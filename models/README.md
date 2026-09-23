@@ -19,7 +19,26 @@ meaningfully more accurate than embedding a naively-cropped photo — a
 crooked selfie and a perfectly centered one produce nearly identical
 embeddings once both are aligned to the same template.
 
-## What's bundled vs. what you need to download
+## Default: the smaller "buffalo_s" pack (bundled)
+
+The app now defaults to InsightFace's smaller **buffalo_s** pair, both
+committed in `models/`, because the `buffalo_l` recognizer below ran
+Render's 512MB free instance out of memory while loading:
+
+| File | Size | Role |
+|---|---|---|
+| `det_500m.onnx` | ~2.5 MB | Detector (SCRFD-500M) |
+| `w600k_mbf.onnx` | ~13.6 MB | Recognizer (MobileFaceNet ArcFace, 512-d) |
+
+Measured locally: ~125MB peak memory vs ~290MB for buffalo_l, with
+same-person / different-person similarity still well separated around the
+0.5 match threshold. The rest of this file describes the larger buffalo_l
+pair, which you can switch back to on a bigger instance via
+`FACE_DETECTOR_MODEL_PATH` / `FACE_MODEL_PATH` (see config/config.js).
+Embeddings from the two recognizers aren't comparable, so switching means
+every employee re-registers their face.
+
+## buffalo_l: what's bundled vs. what you need to download
 
 | File | Size | Included? |
 |---|---|---|

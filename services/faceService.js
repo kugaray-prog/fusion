@@ -17,10 +17,9 @@ const config = require('../config/config');
 // naively-cropped photo: a tilted head, an off-center face, or a phone held
 // at an angle all get corrected before recognition ever sees the image.
 //
-// Model files (not included in this repo — see config/config.js for exact
-// download locations/env vars):
-//   - Detector:   det_10g.onnx    (SCRFD-10GF)
-//   - Recognizer: w600k_r50.onnx  (ResNet50 ArcFace, 512-d embeddings)
+// Model files (see config/config.js for why these defaults / how to switch):
+//   - Detector:   det_500m.onnx   (SCRFD-500M, "buffalo_s", bundled)
+//   - Recognizer: w600k_mbf.onnx  (MobileFaceNet ArcFace, 512-d embeddings, "buffalo_s", bundled)
 // ============================================================================
 
 // Lazily loaded so the server can boot even before model files are in place

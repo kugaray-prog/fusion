@@ -30,17 +30,24 @@ module.exports = {
   // those landmarks, then an ArcFace-family RECOGNIZER turns that aligned
   // crop into an embedding. Download both ONNX files from the official
   // InsightFace model zoo (https://github.com/deepinsight/insightface/tree/master/model_zoo,
-  // "buffalo_l" pack) and place them under models/, or point the *_MODEL_PATH
-  // env vars at wherever you keep them:
-  //   - Detector:   buffalo_l/det_10g.onnx     (SCRFD-10GF, finds face + 5 landmarks)
-  //   - Recognizer: buffalo_l/w600k_r50.onnx   (ResNet50 ArcFace, 512-d embeddings)
+  // "buffalo_s" pack, both bundled in models/), or point the *_MODEL_PATH env
+  // vars at the larger "buffalo_l" pair instead:
+  //   - Detector:   buffalo_s/det_500m.onnx    (SCRFD-500M, finds face + 5 landmarks)
+  //   - Recognizer: buffalo_s/w600k_mbf.onnx   (MobileFaceNet ArcFace, 512-d embeddings)
+  // buffalo_s is the default because buffalo_l's recognizer (w600k_r50.onnx,
+  // ~174MB) ran Render's 512MB free instance out of memory while loading;
+  // buffalo_s peaks around 125MB. buffalo_l is slightly more accurate -- to use
+  // it on a bigger instance, set FACE_DETECTOR_MODEL_PATH=./models/det_10g.onnx
+  // and FACE_MODEL_PATH=./models/w600k_r50.onnx. Embeddings from the two
+  // recognizers are NOT comparable: switching means every employee has to
+  // re-register their face.
   face: {
-    detectorModelPath: process.env.FACE_DETECTOR_MODEL_PATH || path.join(__dirname, '..', 'models', 'det_10g.onnx'),
+    detectorModelPath: process.env.FACE_DETECTOR_MODEL_PATH || path.join(__dirname, '..', 'models', 'det_500m.onnx'),
     detectorInputSize: Number(process.env.FACE_DETECTOR_INPUT_SIZE) || 640, // SCRFD's standard square input size
     // Faces scoring below this (0..1, post-sigmoid) are ignored as noise.
     detectorScoreThreshold: Number(process.env.FACE_DETECTOR_SCORE_THRESHOLD) || 0.5,
     detectorNmsThreshold: Number(process.env.FACE_DETECTOR_NMS_THRESHOLD) || 0.4,
-    modelPath: process.env.FACE_MODEL_PATH || path.join(__dirname, '..', 'models', 'w600k_r50.onnx'),
+    modelPath: process.env.FACE_MODEL_PATH || path.join(__dirname, '..', 'models', 'w600k_mbf.onnx'),
     inputSize: Number(process.env.FACE_INPUT_SIZE) || 112, // ArcFace/InsightFace recognizers expect 112x112 aligned faces
     // Cosine similarity (-1..1) above which two faces are considered the same person.
     // 0.5 is a reasonably conservative default for ArcFace-style embeddings; tune per model.
