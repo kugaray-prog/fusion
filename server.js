@@ -301,4 +301,10 @@ app.listen(PORT, () => {
   );
   console.log('==========================================');
   console.log('');
+
+  // Warm the face models in the background -- failures (e.g. model files
+  // missing) are logged here and surface again on the first face request.
+  require('./services/faceService').warmUp()
+    .then(() => console.log('Face recognition models loaded.'))
+    .catch((err) => console.error('Face model warm-up failed:', err.message));
 }); 

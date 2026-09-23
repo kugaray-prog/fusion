@@ -27,6 +27,14 @@ const config = require('../config/config');
 // (onnxruntime-node is a fairly heavy native dependency) and so we only pay
 // the session-creation cost once per process.
 let ort = null;
+
+// ONNX Runtime's CPU memory arena keeps a large pool of scratch buffers
+// around after each run; with both models loaded it pushed the process to
+// ~430MB, over the 512MB limit of Render's free instance once the rest of
+// the app is counted. Turning it off (and memory-pattern planning, which
+// pre-reserves buffers the same way) brings both models down to ~260MB,
+// with no measurable slowdown for single-image requests.
+const SESSION_OPTIONS = { enableCpuMemArena: false, enableMemPattern: false };
 let detectorSessionPromise = null;
 let recognizerSessionPromise = null;
 
@@ -42,7 +50,7 @@ function getDetectorSession() {
       );
     }
     ort = ort || require('onnxruntime-node');
-    return ort.InferenceSession.create(modelPath);
+    return ort.InferenceSession.create(modelPath, SESSION_OPTIONS);
   })();
   return detectorSessionPromise;
 }
@@ -59,7 +67,7 @@ function getRecognizerSession() {
       );
     }
     ort = ort || require('onnxruntime-node');
-    return ort.InferenceSession.create(modelPath);
+    return ort.InferenceSession.create(modelPath, SESSION_OPTIONS);
   })();
   return recognizerSessionPromise;
 }
@@ -432,8 +440,16 @@ function findBestMatch(targetEmbedding, candidates) {
   return best;
 }
 
+// Loads both models ahead of the first request (called once the server is
+// listening), so the first face registration or check-in after a deploy or
+// cold start doesn't also pay the model-loading cost on a slow instance.
+function warmUp() {
+  return Promise.all([getDetectorSession(), getRecognizerSession()]);
+}
+
 module.exports = {
   getEmbedding,
+  warmUp,
   detectFace,
   cosineSimilarity,
   findBestMatch,

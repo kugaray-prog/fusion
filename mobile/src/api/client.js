@@ -6,6 +6,13 @@ export { API_BASE_URL };
 
 const api = axios.create({ baseURL: API_BASE_URL, timeout: 15000 });
 
+// Face uploads get far longer than the 15s default: the server runs face
+// recognition on the photo, which is slow on a small hosting instance, and a
+// free Render instance that has gone to sleep takes ~50s just to wake up.
+// Timing out early showed a generic "Registration failed" even though the
+// server would have succeeded.
+const FACE_UPLOAD_TIMEOUT_MS = 120000;
+
 api.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem('employee_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -60,7 +67,8 @@ export async function getDepartments() {
 // pendingToken, and an `image` file field (the captured selfie).
 export async function linkDevice(formData) {
   const { data } = await api.post('/employee-auth/link-device', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: FACE_UPLOAD_TIMEOUT_MS
   });
   return data;
 }
@@ -118,7 +126,8 @@ export async function getAttendanceSessions(attendanceId) {
 // completed), in which case the attendance stays unconfirmed.
 export async function verifyAttendanceFace(attendanceId, formData) {
   const { data } = await api.post(`/attendance/${attendanceId}/face-verify`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: FACE_UPLOAD_TIMEOUT_MS
   });
   return data;
 }
