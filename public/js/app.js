@@ -144,7 +144,7 @@ const G_App = {
                     }
                     if (target === 'verification-section') G_App.verification.init();
                     if (target === 'reports') G_App.reports.init();
-                    if (target === 'settings') { G_App.settings.render(); G_App.adminAccounts.load(); }
+                    if (target === 'settings') { G_App.settings.render(); G_App.adminAccounts.load(); G_App.network.load(); }
                     if (target === 'mobile-app') G_App.mobile.render();
                     if (target === 'ratings') { G_App.ratings.initSelectors(); G_App.ratings.load(); }
                     if (target === 'departments') G_App.departments.render();
@@ -2378,6 +2378,43 @@ const G_App = {
                 });
                 toast('Certificate generated.', 'success');
                 window.open(result.data.downloadUrl, '_blank');
+            } catch (err) {
+                toast(err.message, 'error');
+            }
+        }
+    },
+
+    // Settings -> Office Network: the public IPs the mobile app's network
+    // gate accepts (see services/networkService.js). Super Admin only.
+    network: {
+        load: async () => {
+            const card = document.getElementById('network-settings-card');
+            if (!card) return;
+            card.style.display = G_App.state.role === 'super_admin' ? '' : 'none';
+            if (G_App.state.role !== 'super_admin') return;
+            try {
+                const { data } = await apiFetch('/network/settings');
+                document.getElementById('network-allowed-ips').value = data.allowed_ips.join('\n');
+                document.getElementById('network-your-ip').textContent = data.your_ip || 'unknown';
+                lucide.createIcons();
+            } catch (err) {
+                toast(err.message, 'error');
+            }
+        },
+        addCurrentIp: () => {
+            const ip = document.getElementById('network-your-ip').textContent.trim();
+            if (!ip || ip === '--' || ip === 'unknown') return toast('Your IP could not be detected.', 'error');
+            const box = document.getElementById('network-allowed-ips');
+            const lines = box.value.split(/[\s,]+/).filter(Boolean);
+            if (lines.includes(ip)) return toast('That IP is already on the list.', 'info');
+            box.value = [...lines, ip].join('\n');
+        },
+        save: async () => {
+            try {
+                const allowed_ips = document.getElementById('network-allowed-ips').value;
+                const { data } = await apiFetch('/network/settings', { method: 'PUT', body: JSON.stringify({ allowed_ips }) });
+                document.getElementById('network-allowed-ips').value = data.allowed_ips.join('\n');
+                toast(data.allowed_ips.length ? 'Allowed network IPs saved.' : 'Saved. The network check is now off.', 'success');
             } catch (err) {
                 toast(err.message, 'error');
             }

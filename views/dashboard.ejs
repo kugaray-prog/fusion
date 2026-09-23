@@ -1148,6 +1148,21 @@
                             <div id="admin-accounts-list" style="display:flex; flex-direction:column; gap:10px;"></div>
                         </div>
                     </div>
+
+                    <!-- Office network check for the mobile app: the phone must be on a
+                         connection whose public IP is listed here (main router, extender,
+                         repeater -- anything on the same provider line). Replaces the old
+                         Wi-Fi SSID check. Super Admin only. -->
+                    <div class="card" id="network-settings-card" style="display: none;">
+                        <h3 style="margin-bottom: 8px; font-weight: 800; font-size: 1.2rem;">Office Network (Allowed IPs)</h3>
+                        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 15px;">The mobile app only opens on a network whose public IP matches this list. Every router, extender and repeater on the same internet provider line shares that IP, so employees can connect to any of them. One entry per line: an exact IP (<code>112.198.10.25</code>) or a range (<code>112.198.0.0/16</code>, <code>2001:db8:1200::/56</code>) if the provider changes your IP. Leave empty to turn the check off.</p>
+                        <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-body); padding:12px 16px; border-radius:14px; margin-bottom: 12px; gap: 10px; flex-wrap: wrap;">
+                            <span style="font-size: 0.85rem;">Your current public IP: <code id="network-your-ip">--</code></span>
+                            <button class="btn-primary" style="padding: 8px 14px; font-size: 0.8rem;" onclick="G_App.network.addCurrentIp()"><i data-lucide="plus" size="14"></i> Add this IP</button>
+                        </div>
+                        <textarea id="network-allowed-ips" class="geo-input" rows="4" style="font-family: monospace; resize: vertical;" placeholder="e.g. 112.198.10.25"></textarea>
+                        <button class="btn-primary" onclick="G_App.network.save()"><i data-lucide="save"></i> Save Allowed IPs</button>
+                    </div>
                 </div>
             </div>
 

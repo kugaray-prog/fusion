@@ -131,4 +131,13 @@ export async function getGeofences() {
   return data;
 }
 
+// GET /api/network/check — whether this phone's current connection is the
+// office network, judged by the server from the connection's public IP (the
+// same for the main router and every extender/repeater on that provider
+// line). Returns { ip, enforced, allowed }.
+export async function checkOfficeNetwork() {
+  const { data } = await api.get('/network/check');
+  return data;
+}
+
 export default api;

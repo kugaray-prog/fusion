@@ -13,12 +13,6 @@ export const GOOGLE_ANDROID_CLIENT_ID = extra.googleAndroidClientId || '';
 export const isGoogleConfigured = () =>
   !!GOOGLE_WEB_CLIENT_ID && !GOOGLE_WEB_CLIENT_ID.startsWith('your_');
 
-// Fallback Wi-Fi network name used by WifiCheckScreen to confirm the employee is
-// on the designated location network before reaching the Dashboard. If the
-// active event's geofence record from the API includes its own `wifi_ssid`
-// field, that value takes priority over this default (see WifiCheckScreen.js).
-export const REQUIRED_WIFI_SSID = extra.requiredWifiSsid || 'CSPC Student Wi-Fi';
-
 // Backend API base URL. Set `apiBaseUrl` under "extra" in mobile/app.json to your
 // machine's current LAN IP (or deployed URL) — e.g. "http://192.168.1.20:3000/api".
 // 'localhost' only works when running in a simulator on the same machine as the

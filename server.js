@@ -234,6 +234,12 @@ app.use(
   require('./routes/adminAccountRoutes')
 );
 
+// Office network (public IP) check for the mobile app + its admin settings
+app.use(
+  '/api/network',
+  require('./routes/networkRoutes')
+);
+
 // ------------------------------------------------------------
 // API Health Check
 // ------------------------------------------------------------

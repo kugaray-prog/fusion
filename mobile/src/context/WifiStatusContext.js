@@ -42,21 +42,16 @@ export function WifiStatusProvider({ children }) {
         ]);
         setWifiOn(!!enabled && !!connected);
       } else {
-        // iOS has no public API to read the Wi-Fi radio state directly
-        // (Apple restricts this -- see WifiCheckScreen's own platform
-        // note). The closest available signal is whether a connected
-        // network name can be read at all, the same check WifiCheckScreen
-        // already relies on for its own SSID match. This can't
-        // distinguish "radio off" from "on but out of range of any
-        // network", but both cases mean Wi-Fi isn't usable right now,
-        // which is exactly what needs to be caught here.
-        const ssid = await WifiManager.getCurrentWifiSSID();
-        setWifiOn(!!ssid);
+        // iOS has no public API to read the Wi-Fi radio state, and the
+        // network name is no longer used (the office-network check is now
+        // done server-side by public IP -- see WifiCheckScreen), so don't
+        // gate on it here; WifiCheckScreen still blocks anyone who isn't
+        // on the office connection.
+        setWifiOn(true);
       }
     } catch (e) {
       // If the check itself can't run (e.g. unsupported in this preview
-      // environment, or location permission not granted yet on iOS, which
-      // getCurrentWifiSSID() also requires) -- don't block the whole app
+      // environment) -- don't block the whole app
       // on an unrelated failure. Any real Wi-Fi problem at sign-in still
       // surfaces through WifiCheckScreen's own error handling.
       setWifiOn(true);
