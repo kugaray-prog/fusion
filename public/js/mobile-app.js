@@ -171,7 +171,8 @@ function prefillRegistrationForm() {
   }
   const info = parseDeviceInfo();
   document.getElementById('reg-device-info').innerHTML =
-    `<strong>DEVICE MODEL:</strong> ${info.brand} ${info.model}<br><strong>DEVICE ID:</strong> ${getDeviceUid().slice(0, 18)}…`;
+    // Exactly the device_model / device_os / device_uid submitted with this form.
+    `<strong>DEVICE MODEL:</strong> ${info.brand} ${info.model}<br><strong>OS:</strong> ${info.os}<br><strong>DEVICE ID:</strong> <span style="word-break:break-all;">${getDeviceUid()}</span>`;
   loadDepartmentOptions();
 }
 
@@ -783,7 +784,8 @@ function renderProfile() {
     </div>
     <div style="border-top:1px solid #eee; padding-top:15px; font-size:13px; font-family: monospace;">
       <p style="margin-bottom:8px;"><strong>DEVICE MODEL:</strong> ${info.brand} ${info.model}</p>
-      <p><strong>DEVICE ID:</strong> ${getDeviceUid().slice(0, 18)}…</p>
+      <p style="margin-bottom:8px;"><strong>OS:</strong> ${info.os}</p>
+      <p><strong>DEVICE ID:</strong> <span style="word-break:break-all;">${getDeviceUid()}</span></p>
     </div>
   `;
 }

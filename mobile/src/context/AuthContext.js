@@ -60,7 +60,7 @@ export function AuthProvider({ children }) {
   // status so the app can automatically move on once an admin approves it.
   const refreshDeviceStatus = async () => {
     try {
-      const data = await getDeviceStatus(getDeviceUid(employee?.id));
+      const data = await getDeviceStatus(getDeviceUid());
       await persistDeviceStatus(data.deviceStatus);
       return data.deviceStatus;
     } catch (err) {

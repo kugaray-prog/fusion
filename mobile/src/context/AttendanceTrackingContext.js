@@ -1,12 +1,11 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import * as Location from 'expo-location';
-import * as Device from 'expo-device';
 import { useAuth } from './AuthContext';
 import { useLocationStatus } from './LocationStatusContext';
 import { getGeofences, registerDevice, submitAttendance, sendHeartbeat, getMyHistory } from '../api/client';
 import { navigationRef } from '../navigation/navigationRef';
 import { notify } from '../utils/notify';
-import { getDeviceUid } from '../utils/device';
+import { getDeviceUid, getDeviceInfo } from '../utils/device';
 import { liveDurationSeconds } from '../utils/duration';
 import { alertFaceVerificationRequired, clearFaceVerificationAlert } from '../utils/faceVerificationAlert';
 
@@ -132,7 +131,7 @@ export function AttendanceTrackingProvider({ children }) {
   useEffect(() => { geofencesRef.current = geofences; }, [geofences]);
   useEffect(() => { autoSubmittingRef.current = autoSubmitting; }, [autoSubmitting]);
 
-  const deviceUid = useCallback(() => getDeviceUid(employee?.id), [employee]);
+  const deviceUid = useCallback(() => getDeviceUid(), []);
 
   const stopHeartbeat = (attendanceId) => {
     if (heartbeatTimers.current[attendanceId]) {
@@ -396,12 +395,14 @@ export function AttendanceTrackingProvider({ children }) {
       if (!cancelled) setPermissionDenied(false);
 
       try {
+        // Same values the registration form showed and submitted.
+        const device = getDeviceInfo();
         await registerDevice({
           employee_id: employee.id,
-          device_uid: deviceUid(),
-          model: Device.modelName,
-          brand: Device.brand,
-          os: `${Device.osName} ${Device.osVersion}`
+          device_uid: device.uid,
+          model: device.model,
+          brand: device.brand,
+          os: device.os
         });
       } catch (e) {
         // Non-fatal here — submitAttendance will surface a clear "device not

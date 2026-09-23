@@ -1,13 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Modal, FlatList, Image, Animated, Easing } from 'react-native';
-import * as Device from 'expo-device';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import FaceDetection from '@react-native-ml-kit/face-detection';
 import { useAuth } from '../context/AuthContext';
 import { colors, radius, shadow } from '../theme';
-import { getDeviceUid } from '../utils/device';
+import { getDeviceInfo } from '../utils/device';
 import { getDepartments } from '../api/client';
 import FadeIn from '../components/FadeIn';
 import PrimaryButton from '../components/PrimaryButton';
@@ -265,8 +264,8 @@ export default function RegistrationScreen({ navigation }) {
       setGivenName(pendingGoogle.google?.given_name || '');
     }
     (async () => {
-      const uid = getDeviceUid();
-      setDeviceInfo(`MODEL: ${Device.modelName || 'Unknown'}\nOS: ${Device.osName || ''} ${Device.osVersion || ''}\nDEVICE ID: ${uid}`);
+      const info = getDeviceInfo();
+      setDeviceInfo(`MODEL: ${info.model}\nBRAND: ${info.brand}\nOS: ${info.os}\nDEVICE ID: ${info.uid}`);
     })();
     (async () => {
       try {
@@ -567,7 +566,7 @@ export default function RegistrationScreen({ navigation }) {
     setLockInfo(null);
     setSubmitting(true);
     try {
-      const uid = getDeviceUid();
+      const device = getDeviceInfo();
       const formData = new FormData();
       formData.append('employee_code', employeeCode.trim().toUpperCase());
       formData.append('surname', surname.trim());
@@ -584,10 +583,10 @@ export default function RegistrationScreen({ navigation }) {
       if (genderValue) formData.append('gender', genderValue);
       const classificationValue = classification === 'Others' ? classificationOther.trim() : classification;
       formData.append('classification', classificationValue);
-      formData.append('device_uid', uid);
-      formData.append('device_model', Device.modelName || '');
-      formData.append('device_brand', Device.brand || '');
-      formData.append('device_os', `${Device.osName || ''} ${Device.osVersion || ''}`);
+      formData.append('device_uid', device.uid);
+      formData.append('device_model', device.model);
+      formData.append('device_brand', device.brand);
+      formData.append('device_os', device.os);
       formData.append('liveness_verified', 'true');
       formData.append('liveness_actions', 'hold_still');
       formData.append('image', {

@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image } from 'react-native';
-import * as Device from 'expo-device';
 import { useAuth } from '../context/AuthContext';
 import { colors, radius, shadow } from '../theme';
 import BottomNav from '../components/BottomNav';
-import { getDeviceUid } from '../utils/device';
+import { getDeviceInfo } from '../utils/device';
 import { assetUrl } from '../config';
 import FadeIn from '../components/FadeIn';
 import AppHeader from '../components/AppHeader';
@@ -13,16 +12,13 @@ import AppHeader from '../components/AppHeader';
 // avatar circle, name/employee id, and a monospace device-info block.
 export default function ProfileScreen({ navigation }) {
   const { employee, logout } = useAuth();
-  const [deviceId, setDeviceId] = useState('--');
   // Starts true whenever there's a photo path to try; a load failure (bad
   // network, file removed from the server, etc.) flips this back to the
   // placeholder avatar instead of showing a broken-image icon.
   const [photoFailed, setPhotoFailed] = useState(false);
   const photoUrl = assetUrl(employee?.face_photo_url);
-
-  useEffect(() => {
-    setDeviceId(getDeviceUid(employee?.id) || 'N/A');
-  }, [employee]);
+  // Same model/ID the registration form showed for this phone.
+  const device = getDeviceInfo();
 
   useEffect(() => {
     setPhotoFailed(false);
@@ -57,8 +53,8 @@ export default function ProfileScreen({ navigation }) {
 
             <View style={styles.infoBlock}>
               <Text style={styles.infoLine}><Text style={styles.infoLabel}>DEPARTMENT: </Text>{employee?.department || '--'}</Text>
-              <Text style={styles.infoLine}><Text style={styles.infoLabel}>DEVICE MODEL: </Text>{Device.modelName || 'Unknown'}</Text>
-              <Text style={styles.infoLine}><Text style={styles.infoLabel}>DEVICE ID: </Text>{deviceId}</Text>
+              <Text style={styles.infoLine}><Text style={styles.infoLabel}>DEVICE MODEL: </Text>{device.model}</Text>
+              <Text style={styles.infoLine}><Text style={styles.infoLabel}>DEVICE ID: </Text>{device.uid}</Text>
             </View>
           </View>
 
