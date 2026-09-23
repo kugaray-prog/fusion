@@ -58,3 +58,6 @@ mobile/android/
 # projects -- EAS Build (the workflow this project's mobile/eas.json is set
 # up for) generates these in the cloud instead, so they don't need to exist
 # in this repo at all in the normal workflow.
+
+# --- Stray folder from an unexpanded Windows %ProgramData% path ---
+mobile/%ProgramData%/

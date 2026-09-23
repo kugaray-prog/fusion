@@ -69,7 +69,13 @@ module.exports = {
     autoEndOutsideStreakThreshold: Number(process.env.ATTENDANCE_AUTO_END_STREAK) || 2,
     // Minimum minutes between accepted heartbeat pings for the same
     // attendance record, to avoid flooding the DB from a tight watchPosition loop.
-    heartbeatMinIntervalSeconds: Number(process.env.ATTENDANCE_HEARTBEAT_MIN_SECONDS) || 20
+    heartbeatMinIntervalSeconds: Number(process.env.ATTENDANCE_HEARTBEAT_MIN_SECONDS) || 20,
+    // Geo-anomaly ("one person carrying another's phone") detection: two
+    // different employees' devices reporting positions within this many
+    // degrees of each other (~0.0001 = ~11m) within the last N minutes, for
+    // the same event, get flagged for face verification. See detectGeoAnomaly.
+    anomalyCoordTolerance: Number(process.env.ANOMALY_COORD_TOLERANCE) || 0.0001,
+    anomalyWindowMinutes: Number(process.env.ANOMALY_WINDOW_MINUTES) || 15
   },
   // Default/initial Geo-Fence location: CSPC (Camarines Sur Polytechnic
   // Colleges). Used to pre-fill the map/coordinates when an admin opens the

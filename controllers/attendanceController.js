@@ -13,30 +13,9 @@ const { logAction } = require('../services/auditService');
 // Mondays) and also correctly rates a true no-show (nobody ever timed in for
 // that event) as Absent, which a time-in-triggered hook here never could.
 
-// Geolocation tolerance (in degrees) used to flag "suspiciously identical"
-// coordinates between different employees/devices — a common spoofing/hacking
-// signature (everyone reporting the exact same fake GPS point). ~11 meters.
-const ANOMALY_COORD_TOLERANCE = 0.0001;
-const ANOMALY_WINDOW_MINUTES = 15;
-
-// Looks for other recent attendance submissions for the same event whose GPS
-// coordinates are suspiciously close to this one but came from a different
-// employee or device — logs a geo_anomalies row and flags the record for
-// face verification when found.
-async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude }) {
-  const [rows] = await pool.query(
-    `SELECT a.id, a.employee_id, a.latitude, a.longitude, md.device_uid
-     FROM attendance a
-     LEFT JOIN mobile_devices md ON a.device_id = md.id
-     WHERE a.event_id = ? AND a.employee_id != ? AND a.time_in >= (NOW() - INTERVAL ? MINUTE)
-       AND ABS(a.latitude - ?) < ? AND ABS(a.longitude - ?) < ?`,
-    [eventId, employeeId, ANOMALY_WINDOW_MINUTES, latitude, ANOMALY_COORD_TOLERANCE, longitude, ANOMALY_COORD_TOLERANCE]
-  );
-  if (!rows.length) return false;
-
-  const details = `Matches attendance from employee #${rows[0].employee_id}` +
-    (rows[0].device_uid && rows[0].device_uid !== deviceUid ? ` (different device: ${rows[0].device_uid})` : '');
-
+// Logs a geo_anomalies row for one attendance record, flags it for face
+// verification, and notifies its employee.
+async function flagAttendanceForVerification({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude, details }) {
   await pool.query(
     `INSERT INTO geo_anomalies (attendance_id, employee_id, event_id, device_uid, anomaly_type, details, latitude, longitude)
      VALUES (?, ?, ?, ?, 'duplicate_geolocation', ?, ?, ?)`,
@@ -47,8 +26,87 @@ async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, 
 
   await pool.query(
     `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Face Verification Required', ?, 'face_verification_required')`,
-    [employeeId, 'We detected unusual location activity on your attendance. Please open the app and complete a quick face verification to confirm it was really you.']
+    [employeeId, 'Your phone reported the same location as another employee\'s phone. Open the app and complete face verification before the event ends, or your attendance will not be recorded.']
   );
+}
+
+// Looks for OTHER employees' attendance for the same event whose device is
+// currently (or very recently) reporting a position suspiciously close to
+// this one — the signature of one person carrying a colleague's phone in to
+// record attendance for them. Compares against each record's most recent
+// heartbeat position (last_lat/last_lng) as well as its latest time-in
+// position, so it catches two phones that arrived together AND two phones
+// that stay together afterwards. Called on every time-in and every inside
+// heartbeat.
+//
+// Both sides of a match are flagged: the server can't tell which phone is
+// the "real" one, and only the employee actually present can pass the face
+// verification on their own phone. A record that's already flagged just
+// reports true again (so its app keeps being prompted); a record that
+// already passed face verification is never re-flagged, so a legitimate
+// employee standing next to a colleague isn't nagged in a loop.
+//
+// Returns whether THIS record currently requires face verification.
+async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude }) {
+  const [selfRows] = await pool.query(
+    'SELECT requires_face_verification, face_verified_at FROM attendance WHERE id = ?',
+    [attendanceId]
+  );
+  const self = selfRows[0];
+  if (!self) return false;
+  if (self.requires_face_verification) return true;
+  if (self.face_verified_at) return false;
+
+  const tol = config.attendance.anomalyCoordTolerance;
+  const windowMinutes = config.attendance.anomalyWindowMinutes;
+  const [rows] = await pool.query(
+    `SELECT a.id, a.employee_id, a.requires_face_verification, a.face_verified_at,
+            COALESCE(a.last_lat, a.latitude) AS cur_lat, COALESCE(a.last_lng, a.longitude) AS cur_lng,
+            md.device_uid
+     FROM attendance a
+     LEFT JOIN mobile_devices md ON a.device_id = md.id
+     WHERE a.event_id = ? AND a.employee_id != ? AND a.id != ?
+       AND (
+         (a.last_ping_at >= NOW() - INTERVAL ? MINUTE
+           AND ABS(a.last_lat - ?) < ? AND ABS(a.last_lng - ?) < ?)
+         OR
+         (GREATEST(a.time_in, COALESCE((SELECT MAX(s.time_in) FROM attendance_sessions s WHERE s.attendance_id = a.id), a.time_in))
+             >= NOW() - INTERVAL ? MINUTE
+           AND ABS(a.latitude - ?) < ? AND ABS(a.longitude - ?) < ?)
+       )`,
+    [
+      eventId, employeeId, attendanceId,
+      windowMinutes, latitude, tol, longitude, tol,
+      windowMinutes, latitude, tol, longitude, tol
+    ]
+  );
+  if (!rows.length) return false;
+
+  const first = rows[0];
+  await flagAttendanceForVerification({
+    attendanceId,
+    employeeId,
+    eventId,
+    deviceUid,
+    latitude,
+    longitude,
+    details: `Same location as employee #${first.employee_id}` +
+      (first.device_uid && first.device_uid !== deviceUid ? ` (device: ${first.device_uid})` : '')
+  });
+
+  for (const other of rows) {
+    if (other.requires_face_verification || other.face_verified_at) continue;
+    await flagAttendanceForVerification({
+      attendanceId: other.id,
+      employeeId: other.employee_id,
+      eventId,
+      deviceUid: other.device_uid,
+      latitude: Number(other.cur_lat),
+      longitude: Number(other.cur_lng),
+      details: `Same location as employee #${employeeId}` +
+        (deviceUid && deviceUid !== other.device_uid ? ` (device: ${deviceUid})` : '')
+    });
+  }
 
   return true;
 }
@@ -181,6 +239,38 @@ async function closeSessionsForEndedEvents() {
     if (finalStatus !== record.attendance_status) {
       await recalculateAllRatings(record.employee_id);
     }
+  }
+
+  await rejectUnverifiedFlaggedAttendance();
+}
+
+// A geo-anomaly-flagged attendance (see detectGeoAnomaly) only counts once
+// the employee passes face verification. If the event ends with the flag
+// still unresolved, the attendance is not recorded: status becomes Absent
+// and verification_status Rejected. Runs as part of
+// closeSessionsForEndedEvents, so it self-heals on every attendance/report/
+// rating read like the rest of the end-of-event settling.
+async function rejectUnverifiedFlaggedAttendance() {
+  const [rows] = await pool.query(
+    `SELECT a.id, a.employee_id, a.attendance_status
+     FROM attendance a
+     JOIN events e ON a.event_id = e.id
+     WHERE a.requires_face_verification = 1 AND a.verification_status = 'Pending' AND e.end_datetime < NOW()`
+  );
+  for (const record of rows) {
+    await pool.query(
+      `UPDATE attendance SET attendance_status = 'Absent', verification_status = 'Rejected' WHERE id = ?`,
+      [record.id]
+    );
+    await pool.query(
+      `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'face_verification_expired', ?)`,
+      [record.id, record.employee_id, JSON.stringify({ reason: 'event_ended_unverified', previousStatus: record.attendance_status })]
+    );
+    await pool.query(
+      `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Attendance Not Recorded', ?, 'face_verification_required')`,
+      [record.employee_id, 'Your attendance was not recorded because the required face verification was not completed before the event ended.']
+    );
+    await recalculateAllRatings(record.employee_id);
   }
 }
 
@@ -713,6 +803,21 @@ async function faceVerify(req, res, next) {
     if (!record) return res.status(404).json({ success: false, message: 'Attendance record not found.' });
     if (!req.file) return res.status(400).json({ success: false, message: 'A selfie photo is required.' });
 
+    // Face verification is only accepted while the event is still running —
+    // once it ends, an unverified flagged record is settled as not recorded
+    // (see rejectUnverifiedFlaggedAttendance).
+    if (record.event_id) {
+      const [eventRows] = await pool.query('SELECT end_datetime FROM events WHERE id = ?', [record.event_id]);
+      if (eventRows[0] && new Date(eventRows[0].end_datetime) <= new Date()) {
+        await closeSessionsForEndedEvents();
+        return res.status(410).json({
+          success: false,
+          result: 'expired',
+          message: 'This event has already ended, so face verification is closed and this attendance was not recorded.'
+        });
+      }
+    }
+
     // Same rule as the admin's live-selfie tool (controllers/faceController.js
     // verifyFace): a claimed-but-unverified liveness check is rejected before
     // the comparatively expensive face-recognition model even runs.
@@ -1052,7 +1157,25 @@ async function heartbeat(req, res, next) {
       );
     }
 
-    res.json({ success: true, data: { ended: shouldAutoEnd, inside, outsideStreak: newStreak } });
+    // Keep checking for co-located devices for as long as the session is
+    // open, not just at time-in — two phones carried in by one person keep
+    // reporting the same position on every ping.
+    let requiresFaceVerification = !!record.requires_face_verification;
+    if (!shouldAutoEnd && inside) {
+      const [deviceRows] = record.device_id
+        ? await pool.query('SELECT device_uid FROM mobile_devices WHERE id = ?', [record.device_id])
+        : [[]];
+      requiresFaceVerification = await detectGeoAnomaly({
+        attendanceId: record.id,
+        employeeId: record.employee_id,
+        eventId: record.event_id,
+        deviceUid: deviceRows[0]?.device_uid,
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude)
+      });
+    }
+
+    res.json({ success: true, data: { ended: shouldAutoEnd, inside, outsideStreak: newStreak, requiresFaceVerification } });
   } catch (err) {
     next(err);
   }

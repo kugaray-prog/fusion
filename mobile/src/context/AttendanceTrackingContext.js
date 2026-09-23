@@ -8,6 +8,7 @@ import { navigationRef } from '../navigation/navigationRef';
 import { notify } from '../utils/notify';
 import { getDeviceUid } from '../utils/device';
 import { liveDurationSeconds } from '../utils/duration';
+import { alertFaceVerificationRequired, clearFaceVerificationAlert } from '../utils/faceVerificationAlert';
 
 // Point-in-polygon test (ray-casting), mirroring the backend's geofenceService
 // so the app can tell "inside/outside" locally without waiting on a round trip.
@@ -82,12 +83,38 @@ export function AttendanceTrackingProvider({ children }) {
   // refreshSessionsFromHistory below for a flag that's still open from
   // earlier (app was closed/backgrounded before it got resolved).
   const goToFaceVerification = useCallback((attendanceId, eventTitle) => {
-    if (!attendanceId || promptedVerificationRef.current[attendanceId]) return;
-    promptedVerificationRef.current[attendanceId] = true;
-    if (navigationRef.isReady()) {
-      navigationRef.navigate('FaceVerification', { attendanceId, eventTitle });
+    if (!attendanceId) return;
+    // Sound + vibration so an employee with the phone in their pocket still
+    // notices; throttled internally, so it repeats while still flagged.
+    alertFaceVerificationRequired(attendanceId, eventTitle);
+    if (promptedVerificationRef.current[attendanceId]) return;
+    // FaceVerification is only registered once the employee is past the
+    // WaitingApproval / WifiCheck gates (see App.js RootNavigator). Tracking
+    // can flag a record before that -- e.g. right after an app reload, while
+    // WifiCheck is still showing -- so hold it and navigate as soon as the
+    // screen exists (see the navigationRef 'state' listener below).
+    const routeNames = navigationRef.isReady() ? navigationRef.getRootState()?.routeNames : null;
+    if (!routeNames || !routeNames.includes('FaceVerification')) {
+      pendingVerificationNavRef.current = { attendanceId, eventTitle };
+      return;
     }
+    pendingVerificationNavRef.current = null;
+    promptedVerificationRef.current[attendanceId] = true;
+    navigationRef.navigate('FaceVerification', { attendanceId, eventTitle });
   }, []);
+  // A flagged record waiting for the FaceVerification screen to become
+  // available -- { attendanceId, eventTitle } or null.
+  const pendingVerificationNavRef = useRef(null);
+  useEffect(() => {
+    const unsubscribe = navigationRef.addListener('state', () => {
+      const pending = pendingVerificationNavRef.current;
+      if (!pending) return;
+      // Deferred so it doesn't navigate in the middle of the navigator's
+      // own screen-list swap.
+      setTimeout(() => goToFaceVerification(pending.attendanceId, pending.eventTitle), 0);
+    });
+    return unsubscribe;
+  }, [goToFaceVerification]);
   const sessionsRef = useRef({});
   const geofencesRef = useRef([]);
   const autoSubmittingRef = useRef({});
@@ -150,6 +177,13 @@ export function AttendanceTrackingProvider({ children }) {
           stopHeartbeat(attendanceId);
           await refreshSessionsFromHistoryRef.current?.();
           notify('Time-Out Recorded', 'You left the event area, so your session was automatically timed out. Your total time keeps accumulating if you come back.');
+        } else if (result?.data?.requiresFaceVerification) {
+          // The server flagged this session mid-way (another employee's
+          // device is reporting the same location) -- see detectGeoAnomaly.
+          const geofence = geofencesRef.current.find((g) => g.event_id === eventId);
+          goToFaceVerification(attendanceId, geofence?.title);
+        } else if (result?.data && result.data.requiresFaceVerification === false) {
+          clearFaceVerificationAlert(attendanceId);
         }
       } catch (e) {
         // Non-fatal — a missed ping just retries on the next tick, still
@@ -157,7 +191,7 @@ export function AttendanceTrackingProvider({ children }) {
         // connectivity gap doesn't lose track of when the employee actually left.
       }
     }, HEARTBEAT_INTERVAL_MS);
-  }, []);
+  }, [goToFaceVerification]);
 
   // Restores today's attendance state (open, completed, or in-between visits)
   // from the server — including the accumulated total_duration_seconds and

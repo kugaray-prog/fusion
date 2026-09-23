@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { logAction } = require('../services/auditService');
+const { closeSessionsForEndedEvents } = require('./attendanceController');
 
 // The employees "expected" at a given event: everyone in the event's
 // department, or the entire roster when the event isn't department-scoped
@@ -34,6 +35,9 @@ async function expectedEmployeeIdsForEvent(event) {
 // without needing a cron job. An admin's manual edit (is_manual = 1) is
 // never overwritten by this.
 async function generateRatingsForRange(rangeStart, rangeEnd) {
+  // Settle ended events first (open sessions, unverified flagged attendance)
+  // so ratings are computed from final statuses.
+  await closeSessionsForEndedEvents();
   const [events] = await pool.query(
     `SELECT id, title, department_id, start_datetime, end_datetime
      FROM events
