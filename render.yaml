@@ -1,0 +1,65 @@
+# Render Blueprint — optional, for one-click setup.
+#
+# Render can read this file and create the web service below automatically
+# (New + > Blueprint in the Render dashboard, pointed at this repo) instead
+# of clicking through New + > Web Service manually. Either path ends up in
+# the same place; this just fills in the repeatable settings for you.
+#
+# Render's free tier has no managed MySQL, only PostgreSQL — that's why
+# there's no database defined here. Use Aiven's free MySQL instead (see
+# DEPLOYMENT.md Part 2) and paste its connection details into this service's
+# environment variables (either right here, or in the dashboard afterward —
+# `sync: false` below means Render will prompt you for each one rather than
+# needing a real value committed to this file).
+
+services:
+  - type: web
+    name: geoattend-pro
+    runtime: node
+    plan: free
+    branch: main
+    # npm ci installs dependencies; the rest re-downloads w600k_r50.onnx
+    # (~174MB, gitignored — see models/README.md and .gitignore) on every
+    # build, since Render's free tier has no persistent disk to keep it
+    # between deploys. Costs a slower build; Face Verification needs it.
+    buildCommand: npm ci && bash -c "if [ ! -f models/w600k_r50.onnx ]; then curl -L -o /tmp/buffalo_l.zip https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip && unzip -o /tmp/buffalo_l.zip w600k_r50.onnx -d models/ && rm /tmp/buffalo_l.zip; fi"
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render sets PORT itself; server.js already reads process.env.PORT.
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_SSL_CA
+        sync: false
+      # DB_SSL=true is a fallback for a MySQL host whose certificate chains
+      # to a public CA rather than issuing its own -- Aiven's free tier
+      # issues its own, so DB_SSL_CA above (paired with Render's Secret
+      # Files feature -- see DEPLOYMENT.md Part 3) is what you actually need.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DEFAULT_ADMIN_EMAIL
+        sync: false
+      - key: DEFAULT_ADMIN_PASSWORD
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_ANDROID_CLIENT_ID
+        sync: false
+      - key: ATTENDANCE_MAX_ACCURACY_METERS
+        value: '100'

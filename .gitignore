@@ -1,0 +1,60 @@
+# ============================================================
+# GeoAttend Pro — .gitignore
+# ============================================================
+
+# --- Secrets ---
+# Never commit real credentials. .env.example (if you create one) documents
+# which variables are needed without the real values.
+.env
+.env.*
+!.env.example
+
+# --- Dependencies ---
+node_modules/
+mobile/node_modules/
+
+# --- Face recognition models (large binaries) ---
+# w600k_r50.onnx (~174MB) exceeds GitHub's 100MB per-file push limit and is
+# licensed for non-commercial research use only (see models/README.md) --
+# don't commit it; anyone cloning this repo downloads it once with the
+# command in models/README.md / DEPLOYMENT.md. det_10g.onnx (~17MB) is
+# small enough to commit directly and is deliberately NOT excluded below --
+# leaving both out would mean a fresh clone can't run Face Verification at
+# all until BOTH files are fetched manually, instead of just the one that
+# actually has to be.
+models/w600k_r50.onnx
+
+# --- User-uploaded content ---
+# Enrolled faces, selfies, OCR scans, imported files -- runtime data, not
+# source code. Keeps the folders themselves (via .gitkeep below) so
+# multer's upload paths exist on a fresh clone.
+uploads/*/*
+!uploads/*/.gitkeep
+
+# --- Logs ---
+*.log
+npm-debug.log*
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Expo / React Native (mobile/) ---
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/*.jks
+mobile/*.p8
+mobile/*.p12
+mobile/*.key
+mobile/*.mobileprovision
+mobile/*.orig.*
+mobile/.metro-health-check*
+mobile/ios/
+mobile/android/
+# ^ Only relevant if you ever run `expo prebuild` locally to get native
+# projects -- EAS Build (the workflow this project's mobile/eas.json is set
+# up for) generates these in the cloud instead, so they don't need to exist
+# in this repo at all in the normal workflow.

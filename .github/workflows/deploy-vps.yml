@@ -1,0 +1,44 @@
+name: Deploy to VPS
+
+# OPTION B of two alternative deploy workflows -- see DEPLOYMENT.md.
+# Use this one if you're hosting on your own server (DigitalOcean, AWS
+# EC2/Lightsail, Linode, a spare machine, etc.) with PM2 keeping the app
+# running. If you're using OPTION A (Railway/a PaaS), delete this file --
+# don't keep both, or every push will try to deploy to two different
+# places.
+#
+# Setup (see DEPLOYMENT.md Part 4 for the full walkthrough):
+#   1. Provision the VPS, install Node 20+, MySQL 8+, PM2, and Nginx on it,
+#      and get the app running there manually once (git clone, npm ci,
+#      pm2 start) so this workflow only ever has to update it afterward.
+#   2. Generate an SSH key pair on your own machine (not the server):
+#        ssh-keygen -t ed25519 -C "github-actions-deploy" -f deploy_key
+#      Append deploy_key.pub to the VPS's ~/.ssh/authorized_keys.
+#   3. This repo's GitHub Settings > Secrets and variables > Actions >
+#      New repository secret, one each for:
+#        VPS_HOST       the server's IP or domain
+#        VPS_USER       the SSH user (don't use root -- see DEPLOYMENT.md)
+#        VPS_SSH_KEY    the private key file's contents (deploy_key, not
+#                        deploy_key.pub)
+#        VPS_APP_PATH   the app's path on the server, e.g. /home/deploy/geoattend-pro
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH in and update
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.VPS_APP_PATH }}
+            git pull origin main
+            npm ci --omit=dev
+            npm run seed
+            pm2 reload geoattend-pro

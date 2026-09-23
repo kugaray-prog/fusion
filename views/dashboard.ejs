@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoAttend Pro | Institutional Intelligence Dashboard</title>
+
+    <!-- External Assets -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=<%= googleMapsApiKey %>&libraries=geometry"></script>
+
+    <style>
+        :root {
+            --primary: #0D00A5;
+            --primary-hover: #09007a;
+            --primary-light: #F0F2FF;
+            --secondary: #2B3674;
+            --accent: #4318FF;
+            --success: #05CD99;
+            --danger: #EE5D50;
+            --warning: #FFB547;
+            --bg-body: #F4F7FE;
+            --bg-card: #FFFFFF;
+            --text-main: #1B2559;
+            --text-muted: #A3AED0;
+            --border: #E9EDF7;
+            --shadow-sm: 0px 10px 30px rgba(112, 144, 176, 0.15);
+            --shadow-lg: 0px 25px 50px -12px rgba(0, 0, 165, 0.2);
+            --radius-xl: 30px;
+            --radius-lg: 24px;
+            --radius-md: 16px;
+            --transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body.dark-mode {
+            --bg-body: #0B1437;
+            --bg-card: #111C44;
+            --text-main: #FFFFFF;
+            --text-muted: #8F9BBA;
+            --border: #1B2559;
+            --primary-light: #1A2251;
+            --shadow-sm: 0px 18px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Plus Jakarta Sans', sans-serif; }
+
+        body { background: var(--bg-body); color: var(--text-main); height: 100vh; overflow: hidden; display: flex; transition: var(--transition); }
+        button, input, select, textarea { outline: none; transition: var(--transition); font-family: inherit; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+
+        .card { background: var(--bg-card); border-radius: var(--radius-lg); border: 1px solid var(--border); padding: 28px; box-shadow: var(--shadow-sm); position: relative; overflow: hidden; transition: var(--transition); }
+        .hidden { display: none !important; }
+
+        /* Login */
+        #login-screen { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%); }
+        .login-card { background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(30px); padding: 60px; border-radius: var(--radius-xl); width: 100%; max-width: 480px; border: 1px solid rgba(255,255,255,0.2); text-align: center; color: white; animation: fadeIn 0.8s ease; }
+        .login-input { width: 100%; padding: 18px 24px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.15); margin-bottom: 20px; color: white; }
+        .login-btn { width: 100%; padding: 18px; border-radius: 18px; border: none; background: white; color: var(--primary); font-weight: 800; cursor: pointer; }
+        .login-error { color: #FFB4B4; font-size: 0.85rem; margin-bottom: 15px; min-height: 18px; }
+
+        /* Sidebar */
+        aside { width: 300px; height: 100vh; flex-shrink: 0; background: var(--bg-card); display: flex; flex-direction: column; padding: 40px 24px; border-right: 1px solid var(--border); z-index: 100; transition: var(--transition); overflow-y: auto; }
+        .nav-item { display: flex; align-items: center; gap: 14px; padding: 16px 20px; border-radius: 20px; color: var(--text-muted); font-weight: 700; cursor: pointer; margin-bottom: 8px; }
+        .nav-item.active { background: var(--primary); color: white; box-shadow: 0px 12px 24px rgba(13, 0, 165, 0.25); }
+        .weekday-chip { display:flex; align-items:center; gap:5px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
+
+        header { padding: 30px 45px; display: flex; justify-content: space-between; align-items: center; }
+        .nav-tool-btn { width: 48px; height: 48px; border-radius: 16px; background: var(--bg-card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-main); }
+
+        /* Stats Grid */
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-bottom: 30px; }
+        .stat-card { background: var(--bg-card); padding: 25px; border-radius: var(--radius-lg); display: flex; align-items: center; gap: 20px; border: 1px solid var(--border); }
+        .stat-icon { width: 64px; height: 64px; border-radius: 20px; display: flex; align-items: center; justify-content: center; background: var(--primary-light); color: var(--primary); }
+        .stat-info span { font-size: 2rem; font-weight: 800; color: var(--text-main); display: block; line-height: 1; }
+        .stat-info h4 { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
+
+        .view { display: none; animation: slideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+        .view.active { display: block; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes scanning { 0% { top: 0; } 100% { top: 100%; } }
+
+        /* Table UI */
+        .table-container { background: var(--bg-card); border-radius: var(--radius-lg); border: 1px solid var(--border); overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: var(--primary-light); padding: 20px 25px; text-align: left; font-size: 0.75rem; color: var(--primary); text-transform: uppercase; font-weight: 800; }
+        td { padding: 20px 25px; border-bottom: 1px solid var(--border); font-size: 0.95rem; font-weight: 600; color: var(--text-main); }
+
+        .badge { padding: 6px 14px; border-radius: 12px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; }
+        .badge-success { background: #DCFCE7; color: var(--success); }
+        .badge-danger { background: #FEE2E2; color: var(--danger); }
+        .badge-warning { background: #FFF4E5; color: var(--warning); }
+        .badge-info { background: #E0E7FF; color: #4338CA; }
+        .badge-select { border: none; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; padding: 6px 10px; border-radius: 12px; cursor: pointer; }
+
+        .geo-input { width: 100%; padding: 14px 18px; border-radius: 14px; border: 1px solid var(--border); background: var(--bg-body); color: var(--text-main); margin-bottom: 15px; font-weight: 600; }
+        .btn-primary { background: var(--primary); color: white; border: none; padding: 14px 28px; border-radius: 14px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+
+        /* Dashboard — secondary "today snapshot" stat row (smaller than the
+           main stats-grid so it reads as a supporting summary, not a repeat). */
+        .mini-stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 24px; }
+        .mini-stat-card { background: var(--bg-card); border-radius: var(--radius-md); border: 1px solid var(--border); padding: 18px 20px; display: flex; align-items: center; gap: 14px; }
+        .mini-stat-icon { width: 44px; height: 44px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .mini-stat-card .mini-val { font-size: 1.35rem; font-weight: 800; color: var(--text-main); line-height: 1.1; }
+        .mini-stat-card .mini-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.03em; }
+
+        /* Dashboard — quick actions row */
+        .quick-actions-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+        .quick-action-btn { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; cursor: pointer; font-weight: 700; color: var(--text-main); text-align: left; }
+        .quick-action-btn:hover { border-color: var(--primary); box-shadow: var(--shadow-sm); }
+        .quick-action-btn .qa-icon { width: 40px; height: 40px; border-radius: 12px; background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; }
+        .quick-action-btn small { font-weight: 500; color: var(--text-muted); font-size: 0.75rem; }
+
+        /* Dashboard — recent activity feed + upcoming events mini-list */
+        .widget-title { font-weight: 800; font-size: 1rem; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; }
+        .activity-item { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+        .activity-item:last-child { border-bottom: none; }
+        .activity-dot { width: 34px; height: 34px; border-radius: 50%; background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .activity-item p { font-size: 0.85rem; font-weight: 700; color: var(--text-main); }
+        .activity-item span { font-size: 0.72rem; color: var(--text-muted); }
+        .mini-event-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); gap: 10px; }
+        .mini-event-item:last-child { border-bottom: none; }
+        .mini-event-item h5 { font-size: 0.85rem; font-weight: 700; color: var(--text-main); }
+        .mini-event-item span { font-size: 0.72rem; color: var(--text-muted); }
+
+        @media (max-width: 1180px) {
+            .mini-stats-grid, .quick-actions-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 900px) {
+            .mini-stats-grid, .quick-actions-grid { grid-template-columns: 1fr 1fr; }
+        }
+
+        /* Reports — summary stat row shown after a report is generated */
+        .rpt-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 25px; }
+        .rpt-stat { border-radius: var(--radius-md); padding: 16px 18px; border: 1px solid var(--border); background: var(--bg-body); }
+        .rpt-stat span { display: block; font-size: 1.5rem; font-weight: 800; color: var(--text-main); }
+        .rpt-stat label { font-size: 0.7rem; font-weight: 800; text-transform: uppercase; color: var(--text-muted); }
+        @media (max-width: 900px) { .rpt-summary-grid { grid-template-columns: repeat(2, 1fr); } }
+
+        /* Reports — attendance insights: offices/colleges ranked by attendance,
+           each row expanding into the employees involved. */
+        .rpt-section-title { font-weight: 800; font-size: 1rem; color: var(--text-main); }
+        .ins-panel { margin-bottom: 32px; }
+        .ins-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+        .ins-scope { font-size: 0.85rem; color: var(--text-muted); margin-top: 3px; }
+        .ins-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .ins-toggle { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--bg-body); border: 1px solid var(--border); }
+        .ins-toggle button { display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 800; font-size: 0.8rem; padding: 9px 14px; border-radius: 10px; cursor: pointer; }
+        .ins-toggle button:hover { color: var(--text-main); }
+        .ins-toggle button.active { background: var(--primary); color: #fff; box-shadow: 0 6px 16px rgba(13, 0, 165, 0.22); }
+        .ins-select { margin: 0; width: auto; padding: 10px 14px; font-size: 0.8rem; }
+        .ins-summary { background: var(--primary-light); border-radius: var(--radius-md); padding: 14px 18px; font-size: 0.9rem; line-height: 1.6; color: var(--text-main); margin-bottom: 16px; }
+        .ins-summary:empty { display: none; }
+        .ins-list-tools { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 0.78rem; color: var(--text-muted); font-weight: 700; margin-bottom: 8px; }
+        .ins-link { background: none; border: none; color: var(--primary); font-weight: 800; font-size: 0.78rem; cursor: pointer; padding: 4px 2px; white-space: nowrap; }
+        .ins-list { display: flex; flex-direction: column; gap: 10px; transition: opacity 0.2s ease; }
+        .ins-list[aria-busy="true"] { opacity: 0.5; pointer-events: none; }
+        .ins-row { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); overflow: hidden; }
+        .ins-row.is-selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+        .ins-row-main { width: 100%; display: grid; grid-template-columns: 38px minmax(0, 1fr) 132px; gap: 16px; align-items: center; padding: 14px 18px; background: none; border: none; text-align: left; color: inherit; font-size: inherit; }
+        button.ins-row-main { cursor: pointer; }
+        button.ins-row-main:hover { background: var(--bg-body); }
+        .ins-rank { width: 36px; height: 36px; border-radius: 12px; background: var(--primary-light); color: var(--primary); font-weight: 800; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; }
+        .ins-row.is-unranked .ins-rank { background: var(--bg-body); color: var(--text-muted); }
+        .ins-dept-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 800; font-size: 0.95rem; color: var(--text-main); }
+        .ins-bar { display: block; height: 8px; border-radius: 6px; background: var(--border); overflow: hidden; margin: 8px 0 7px; }
+        .ins-bar > span { display: block; height: 100%; border-radius: 6px; }
+        .ins-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.75rem; color: var(--text-muted); font-weight: 600; }
+        .ins-meta b { color: var(--text-main); font-weight: 800; }
+        .ins-stat { display: inline-flex; align-items: center; gap: 5px; }
+        .ins-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+        .ins-figure { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+        .ins-rate { text-align: right; font-size: 1.35rem; font-weight: 800; color: var(--text-main); line-height: 1.1; }
+        .ins-rate small { display: block; font-size: 0.68rem; font-weight: 700; color: var(--text-muted); }
+        .ins-chevron { color: var(--text-muted); display: flex; transition: transform 0.2s ease; }
+        .ins-row.is-open .ins-chevron { transform: rotate(180deg); }
+        .ins-employees { border-top: 1px solid var(--border); padding: 6px 18px 14px; overflow-x: auto; }
+        .ins-emp-table { width: 100%; min-width: 560px; }
+        .ins-emp-table th, .ins-emp-table td { padding: 10px 12px; font-size: 0.82rem; }
+        .ins-emp-table th { background: transparent; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+        .ins-emp-table tr:last-child td { border-bottom: none; }
+        .ins-emp-sub { display: block; font-size: 0.72rem; color: var(--text-muted); font-weight: 600; margin-top: 2px; }
+        .ins-empty { padding: 28px; text-align: center; color: var(--text-muted); border: 1px dashed var(--border); border-radius: var(--radius-md); font-size: 0.9rem; line-height: 1.6; }
+        .badge-muted { background: var(--bg-body); color: var(--text-muted); border: 1px solid var(--border); }
+        .ins-toggle button:focus-visible, button.ins-row-main:focus-visible, .ins-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+        /* --primary is too dark to read on the dark-mode background */
+        body.dark-mode .ins-rank { color: var(--text-main); }
+        body.dark-mode .ins-link { color: #9CA3FF; }
+        body.dark-mode .ins-row.is-selected { border-color: #9CA3FF; box-shadow: 0 0 0 1px #9CA3FF; }
+        @media (max-width: 460px) {
+            .ins-row-main { grid-template-columns: 30px minmax(0, 1fr); gap: 12px; padding: 12px 14px; }
+            .ins-rank { width: 30px; height: 30px; border-radius: 10px; }
+            .ins-figure { grid-column: 2; justify-content: space-between; }
+            .ins-rate { text-align: left; }
+            .ins-toggle { width: 100%; }
+            .ins-toggle button { flex: 1; justify-content: center; padding: 9px 8px; }
+            .ins-toggle button svg { display: none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .ins-chevron, .ins-list { transition: none; }
+        }
+
+        /* Face Verification — liveness challenge overlay (GCash-style: dark
+           camera background, a bright circular guide ring that reacts in
+           real time, and a light rounded bottom sheet for instructions). */
+        #face-guide-frame { transition: border-color 0.25s ease, box-shadow 0.25s ease; }
+        /* "A face is visible" is a different, lower-stakes fact than "the correct
+           action was confirmed" -- state-found deliberately stays neutral (never
+           green) so it can't be misread as a success signal before the prompted
+           action is actually verified. Only state-pass (a genuinely confirmed
+           action) gets the green/glow treatment. */
+        #face-guide-frame.state-found { border-color: var(--accent) !important; }
+        #face-guide-frame.state-searching { border-color: var(--warning) !important; }
+        #face-guide-frame.state-pass { border-color: var(--success) !important; box-shadow: 0 0 0 10px rgba(5,205,153,0.2); }
+        #face-guide-frame.state-fail { border-color: var(--danger) !important; box-shadow: 0 0 0 8px rgba(238,93,80,0.16); }
+        #face-liveness-banner { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; padding: 18px 22px 22px; text-align: center; background: #fff; border-top-left-radius: 22px; border-top-right-radius: 22px; box-shadow: 0 -10px 30px rgba(112,144,176,0.18); }
+        #face-liveness-banner::before { content: ''; display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--border); margin: 0 auto 14px; }
+        #face-liveness-instruction { font-size: 0.95rem; font-weight: 800; letter-spacing: 0.01em; margin-bottom: 12px; color: var(--text-main); }
+        .liveness-dots { display: flex; justify-content: center; gap: 8px; }
+        .liveness-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); transition: 0.3s; }
+        .liveness-dot.done { background: var(--success); }
+        .liveness-dot.active { background: var(--warning); box-shadow: 0 0 10px var(--warning); }
+        .liveness-badge { padding: 4px 10px; border-radius: 10px; font-size: 0.68rem; font-weight: 800; text-transform: uppercase; }
+        .liveness-badge.pass { background: #DCFCE7; color: var(--success); }
+        .liveness-badge.fail { background: #FEE2E2; color: var(--danger); }
+        .face-status-chip { position: absolute; top: 16px; left: 16px; z-index: 5; display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 20px; background: rgba(15,23,42,0.6); color: #fff; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+        .face-status-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warning); transition: background 0.25s ease; }
+        .face-status-chip.state-found .dot { background: var(--accent); }
+        .face-status-chip.state-pass .dot { background: var(--success); }
+        .face-status-chip.state-fail .dot { background: var(--danger); }
+        #face-output { border-left: 3px solid var(--border); transition: border-color 0.25s ease; }
+        #face-output.tone-success { border-left-color: var(--success); }
+        #face-output.tone-error { border-left-color: var(--danger); }
+
+        /* Modal Overlay */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(11, 20, 55, 0.4); backdrop-filter: blur(10px); z-index: 5000; display: flex; align-items: center; justify-content: center; opacity: 0; visibility: hidden; transition: 0.4s; }
+        .modal-overlay.open { opacity: 1; visibility: visible; }
+        .modal-card { background: var(--bg-card); width: 100%; max-width: 500px; padding: 40px; border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); transform: translateY(20px); transition: 0.4s; }
+
+        #notif-drawer { position: fixed; top: 0; right: -420px; width: 400px; height: 100vh; background: var(--bg-card); box-shadow: -15px 0 40px rgba(0,0,0,0.1); z-index: 2000; transition: 0.4s; padding: 35px; border-left: 1px solid var(--border); }
+        #notif-drawer.open { right: 0; }
+
+        /* CRUD Specific Buttons */
+        .btn-icon { width: 32px; height: 32px; border-radius: 8px; border: none; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; margin-right: 5px; }
+        .btn-edit { background: var(--primary-light); color: var(--primary); }
+        .btn-delete { background: #FEE2E2; color: var(--danger); }
+
+        /* Toast */
+        #toast-container { position: fixed; bottom: 30px; right: 30px; z-index: 9998; display: flex; flex-direction: column; gap: 10px; }
+        .toast { padding: 16px 22px; border-radius: 14px; color: white; font-weight: 700; box-shadow: var(--shadow-sm); animation: fadeIn 0.3s ease; min-width: 260px; }
+        .toast-success { background: var(--success); }
+        .toast-error { background: var(--danger); }
+        .toast-info { background: var(--primary); }
+
+        /* ------------------------------------------------------------
+           RESPONSIVE — same look/theme on every breakpoint, only the
+           layout (columns, spacing, sidebar width) adapts to the
+           available screen width so nothing overflows or gets cut off
+           on tablets, small laptops, or small phones.
+        ------------------------------------------------------------ */
+        html { overflow-x: hidden; }
+        img, canvas, svg { max-width: 100%; }
+        .mobile-nav-toggle { display: none; }
+
+        /* Shorter windows (laptops with browser chrome, split-screen, or any
+           viewport where the sidebar's 11 nav items + logout don't all fit
+           vertically) — tighten the sidebar's own spacing first. The aside's
+           overflow-y: auto above is the fallback for anything still too
+           short after this, so "Terminate" is always reachable either way. */
+        @media (max-height: 820px) {
+            aside { padding: 22px 20px; }
+            aside > div:first-child { margin-bottom: 24px !important; }
+            .nav-item { padding: 11px 18px; margin-bottom: 4px; font-size: 0.92rem; }
+        }
+        @media (max-height: 680px) {
+            aside { padding: 16px 16px; }
+            aside > div:first-child { margin-bottom: 16px !important; }
+            .nav-item { padding: 9px 16px; margin-bottom: 2px; font-size: 0.88rem; }
+        }
+
+        /* Tablets / small laptops (iPad landscape, 13"-ish windows, split
+           screen, etc.) — keep the desktop sidebar layout but tighten it
+           up so 4-column grids don't get cramped. */
+        @media (max-width: 1180px) and (min-width: 901px) {
+            aside { width: 240px; padding: 32px 18px; }
+            header { padding: 24px 28px; }
+            main { padding: 0 28px 30px !important; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            #geofence > div[style*="grid-template-columns: 1fr 400px"] { grid-template-columns: 1fr 320px !important; }
+        }
+
+        @media (max-width: 900px) {
+            body { overflow: auto; height: auto; min-height: 100vh; flex-direction: column; }
+
+            .mobile-nav-toggle {
+                display: flex; align-items: center; justify-content: center;
+                width: 44px; height: 44px; border-radius: 14px; background: var(--bg-card);
+                border: 1px solid var(--border); color: var(--text-main); cursor: pointer;
+            }
+
+            aside {
+                position: fixed; inset: 0 25% 0 0; width: auto; max-width: 300px;
+                transform: translateX(-105%); box-shadow: var(--shadow-lg); z-index: 3000;
+            }
+            aside.mobile-open { transform: translateX(0); }
+
+            #main-wrapper { width: 100%; }
+            header { padding: 20px; flex-wrap: wrap; gap: 12px; }
+            header h2 { font-size: 1.3rem; }
+            main { padding: 0 16px 30px !important; }
+
+            .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+            .stat-card { padding: 16px; gap: 12px; }
+            .stat-icon { width: 46px; height: 46px; }
+            .stat-info span { font-size: 1.3rem; }
+
+            /* Any inline two/three/four-column grid collapses to one column on phones */
+            [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+            #geofence [style*="height: 720px"] { height: auto !important; }
+            #geo-map { height: 320px; }
+
+            .table-container { overflow-x: auto; }
+            table { min-width: 640px; }
+
+            .modal-card { max-width: calc(100vw - 32px); padding: 24px; max-height: 85vh; overflow-y: auto; }
+            #notif-drawer { width: 85vw; right: -85vw; }
+
+            .login-card { padding: 32px 24px; }
+        }
+
+        /* Small phones (≤460px) — everything above still applies; this just
+           trims paddings/font sizes further so cards and the login screen
+           don't feel oversized on a narrow screen. */
+        @media (max-width: 460px) {
+            .stats-grid { grid-template-columns: 1fr; }
+            .card { padding: 18px; }
+            header { padding: 16px; }
+            header h2 { font-size: 1.15rem; }
+            .login-card { padding: 26px 18px; }
+            .modal-card { padding: 18px; }
+            .btn-primary { padding: 12px 18px; font-size: 0.9rem; }
+            th, td { padding: 14px 16px; font-size: 0.85rem; }
+        }
+    </style>
+</head>
+<body class="light-mode">
+
+    <div id="toast-container"></div>
+
+    <!-- NOTIFICATION DRAWER -->
+    <div id="notif-drawer">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h3 style="font-weight: 800; font-size: 1.4rem;">Live Feed</h3>
+            <button class="nav-tool-btn" onclick="G_App.ui.toggleNotifs()"><i data-lucide="x"></i></button>
+        </div>
+        <div id="notif-list">
+            <div class="notif-item" style="padding: 18px; border-radius: 18px; background: var(--bg-body); border-left: 5px solid var(--primary); margin-bottom: 12px;">
+                <h5>System Active</h5><p style="font-size: 0.85rem; color: var(--text-muted);">Admin interface established.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL PARA SA CRUD (CREATE/EDIT) -->
+    <div id="crud-modal" class="modal-overlay">
+        <div class="modal-card">
+            <h2 id="modal-title" style="margin-bottom: 25px; font-weight: 800;">Register Member</h2>
+            <input type="hidden" id="inp-id">
+            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Employee ID *</label>
+            <input type="text" id="inp-code" class="geo-input" placeholder="e.g. E004" required>
+            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Surname *</label>
+            <input type="text" id="inp-surname" class="geo-input" placeholder="Surname" required>
+            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Given Name *</label>
+            <input type="text" id="inp-given-name" class="geo-input" placeholder="Given Name" required>
+            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Middle Name</label>
+            <input type="text" id="inp-middle-name" class="geo-input" placeholder="Middle Name (optional)">
+            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Suffix</label>
+            <select id="inp-suffix" class="geo-input">
+                <option value="">None</option>
+                <option value="Jr.">Jr.</option>
+                <option value="Sr.">Sr.</option>
+                <option value="II">II</option>
+                <option value="III">III</option>
+                <option value="IV">IV</option>
+                <option value="V">V</option>
+            </select>
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 5px;">
+                <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block;">Department *</label>
+                <a href="javascript:void(0)" style="font-size: 0.7rem; font-weight: 800; color: var(--primary);" onclick="G_App.departments.openModal()">+ Add New</a>
+            </div>
+            <select id="inp-dept" class="geo-input"></select>
+            <input type="text" id="inp-position" class="geo-input" placeholder="Job Position (e.g. Dean, Instructor)">
+            <input type="email" id="inp-email" class="geo-input" placeholder="Email Address (e.g. juan.delacruz@my.cspc.edu.ph)">
+            <select id="inp-status" class="geo-input">
+                <option value="Full-time">Full-time</option>
+                <option value="Part-time">Part-time</option>
+                <option value="COS">COS (Contract of Service)</option>
+                <option value="Inactive">Inactive</option>
+            </select>
+            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Classification</label>
+            <select id="inp-classification" class="geo-input">
+                <option value="Permanent Administrative">Permanent Administrative</option>
+                <option value="Permanent Academic">Permanent Academic</option>
+                <option value="Casual Administrative">Casual Administrative</option>
+                <option value="COS Administrative">COS Administrative</option>
+                <option value="COS Academic">COS Academic</option>
+                <option value="Job Order">Job Order</option>
+            </select>
+            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Remark</label>
+            <select id="inp-remark" class="geo-input">
+                <option value="Active">Active</option>
+                <option value="On Leave">On Leave</option>
+            </select>
+            <div style="display: flex; gap: 15px; margin-top: 10px;">
+                <button class="btn-primary" style="background: var(--border); color: var(--text-main); flex: 1;" onclick="G_App.employees.closeModal()">Cancel</button>
+                <button class="btn-primary" style="flex: 2;" id="btn-save-member" onclick="G_App.employees.save()">Save Member</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOGIN -->
+    <div id="login-screen">
+        <div class="login-card">
+            <div style="margin: 0 auto 30px; background: white; color: var(--primary); width: 70px; height: 70px; border-radius: 22px; display: flex; align-items: center; justify-content: center;"><i data-lucide="shield-check" size="36"></i></div>
+            <h1 style="font-size: 1.8rem; font-weight: 800;">GeoAttend Pro</h1>
+            <p style="margin-bottom: 30px; opacity: 0.7;">Institutional Intelligence Gateway</p>
+            <div class="login-error" id="login-error"></div>
+            <input type="email" id="login-email" class="login-input" placeholder="Admin Email" value="<%= typeof defaultAdminEmail !== 'undefined' ? defaultAdminEmail : 'admin@my.cspc.edu.ph' %>">
+            <input type="password" id="login-password" class="login-input" placeholder="Password" onkeypress="if(event.key==='Enter') G_App.auth.login()">
+            <button class="login-btn" id="login-btn" onclick="G_App.auth.login()">Verify & Authorize</button>
+        </div>
+    </div>
+
+    <!-- SIDEBAR -->
+    <aside id="app-sidebar" class="hidden">
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 50px;">
+            <div style="background: var(--primary); color: white; padding: 10px; border-radius: 14px;"><i data-lucide="globe"></i></div>
+            <h1 style="font-size: 1.4rem; font-weight: 800; color: var(--primary);">GeoAttend</h1>
+        </div>
+        <nav style="flex: 1;">
+            <div class="nav-item active" data-target="dashboard"><i data-lucide="layout-dashboard"></i> Dashboard</div>
+            <div class="nav-item" data-target="employees"><i data-lucide="users-2"></i> Employees</div>
+            <div class="nav-item" data-target="departments"><i data-lucide="building-2"></i> Departments</div>
+            <div class="nav-item" data-target="attendance"><i data-lucide="calendar-check"></i> Attendance</div>
+            <div class="nav-item" data-target="events"><i data-lucide="calendar-range"></i> Events</div>
+            <div class="nav-item" data-target="reports"><i data-lucide="file-bar-chart"></i> Reports</div>
+            <div class="nav-item" data-target="geofence"><i data-lucide="map-pin"></i> Geo-Fences</div>
+            <div class="nav-item" data-target="verification-section"><i data-lucide="fingerprint"></i> Verification</div>
+            <div class="nav-item" data-target="ratings"><i data-lucide="trophy"></i> Ratings</div>
+            <div class="nav-item" data-target="mobile-app"><i data-lucide="smartphone"></i> Device Management</div>
+            <div class="nav-item" data-target="settings"><i data-lucide="sliders"></i> Settings</div>
+        </nav>
+        <div class="nav-item" style="color: var(--danger); background: #FFF1F0; margin-top: 20px;" onclick="G_App.auth.logout()"><i data-lucide="power"></i> Terminate</div>
+    </aside>
+
+    <!-- MAIN WRAPPER -->
+    <div id="main-wrapper" class="hidden" style="flex: 1; flex-direction: column; overflow: hidden;">
+        <header>
+            <div style="display:flex; align-items:center; gap:16px;">
+                <div class="mobile-nav-toggle" onclick="G_App.ui.toggleMobileNav()"><i data-lucide="menu"></i></div>
+                <div><h2 id="view-title" style="font-weight: 800; font-size: 1.8rem;">Dashboard</h2><p id="view-subtitle" style="color: var(--text-muted); font-size: 0.95rem;">System Overview</p></div>
+            </div>
+            <div style="display: flex; gap: 18px; align-items: center;">
+                <div class="nav-tool-btn" onclick="G_App.ui.toggleDarkMode()"><i data-lucide="sun"></i></div>
+                <div class="nav-tool-btn" onclick="G_App.ui.toggleNotifs()"><i data-lucide="bell"></i></div>
+                <div class="card" id="admin-name-badge" style="padding: 12px 24px; font-weight: 800; color: var(--primary); background: var(--primary-light); border: none;">Super Admin</div>
+            </div>
+        </header>
+
+        <main style="padding: 0 45px 45px; overflow-y: auto; flex: 1;">
+
+            <!-- DASHBOARD -->
+            <div id="dashboard" class="view active">
+                <div class="stats-grid">
+                    <div class="stat-card"><div class="stat-icon"><i data-lucide="users"></i></div><div class="stat-info"><h4>Total</h4><span id="stat-total">--</span></div></div>
+                    <div class="stat-card"><div class="stat-icon" style="color:var(--success)"><i data-lucide="check-circle-2"></i></div><div class="stat-info"><h4>Full-Time</h4><span id="stat-present">--</span></div></div>
+                    <div class="stat-card"><div class="stat-icon" style="color:var(--warning)"><i data-lucide="timer"></i></div><div class="stat-info"><h4>Part-Time</h4><span id="stat-late">--</span></div></div>
+                    <div class="stat-card"><div class="stat-icon" style="color:var(--danger)"><i data-lucide="user-x"></i></div><div class="stat-info"><h4>Inactive</h4><span id="stat-absent">--</span></div></div>
+                </div>
+
+                <!-- Today's Snapshot -->
+                <div class="mini-stats-grid">
+                    <div class="mini-stat-card"><div class="mini-stat-icon" style="background:#DCFCE7; color:var(--success);"><i data-lucide="check-circle" size="20"></i></div><div><span class="mini-val" id="stat-today-present">--</span><div class="mini-label">Present Today</div></div></div>
+                    <div class="mini-stat-card"><div class="mini-stat-icon" style="background:#FFF4E5; color:var(--warning);"><i data-lucide="clock" size="20"></i></div><div><span class="mini-val" id="stat-today-late">--</span><div class="mini-label">Late Today</div></div></div>
+                    <div class="mini-stat-card"><div class="mini-stat-icon" style="background:var(--primary-light); color:var(--primary);"><i data-lucide="calendar-range" size="20"></i></div><div><span class="mini-val" id="stat-active-events">--</span><div class="mini-label">Active Events</div></div></div>
+                    <div class="mini-stat-card"><div class="mini-stat-icon" style="background:#E0E7FF; color:#4338CA;"><i data-lucide="smartphone" size="20"></i></div><div><span class="mini-val" id="stat-registered-devices">--</span><div class="mini-label">Registered Devices</div></div></div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1.8fr 1fr; gap: 30px; margin-top: 30px;">
+                    <div class="card">
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom: 10px;">
+                            <h3 style="margin:0;">Department Attendance — Total vs. Attended</h3>
+                            <div style="display:flex; gap:8px;">
+                                <select id="dash-dept-event" class="geo-input" style="margin:0; width:auto; font-size:0.8rem;" onchange="G_App.ui.loadDepartmentAttendanceChart()">
+                                    <option value="">All Events</option>
+                                </select>
+                                <select id="dash-dept-classification" class="geo-input" style="margin:0; width:auto; font-size:0.8rem;" onchange="G_App.ui.loadDepartmentAttendanceChart()">
+                                    <option value="all">All Classifications</option>
+                                    <option value="Permanent Administrative">Permanent Administrative</option>
+                                    <option value="Permanent Academic">Permanent Academic</option>
+                                    <option value="Casual Administrative">Casual Administrative</option>
+                                    <option value="COS Administrative">COS Administrative</option>
+                                    <option value="COS Academic">COS Academic</option>
+                                    <option value="Job Order">Job Order</option>
+                                </select>
+                            </div>
+                        </div>
+                        <canvas id="deptAttendanceChart" height="130"></canvas>
+                    </div>
+                    <div class="card">
+                        <h3>Employee Classification</h3>
+                        <canvas id="classificationChart" height="150"></canvas>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div style="margin-top: 30px;">
+                    <h3 style="margin-bottom: 16px; font-weight: 800; font-size: 1rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Quick Actions</h3>
+                    <div class="quick-actions-grid">
+                        <button class="quick-action-btn" onclick="G_App.ui.switchView('employees'); G_App.employees.openModal();">
+                            <div class="qa-icon"><i data-lucide="user-plus" size="18"></i></div>
+                            Add Employee<small>Enroll a new staff record</small>
+                        </button>
+                        <button class="quick-action-btn" onclick="G_App.ui.switchView('events');">
+                            <div class="qa-icon"><i data-lucide="calendar-plus" size="18"></i></div>
+                            Manage Events<small>Create or review events</small>
+                        </button>
+                        <button class="quick-action-btn" onclick="G_App.ui.switchView('reports');">
+                            <div class="qa-icon"><i data-lucide="file-bar-chart" size="18"></i></div>
+                            Generate Report<small>Attendance intelligence</small>
+                        </button>
+                        <button class="quick-action-btn" onclick="G_App.ui.switchView('verification-section');">
+                            <div class="qa-icon"><i data-lucide="scan-face" size="18"></i></div>
+                            Verify Identity<small>OCR / live face check</small>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Recent Activity + Upcoming Events -->
+                <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 30px; margin-top: 30px;">
+                    <div class="card">
+                        <div class="widget-title">Recent Activity <a href="javascript:void(0)" style="font-size: 0.75rem; font-weight: 800; color: var(--primary);" onclick="G_App.ui.loadRecentActivity()">Refresh</a></div>
+                        <div id="dash-recent-activity"><div class="activity-item"><p>Loading…</p></div></div>
+                    </div>
+                    <div class="card">
+                        <div class="widget-title">Upcoming Events <a href="javascript:void(0)" style="font-size: 0.75rem; font-weight: 800; color: var(--primary);" onclick="G_App.ui.switchView('events')">View All</a></div>
+                        <div id="dash-upcoming-events"><div class="mini-event-item"><h5>Loading…</h5></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EMPLOYEES -->
+            <div id="employees" class="view">
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; flex-wrap: wrap; gap: 15px;">
+                        <div style="display: flex; gap: 15px; flex: 1; min-width: 260px;">
+                            <input type="text" placeholder="Search resources..." class="geo-input" style="max-width: 350px; margin: 0;" onkeyup="G_App.employees.filter(this.value)">
+                            <select id="filter-dept" class="geo-input" style="max-width: 250px; margin: 0;" onchange="G_App.employees.render()">
+                                <option value="all">All Departments</option>
+                            </select>
+                            <select id="filter-classification" class="geo-input" style="max-width: 200px; margin: 0;" onchange="G_App.employees.render()">
+                                <option value="all">All Classifications</option>
+                                <option value="Permanent Administrative">Permanent Administrative</option>
+                                <option value="Permanent Academic">Permanent Academic</option>
+                                <option value="Casual Administrative">Casual Administrative</option>
+                                <option value="COS Administrative">COS Administrative</option>
+                                <option value="COS Academic">COS Academic</option>
+                                <option value="Job Order">Job Order</option>
+                            </select>
+                        </div>
+                        <div style="display:flex; gap:10px; flex-wrap: wrap;">
+                            <button class="btn-primary" style="background: var(--success);" onclick="G_App.employees.exportFile('csv')"><i data-lucide="download"></i> CSV</button>
+                            <button class="btn-primary" style="background: var(--secondary);" onclick="G_App.employees.exportFile('excel')"><i data-lucide="download"></i> Excel</button>
+                            <button class="btn-primary" style="background: var(--warning);" onclick="G_App.employeeImport.openModal()"><i data-lucide="upload"></i> Batch Import</button>
+                            <button class="btn-primary" onclick="G_App.employees.openModal()"><i data-lucide="user-plus"></i> Add New Employee</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Employee ID</th>
+                                    <th>Department/Office</th>
+                                    <th>Position</th>
+                                    <th>Classification</th>
+                                    <th>Status</th>
+                                    <th>Remark</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="employee-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL: BATCH IMPORT EMPLOYEES -->
+            <div id="import-modal" class="modal-overlay">
+                <div class="modal-card" style="max-width: 780px; width: 92vw;">
+                    <h2 style="margin-bottom: 10px; font-weight: 800;">Batch Import Employees</h2>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px;">Upload a CSV or Excel (.xlsx) file. Columns: Employee ID, Surname, Given Name, Middle Name, Suffix, Department, Position, Email, Phone, Status, Classification.</p>
+                    <input type="file" id="import-file-input" accept=".csv,.xlsx,.xls" class="geo-input" onchange="G_App.employeeImport.preview()">
+                    <div id="import-preview-summary" class="hidden" style="margin: 15px 0; display:flex; gap:12px; flex-wrap: wrap;"></div>
+                    <div id="import-preview-table-wrap" class="table-container hidden" style="max-height: 320px; overflow-y: auto;">
+                        <table>
+                            <thead><tr><th>Row</th><th>Employee ID</th><th>Name</th><th>Department</th><th>Status</th></tr></thead>
+                            <tbody id="import-preview-table"></tbody>
+                        </table>
+                    </div>
+                    <div style="display: flex; gap: 15px; margin-top: 20px;">
+                        <button class="btn-primary" style="background: var(--border); color: var(--text-main); flex: 1;" onclick="G_App.employeeImport.closeModal()">Cancel</button>
+                        <button id="btn-import-commit" class="btn-primary hidden" style="flex: 2;" onclick="G_App.employeeImport.commit()">Import Valid Rows</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ATTENDANCE -->
+            <div id="attendance" class="view">
+                <div id="attendance-root">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px;" id="attendance-folders"></div>
+                </div>
+                <div id="attendance-detail" class="hidden">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+                        <button class="btn-primary" style="background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border);" onclick="G_App.attendance.goBack()">
+                            <i data-lucide="arrow-left"></i> Back
+                        </button>
+                        <h3 id="current-dept-title" style="font-weight: 800;">Event</h3>
+                        <button class="btn-primary" onclick="G_App.attendance.generateReport()"><i data-lucide="file-text"></i> Export Report</button>
+                    </div>
+                    <div style="display:flex; gap:15px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+                        <input type="text" id="attendance-detail-search" placeholder="Search by employee or department..." class="geo-input" style="margin:0; max-width: 350px;" onkeyup="G_App.attendance.filterDetail(this.value)">
+                        <select id="attendance-detail-department" class="geo-input" style="margin:0; width:auto;" onchange="G_App.attendance.loadDetail()">
+                            <option value="all">All Departments</option>
+                        </select>
+                        <select id="attendance-detail-status" class="geo-input" style="margin:0; width:auto;" onchange="G_App.attendance.loadDetail()">
+                            <option value="all">All Status</option>
+                            <option value="Present">Present</option>
+                            <option value="Late">Late</option>
+                            <option value="Absent">Absent</option>
+                            <option value="Excused">Excused</option>
+                        </select>
+                        <select id="attendance-detail-sort" class="geo-input" style="margin:0; width:auto;" onchange="G_App.attendance.loadDetail()">
+                            <option value="default">Sort: Latest First</option>
+                            <option value="name_asc">Sort: Name (A-Z)</option>
+                            <option value="name_desc">Sort: Name (Z-A)</option>
+                        </select>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Employee</th>
+                                    <th>Department</th>
+                                    <th>Date</th>
+                                    <th>Time In / Time Out</th>
+                                    <th>Duration</th>
+                                    <th>Method</th>
+                                    <th>Longitude</th>
+                                    <th>Latitude</th>
+                                    <th>Face Verification</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="attendance-dept-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EVENTS — VIEW ALL -->
+            <div id="events" class="view">
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
+                        <div>
+                            <h3 style="font-weight: 800; font-size: 1.2rem;">All Events</h3>
+                            <p style="color: var(--text-muted); font-size: 0.85rem;">Every Flag Ceremony / event occurrence, including recurring schedules.</p>
+                        </div>
+                        <div style="display:flex; gap: 10px; flex-wrap: wrap;">
+                            <input type="text" id="events-search" placeholder="Search events..." class="geo-input" style="margin:0; max-width:240px;" onkeyup="G_App.events.load()">
+                            <select id="events-status-filter" class="geo-input" style="margin:0; width:auto;" onchange="G_App.events.load()">
+                                <option value="all">All Statuses</option>
+                                <option value="upcoming">Upcoming</option>
+                                <option value="ongoing">Ongoing</option>
+                                <option value="completed">Completed</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Title</th><th>Venue</th><th>Start</th><th>End</th><th>Recurrence</th><th>Attendance</th><th>Status</th></tr></thead>
+                            <tbody id="events-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- REPORTS SECTION -->
+            <div id="reports" class="view">
+                <div class="card">
+                    <h3 style="margin-bottom: 25px; font-weight: 800;">Intelligence Report Generator</h3>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px;">
+                        <div>
+                            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display: block;">Office/Dept</label>
+                            <select id="rpt-dept" class="geo-input" style="margin:0;">
+                                <option value="all">All Offices</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display: block;">Year</label>
+                            <select id="rpt-year" class="geo-input" style="margin:0;">
+                                <% const reportYear = new Date().getFullYear(); for (let y = Math.min(2024, reportYear - 2); y <= reportYear + 1; y++) { %>
+                                <option value="<%= y %>" <%= y === reportYear ? 'selected' : '' %>><%= y %></option>
+                                <% } %>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display: block;">Month</label>
+                            <select id="rpt-month" class="geo-input" style="margin:0;">
+                                <option value="all">Full Year</option>
+                                <option value="0">January</option><option value="1">February</option><option value="2">March</option>
+                                <option value="3">April</option><option value="4">May</option><option value="5">June</option>
+                                <option value="6">July</option><option value="7">August</option><option value="8">September</option>
+                                <option value="9">October</option><option value="10">November</option><option value="11">December</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 30px;">
+                        <div>
+                            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display: block;">Employee</label>
+                            <select id="rpt-employee" class="geo-input" style="margin:0;">
+                                <option value="all">All Personnel</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display: block;">Event</label>
+                            <select id="rpt-event" class="geo-input" style="margin:0;" onchange="G_App.reports.syncPeriodToEvent()">
+                                <option value="all">All Events</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display: block;">Duty Status</label>
+                            <select id="rpt-status" class="geo-input" style="margin:0;">
+                                <option value="all">All Statuses</option>
+                                <option value="Present">Present</option>
+                                <option value="Late">Late</option>
+                                <option value="Absent">Absent</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap: 12px;">
+                        <button class="btn-primary" style="flex:1;" id="rpt-generate-btn" onclick="G_App.reports.generate()">
+                            <i data-lucide="file-bar-chart"></i> Generate Analytical Report
+                        </button>
+                        <button class="btn-primary" style="background: var(--success);" onclick="G_App.reports.exportFile('csv')"><i data-lucide="download"></i> CSV</button>
+                        <button class="btn-primary" style="background: var(--secondary);" onclick="G_App.reports.exportFile('excel')"><i data-lucide="download"></i> Excel</button>
+                    </div>
+
+                    <div id="report-results" class="hidden" style="margin-top:30px;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid var(--border);">
+                            <div>
+                                <h4 id="rpt-res-title" style="font-weight: 800; color: var(--primary);">Summary Report</h4>
+                                <p id="rpt-res-subtitle" style="font-size: 0.85rem; color: var(--text-muted);">Criteria: Manual Filter</p>
+                            </div>
+                        </div>
+                        <div class="rpt-summary-grid">
+                            <div class="rpt-stat"><span id="rpt-sum-total">0</span><label>Total Records</label></div>
+                            <div class="rpt-stat" style="border-color: var(--success);"><span id="rpt-sum-present" style="color:var(--success);">0</span><label>Present</label></div>
+                            <div class="rpt-stat" style="border-color: var(--warning);"><span id="rpt-sum-late" style="color:var(--warning);">0</span><label>Late</label></div>
+                            <div class="rpt-stat" style="border-color: var(--danger);"><span id="rpt-sum-absent" style="color:var(--danger);">0</span><label>Absent</label></div>
+                        </div>
+
+                        <!-- ATTENDANCE INSIGHTS — offices/colleges ranked by attendance (G_App.reports.renderInsights) -->
+                        <section id="rpt-insights" class="ins-panel" aria-labelledby="ins-title">
+                            <div class="ins-head">
+                                <div>
+                                    <h4 id="ins-title" class="rpt-section-title">Attendance Insights by Office / College</h4>
+                                    <p id="ins-scope" class="ins-scope">Generate a report to see which offices and colleges attended most and least.</p>
+                                </div>
+                                <div class="ins-controls">
+                                    <div class="ins-toggle" role="group" aria-label="Sort offices and colleges">
+                                        <button type="button" id="ins-order-most" class="active" aria-pressed="true" onclick="G_App.reports.setInsightsOrder('most')"><i data-lucide="trending-up" size="14"></i> Most attendance</button>
+                                        <button type="button" id="ins-order-least" aria-pressed="false" onclick="G_App.reports.setInsightsOrder('least')"><i data-lucide="trending-down" size="14"></i> Minimum attendance</button>
+                                    </div>
+                                    <select id="ins-rank-by" class="geo-input ins-select" aria-label="Rank offices by" onchange="G_App.reports.loadInsights()">
+                                        <option value="rate">Rank by attendance rate</option>
+                                        <option value="count">Rank by number attended</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <p id="ins-summary" class="ins-summary"></p>
+                            <div class="ins-list-tools">
+                                <span id="ins-count"></span>
+                                <button type="button" id="ins-expand-all" class="ins-link hidden" onclick="G_App.reports.toggleAllInsightRows()">Show all employees</button>
+                            </div>
+                            <div id="ins-list" class="ins-list" aria-live="polite"></div>
+                        </section>
+
+                        <h4 class="rpt-section-title" style="margin-bottom: 12px;">Attendance Records</h4>
+                        <div class="table-container">
+                            <table>
+                                <thead><tr><th>Date</th><th>Employee</th><th>Office</th><th>Duty Status</th><th>Late (min)</th></tr></thead>
+                                <tbody id="report-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GEO FENCES -->
+            <div id="geofence" class="view">
+                <div id="geofence-alerts" style="margin-bottom: 20px;"></div>
+                <div style="display: grid; grid-template-columns: 1fr 400px; gap: 25px; height: 720px;">
+                    <div id="geo-map" style="border-radius: 24px; border: 1px solid var(--border); background: var(--bg-card);"></div>
+                    <div class="card" style="overflow-y: auto;">
+                        <h3 id="gf-form-title" style="margin-bottom: 20px; font-weight: 800;">Boundary Protocol</h3>
+                        <div style="display: flex; flex-direction: column;">
+                            <input type="hidden" id="gf-id">
+                            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px;">Event Name</label>
+                            <input type="text" id="gf-title" class="geo-input" placeholder="e.g. Annual Tech Symposium">
+                            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px;">Venue Name</label>
+                            <input type="text" id="gf-venue" class="geo-input" placeholder="e.g. Grand Ballroom A">
+                            <div>
+                                <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;"></label>
+                                <input type="datetime-local" id="gf-start" class="geo-input">
+                            </div>
+                            <div>
+                                <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">End Date/Time</label>
+                                <input type="datetime-local" id="gf-end" class="geo-input">
+                            </div>
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                                <div>
+                                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Latitude</label>
+                                    <input type="number" step="any" id="gf-lat" class="geo-input" placeholder="e.g. 13.6218" oninput="G_App.geofence.onCoordInput()">
+                                </div>
+                                <div>
+                                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Longitude</label>
+                                    <input type="number" step="any" id="gf-lng" class="geo-input" placeholder="e.g. 123.1948" oninput="G_App.geofence.onCoordInput()">
+                                </div>
+                            </div>
+                            <div style="display:flex; gap: 8px; margin-bottom: 15px;">
+                                <button type="button" class="btn-primary" style="flex:1; padding: 10px; font-size: 0.8rem; background: var(--secondary, #4318FF);" onclick="G_App.geofence.previewCoords()"><i data-lucide="map-pin" size="14"></i> Preview on Map</button>
+                                <button type="button" class="btn-primary" style="flex:1; padding: 10px; font-size: 0.8rem; background: var(--text-muted);" onclick="G_App.geofence.useMyLocation()"><i data-lucide="locate-fixed" size="14"></i> Use My Location</button>
+                            </div>
+                            <button type="button" class="btn-primary" style="width:100%; margin-bottom: 15px; padding: 10px; font-size: 0.8rem; background: var(--warning);" onclick="G_App.geofence.useCspcDefault()"><i data-lucide="school" size="14"></i> Use CSPC Default Location</button>
+                            <p style="font-size: 0.7rem; color: var(--text-muted); margin: -10px 0 15px;">Type exact coordinates, or click the map to auto-fill this field while drawing the boundary below.</p>
+
+                            <div style="background: var(--bg-body); border-radius: 16px; padding: 16px; margin-bottom: 15px;">
+                                <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display:block;">Recurring Schedule</label>
+                                <select id="gf-recurrence-type" class="geo-input" style="margin-bottom:10px;" onchange="G_App.geofence.onRecurrenceTypeChange()">
+                                    <option value="none">One-time event</option>
+                                    <option value="weekly">Every selected weekday(s)</option>
+                                </select>
+                                <div id="gf-recurrence-fields" class="hidden">
+                                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;" id="gf-weekday-picker">
+                                        <label class="weekday-chip"><input type="checkbox" value="1"> Mon</label>
+                                        <label class="weekday-chip"><input type="checkbox" value="2"> Tue</label>
+                                        <label class="weekday-chip"><input type="checkbox" value="3"> Wed</label>
+                                        <label class="weekday-chip"><input type="checkbox" value="4"> Thu</label>
+                                        <label class="weekday-chip"><input type="checkbox" value="5"> Fri</label>
+                                        <label class="weekday-chip"><input type="checkbox" value="6"> Sat</label>
+                                        <label class="weekday-chip"><input type="checkbox" value="7"> Sun</label>
+                                    </div>
+                                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display:block;">Repeat Until</label>
+                                    <input type="date" id="gf-recurrence-end" class="geo-input">
+                                </div>
+                            </div>
+
+                            <div style="background: var(--bg-body); border-radius: 16px; padding: 16px; margin-bottom: 15px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+                                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">Boundary Polygon</label>
+                                    <span id="gf-point-count" style="font-size: 0.75rem; font-weight: 800; color: var(--primary);">0 points</span>
+                                </div>
+                                <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Click the map to place each corner of the geofence boundary, in order, then close the shape. At least 3 points are required.</p>
+                                <div style="display:flex; gap: 8px;">
+                                    <button type="button" class="btn-primary" style="flex:1; padding: 10px; font-size: 0.8rem; background: var(--warning);" onclick="G_App.geofence.undoPoint()"><i data-lucide="undo-2" size="14"></i> Undo Point</button>
+                                    <button type="button" class="btn-primary" style="flex:1; padding: 10px; font-size: 0.8rem; background: var(--danger);" onclick="G_App.geofence.clearPoints()"><i data-lucide="x-circle" size="14"></i> Clear</button>
+                                </div>
+                            </div>
+
+
+                            <div style="display: flex; gap: 10px;">
+                                <button id="btn-gf-cancel" class="btn-primary hidden" style="flex: 1; background: var(--text-muted);" onclick="G_App.geofence.clearForm()">
+                                    Cancel
+                                </button>
+                                <button id="btn-gf-save" class="btn-primary" style="flex: 2; padding: 18px;" onclick="G_App.geofence.save()">
+                                    <i data-lucide="shield-check"></i> Initialize Protocol
+                                </button>
+                            </div>
+                        </div>
+                        <div style="margin-top: 30px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 15px;">
+                                <h4 style="font-size: 0.8rem; font-weight: 800; color: var(--secondary);" id="geofence-list-title">Recent Events</h4>
+                                <a href="javascript:void(0)" style="font-size: 0.75rem; font-weight: 800; color: var(--primary);" onclick="G_App.geofence.toggleViewAll()" id="geofence-view-all-link">View All</a>
+                            </div>
+                            <div id="geofence-list" style="display: flex; flex-direction: column; gap: 12px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VERIFICATION (OCR Verification + Face Verification) -->
+            <div id="verification-section" class="view">
+                <!-- Attendance flagged by anomaly detection (geo_anomalies) that
+                     still needs an admin to confirm identity via OCR or Face
+                     Verification below -- see G_App.verification.loadAlerts(). -->
+                <div id="verification-alerts" style="margin-bottom: 20px;"></div>
+
+                <div class="card" style="margin-bottom: 25px; display: flex; gap: 12px; padding: 10px;">
+                    <button type="button" id="verification-tab-ocr" class="btn-primary verification-tab-btn active" onclick="G_App.verification.switchTab('ocr')" style="flex: 1;"><i data-lucide="scan-text"></i> OCR Verification</button>
+                    <button type="button" id="verification-tab-face" class="btn-primary verification-tab-btn" onclick="G_App.verification.switchTab('face')" style="flex: 1; background: var(--border); color: var(--text-main);"><i data-lucide="scan-face"></i> Face Verification</button>
+                </div>
+
+                <!-- OCR VERIFICATION PANEL -->
+                <div id="ocr-panel" class="verification-panel">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                    <div class="card">
+                        <h3 style="margin-bottom: 25px; font-weight: 800;">Optical Verification</h3>
+                        <div style="margin-bottom:16px;">
+                            <label style="display:block;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:6px;">Record Attendance For</label>
+                            <select id="ocr-event-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);font-size:0.85rem;background:#fff;">
+                                <option value="">Verify identity only (no attendance)</option>
+                            </select>
+                            <p style="font-size:0.72rem;color:var(--text-muted);margin:6px 0 0;">Alternative to the mobile app's GPS check-in — use this when the employee doesn't have their phone with them. Select the event, then scan their ID to record their time-in/time-out.</p>
+                        </div>
+                        <div id="ocr-camera-container" style="height: 380px; background: #000; border-radius: 18px; overflow: hidden; position: relative;">
+                            <video id="ocr-video" autoplay playsinline style="width:100%; height:100%; object-fit:cover;"></video>
+                            <canvas id="ocr-canvas" class="hidden"></canvas>
+                            <!-- Dark overlays framing the guide area (sized for a portrait/vertical ID card) -->
+                            <div style="position:absolute;top:0;left:0;right:0;height:35px;background:rgba(0,0,0,0.58);pointer-events:none;z-index:2;"></div>
+                            <div style="position:absolute;bottom:0;left:0;right:0;height:35px;background:rgba(0,0,0,0.58);pointer-events:none;z-index:2;"></div>
+                            <div style="position:absolute;top:35px;bottom:35px;left:0;width:22%;background:rgba(0,0,0,0.58);pointer-events:none;z-index:2;"></div>
+                            <div style="position:absolute;top:35px;bottom:35px;right:0;width:22%;background:rgba(0,0,0,0.58);pointer-events:none;z-index:2;"></div>
+                            <!-- ID card guide frame: narrower + taller so a vertical/portrait ID card fits the frame -->
+                            <div id="ocr-guide-frame" style="position:absolute;top:35px;bottom:35px;left:22%;right:22%;border:1.5px solid rgba(255,255,255,0.22);border-radius:6px;pointer-events:none;z-index:3;">
+                                <!-- Corner brackets -->
+                                <div style="position:absolute;top:-1px;left:-1px;width:22px;height:4px;background:#FFB547;border-radius:2px;"></div>
+                                <div style="position:absolute;top:-1px;left:-1px;width:4px;height:22px;background:#FFB547;border-radius:2px;"></div>
+                                <div style="position:absolute;top:-1px;right:-1px;width:22px;height:4px;background:#FFB547;border-radius:2px;"></div>
+                                <div style="position:absolute;top:-1px;right:-1px;width:4px;height:22px;background:#FFB547;border-radius:2px;"></div>
+                                <div style="position:absolute;bottom:-1px;left:-1px;width:22px;height:4px;background:#FFB547;border-radius:2px;"></div>
+                                <div style="position:absolute;bottom:-1px;left:-1px;width:4px;height:22px;background:#FFB547;border-radius:2px;"></div>
+                                <div style="position:absolute;bottom:-1px;right:-1px;width:22px;height:4px;background:#FFB547;border-radius:2px;"></div>
+                                <div style="position:absolute;bottom:-1px;right:-1px;width:4px;height:22px;background:#FFB547;border-radius:2px;"></div>
+                                <!-- Scan line animates within the guide frame -->
+                                <div id="scan-line" style="display:none;position:absolute;left:0;right:0;top:0;height:2px;background:var(--success);box-shadow:0 0 15px var(--success);animation:scanning 2s linear infinite;"></div>
+                            </div>
+                            <!-- Labels -->
+                            <div style="position:absolute;top:20px;left:0;right:0;text-align:center;color:rgba(255,255,255,0.85);font-size:12px;font-weight:700;letter-spacing:0.06em;pointer-events:none;z-index:4;">Align your ID card within the frame</div>
+                            <div style="position:absolute;bottom:20px;left:0;right:0;text-align:center;color:rgba(255,255,255,0.5);font-size:11px;pointer-events:none;z-index:4;">Hold steady &nbsp;&bull;&nbsp; Ensure good lighting</div>
+                            <!-- Flip camera (front/back) — only shown when the device reports more than one camera -->
+                            <button id="ocr-flip-cam-btn" type="button" onclick="G_App.ocr.switchCamera()" class="hidden" title="Switch camera" style="position:absolute;top:14px;right:14px;z-index:5;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.35);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+                                <i data-lucide="refresh-ccw" size="18"></i>
+                            </button>
+                        </div>
+                        <div id="ocr-output" style="margin-top:20px; padding:15px; background:var(--bg-body); border-radius:12px; font-family:monospace; min-height:60px; white-space:pre-wrap;">System Ready...</div>
+                        <button class="btn-primary" style="width:100%; margin-top:25px;" onclick="G_App.ocr.process()"><i data-lucide="scan"></i> Capture & Verify ID</button>
+                    </div>
+                    <div class="card">
+                        <h3 style="margin-bottom: 20px; font-weight: 800;">Recent OCR Records</h3>
+                        <div class="table-container">
+                            <table>
+                                <thead><tr><th>Employee</th><th>Employee Number</th><th>Position</th><th>Result</th></tr></thead>
+                                <tbody id="ocr-records-table"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                </div>
+
+                <!-- FACE VERIFICATION PANEL -->
+                <div id="face-panel" class="verification-panel hidden">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                    <div class="card" style="padding: 0; overflow: hidden;">
+                        <div style="padding: 25px 25px 18px;">
+                            <h3 style="margin-bottom: 4px; font-weight: 800;">Live Selfie Verification</h3>
+                            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 16px;">Real-time liveness check, then instant face match against enrolled employees.</p>
+                            <label style="display:block;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:6px;">Record Attendance For</label>
+                            <select id="face-event-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);font-size:0.85rem;background:#fff;">
+                                <option value="">Verify identity only (no attendance)</option>
+                            </select>
+                            <p style="font-size:0.72rem;color:var(--text-muted);margin:6px 0 0;">Alternative to the mobile app's GPS check-in — use this when the employee doesn't have an ID on hand. Select the event, then verify their face to record their time-in/time-out.</p>
+                        </div>
+                        <div id="face-camera-container" style="height: 460px; background: #0B0F1A; border-radius: 18px; margin: 0 0 20px; overflow: hidden; position: relative;">
+                            <video id="face-video" autoplay playsinline muted style="width:100%; height:100%; object-fit:cover;"></video>
+                            <canvas id="face-canvas" class="hidden"></canvas>
+                            <!-- Soft top scrim behind the status chip / flip-camera button -->
+                            <div style="position:absolute;top:0;left:0;right:0;height:90px;background:linear-gradient(180deg, rgba(11,15,26,0.55), rgba(11,15,26,0));pointer-events:none;z-index:2;"></div>
+                            <!-- Real-time face-found status chip -->
+                            <div class="face-status-chip state-searching" id="face-status-chip"><span class="dot"></span><span id="face-status-chip-text">READY</span></div>
+                            <!-- Round face guide frame -- color reacts live to face-found / pass / fail -->
+                            <div id="face-guide-frame" style="position:absolute;top:50%;left:50%;width:220px;height:290px;margin:-145px 0 0 -110px;border:3px solid rgba(255,255,255,0.55);border-radius:50%;pointer-events:none;z-index:3;">
+                                <div id="face-scan-line" style="display:none;position:absolute;left:0;right:0;top:0;height:2px;background:var(--success);box-shadow:0 0 15px var(--success);animation:scanning 2s linear infinite;"></div>
+                            </div>
+                            <!-- Idle hint labels (shown before "Start" is tapped) -->
+                            <div id="face-idle-label" style="position:absolute;bottom:118px;left:0;right:0;text-align:center;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 8px rgba(0,0,0,0.55);pointer-events:none;z-index:4;">Center your face within the frame</div>
+                            <div id="face-idle-sublabel" style="position:absolute;bottom:96px;left:0;right:0;text-align:center;color:rgba(255,255,255,0.75);font-size:11px;pointer-events:none;z-index:4;">Hold steady &nbsp;&bull;&nbsp; Ensure good lighting</div>
+                            <!-- Flip camera (front/back) — only shown when the device reports more than one camera -->
+                            <button id="face-flip-cam-btn" type="button" onclick="G_App.face.switchCamera()" class="hidden" title="Switch camera" style="position:absolute;top:14px;right:14px;z-index:5;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.35);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+                                <i data-lucide="refresh-ccw" size="18"></i>
+                            </button>
+                            <!-- Liveness "hold still" banner -- a light bottom sheet, GCash-style -->
+                            <div id="face-liveness-banner" class="hidden">
+                                <div id="face-liveness-instruction">Get ready…</div>
+                            </div>
+                            <!-- Idle action sheet -- houses the Start button; swaps places with the banner above once verification begins -->
+                            <div id="face-idle-sheet" style="position:absolute;left:0;right:0;bottom:0;z-index:4;padding:18px 22px 22px;background:#fff;border-top-left-radius:22px;border-top-right-radius:22px;box-shadow:0 -10px 30px rgba(112,144,176,0.18);">
+                                <div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 14px;"></div>
+                                <div style="display:flex;align-items:center;gap:6px;justify-content:center;margin-bottom:12px;">
+                                    <i data-lucide="shield-check" size="14" style="color:var(--text-muted);"></i>
+                                    <span style="font-size:0.68rem;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-muted);">Secure Identity Verification</span>
+                                </div>
+                                <button class="btn-primary" id="face-verify-btn" style="width:100%;" onclick="G_App.face.startVerification()"><i data-lucide="scan-face"></i> Start Face Verification</button>
+                            </div>
+                        </div>
+                        <div style="padding: 0 25px 25px;">
+                            <div id="face-output" style="padding:15px 18px; background:var(--bg-body); border-radius:12px; font-family:monospace; font-size:0.82rem; min-height:60px; white-space:pre-wrap;">System Ready. Liveness check (hold still, live face) runs automatically before capture.</div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3 style="margin-bottom: 20px; font-weight: 800;">Recent Face Verification Records</h3>
+                        <div class="table-container">
+                            <table>
+                                <thead><tr><th>Employee</th><th>Similarity</th><th>Liveness</th><th>Result</th></tr></thead>
+                                <tbody id="face-records-table"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                </div>
+            </div>
+
+            <!-- DEVICE MANAGEMENT -->
+            <div id="mobile-app" class="view">
+                <div class="card">
+                    <h3 style="margin-bottom: 10px; font-weight: 800;">Device Registry</h3>
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 25px;">Hardware linked to employee accounts.</p>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Employee Name</th><th>Device Model</th><th>Device ID</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="mobile-device-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL: DEVICE + EMPLOYEE DETAILS, INCLUDING THE FACE PHOTO USED AT REGISTRATION -->
+            <div id="device-view-modal" class="modal-overlay">
+                <div class="modal-card" style="max-width: 640px; width: 92vw;">
+                    <h2 style="margin-bottom: 20px; font-weight: 800;">Registered Device</h2>
+                    <div style="display:flex; gap:20px; flex-wrap:wrap;">
+                        <div style="flex:0 0 auto;">
+                            <img id="device-view-photo" src="" alt="Registration face photo"
+                                style="width:180px; height:180px; object-fit:cover; border-radius:16px; border:1px solid var(--border); background:var(--bg-body); display:block;">
+                            <p id="device-view-photo-caption" style="text-align:center; font-size:0.72rem; color:var(--text-muted); font-weight:700; margin-top:6px; max-width:180px;"></p>
+                        </div>
+                        <div style="flex:1; min-width:220px; display:flex; flex-direction:column; gap:14px;">
+                            <div>
+                                <h3 id="device-view-name" style="font-weight:800; font-size:1.15rem;"></h3>
+                                <p id="device-view-subtitle" style="color:var(--text-muted); font-size:0.85rem;"></p>
+                            </div>
+                            <div id="device-view-employee-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px 16px;"></div>
+                        </div>
+                    </div>
+                    <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border);">
+                        <h4 style="font-size:0.75rem; font-weight:800; text-transform:uppercase; color:var(--text-muted); margin-bottom:10px;">Device</h4>
+                        <div id="device-view-device-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px 16px;"></div>
+                    </div>
+                    <div id="device-view-actions" style="display: flex; gap: 15px; margin-top: 22px;"></div>
+                </div>
+            </div>
+
+            <!-- SETTINGS -->
+            <div id="settings" class="view">
+                <div style="display: grid; grid-template-columns: 1fr; gap: 30px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                        <div class="card">
+                            <h3 style="margin-bottom: 20px; font-weight: 800; font-size: 1.2rem;">Certificate of Attendance</h3>
+                            <div style="display: flex; flex-direction: column; gap: 15px;">
+                                <div>
+                                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">Select Employee</label>
+                                    <select id="cert-employee-select" class="geo-input"></select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">Event/Seminar Title</label>
+                                    <input type="text" id="cert-event" class="geo-input" placeholder="e.g. Annual Strategic Planning">
+                                </div>
+                                <button class="btn-primary" onclick="G_App.settings.generateCertificate()">
+                                    <i data-lucide="award"></i> Generate & Print Certificate
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card" id="admin-accounts-card">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
+                                <h3 style="font-weight: 800; font-size: 1.2rem;">Admin Accounts</h3>
+                                <button class="btn-primary" style="padding: 10px 16px; font-size: 0.8rem;" onclick="G_App.adminAccounts.openModal()"><i data-lucide="user-plus" size="14"></i> New Admin</button>
+                            </div>
+                            <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 15px;">Super Admin has full access. Admin is restricted to Verification (OCR & Face) only.</p>
+                            <div id="admin-accounts-list" style="display:flex; flex-direction:column; gap:10px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ADMIN ACCOUNT MODAL -->
+            <div id="admin-account-modal" class="modal-overlay">
+                <div class="modal-card">
+                    <h2 style="margin-bottom: 25px; font-weight: 800;">New Admin Account</h2>
+                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Full Name</label>
+                    <input type="text" id="aa-name" class="geo-input" placeholder="Full Name">
+                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Email</label>
+                    <input type="email" id="aa-email" class="geo-input" placeholder="admin@my.cspc.edu.ph">
+                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Password</label>
+                    <input type="password" id="aa-password" class="geo-input" placeholder="At least 6 characters">
+                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Role</label>
+                    <select id="aa-role" class="geo-input">
+                        <option value="admin">Admin — Verification only</option>
+                        <option value="super_admin">Super Admin — full access</option>
+                    </select>
+                    <div style="display: flex; gap: 15px; margin-top: 10px;">
+                        <button class="btn-primary" style="background: var(--border); color: var(--text-main); flex: 1;" onclick="G_App.adminAccounts.closeModal()">Cancel</button>
+                        <button class="btn-primary" style="flex: 2;" onclick="G_App.adminAccounts.save()">Create Account</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RATINGS -->
+            <div id="ratings" class="view">
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                        <div>
+                            <h3 style="font-weight: 800; font-size: 1.2rem;">Event Ratings</h3>
+                            <p style="color: var(--text-muted); font-size: 0.85rem;">1 = Absent, 5 = Present. Auto-generated once each event ends from actual attendance; click a cell to override. Total Rating = sum of an employee's own event ratings; Rating Points = Total Rating ÷ number of rated events.</p>
+                        </div>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <select id="ratings-department" class="geo-input" style="margin:0; width:auto;" onchange="G_App.ratings.onDepartmentChange()">
+                                <option value="all">All Departments</option>
+                            </select>
+                            <select id="ratings-employee" class="geo-input" style="margin:0; width:auto;" onchange="G_App.ratings.load()">
+                                <option value="all">All Personnel</option>
+                            </select>
+                            <select id="ratings-month" class="geo-input" style="margin:0; width:auto;" onchange="G_App.ratings.load()"></select>
+                            <select id="ratings-year" class="geo-input" style="margin:0; width:auto;" onchange="G_App.ratings.load()"></select>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 15px; position: relative; max-width: 360px;">
+                        <i data-lucide="search" style="position:absolute; left:12px; top:50%; transform:translateY(-50%); width:16px; height:16px; color: var(--text-muted); pointer-events:none;"></i>
+                        <input id="ratings-search" type="text" class="geo-input" placeholder="Search employee, event, or attendance status..." style="width:100%; padding-left: 36px;" oninput="G_App.ratings.onSearch()">
+                    </div>
+                    <div class="table-container" style="overflow-x: auto;">
+                        <table id="ratings-table"></table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL: EMPLOYEE'S EVENTS + PER-EVENT RATING (Ratings section) -->
+            <div id="ratings-events-modal" class="modal-overlay">
+                <div class="modal-card" style="max-width: 560px; width: 92vw;">
+                    <h2 id="ratings-events-modal-name" style="margin-bottom: 2px; font-weight: 800;"></h2>
+                    <p id="ratings-events-modal-sub" style="color: var(--text-muted); font-size: 0.82rem; margin-bottom: 18px;"></p>
+                    <div id="ratings-events-modal-list" style="display:flex; flex-direction:column; gap:8px; max-height: 340px; overflow-y: auto;"></div>
+                    <div id="ratings-events-modal-summary" style="display:flex; gap:12px; margin-top:18px; padding-top:16px; border-top: 1px solid var(--border);"></div>
+                    <div style="display: flex; gap: 15px; margin-top: 20px;">
+                        <button class="btn-primary" style="background: var(--border); color: var(--text-main); flex: 1;" onclick="G_App.ratings.closeEventsModal()">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DEPARTMENTS -->
+            <div id="departments" class="view">
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                        <div>
+                            <h3 style="font-weight: 800; font-size: 1.2rem;">Departments</h3>
+                            <p style="color: var(--text-muted); font-size: 0.85rem;">You need at least one department here before you can register a member.</p>
+                        </div>
+                        <button class="btn-primary" onclick="G_App.departments.openModal()"><i data-lucide="plus"></i> Add Department</button>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Name</th><th>Office</th><th>Members</th><th>Actions</th></tr></thead>
+                            <tbody id="departments-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL: ADD DEPARTMENT -->
+            <div id="dept-modal" class="modal-overlay">
+                <div class="modal-card">
+                    <h2 style="margin-bottom: 25px; font-weight: 800;">Add Department</h2>
+                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Department Name *</label>
+                    <input type="text" id="dept-name" class="geo-input" placeholder="e.g. College of Engineering">
+                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Office</label>
+                    <input type="text" id="dept-office" class="geo-input" placeholder="Defaults to the department name">
+                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Description</label>
+                    <input type="text" id="dept-description" class="geo-input" placeholder="Optional">
+                    <div style="display: flex; gap: 15px; margin-top: 10px;">
+                        <button class="btn-primary" style="background: var(--border); color: var(--text-main); flex: 1;" onclick="G_App.departments.closeModal()">Cancel</button>
+                        <button class="btn-primary" style="flex: 2;" onclick="G_App.departments.save()">Save Department</button>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        window.__GOOGLE_MAPS_API_KEY__ = "<%= googleMapsApiKey %>";
+    </script>
+    <script src="/js/app.js"></script>
+</body>
+</html>

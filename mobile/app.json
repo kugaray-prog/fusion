@@ -1,0 +1,64 @@
+{
+  "expo": {
+    "name": "GeoAttend Pro",
+    "slug": "geoattend-pro-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "geoattendpro",
+    "splash": {
+      "backgroundColor": "#0D00A5"
+    },
+    "android": {
+      "package": "com.geoattend.pro",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_STATE",
+        "ACCESS_NETWORK_STATE",
+        "NEARBY_WIFI_DEVICES",
+        "POST_NOTIFICATIONS",
+        "SCHEDULE_EXACT_ALARM",
+        "CAMERA"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_ANDROID_GOOGLE_MAPS_API_KEY"
+        }
+      }
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.geoattend.pro",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "GeoAttend Pro needs your location to verify you are inside the event geofence when marking attendance, and to detect/join the location's Wi-Fi network.",
+        "NSCameraUsageDescription": "GeoAttend Pro needs camera access to capture your face for Face Verification registration.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "config": {
+        "googleMapsApiKey": "YOUR_IOS_GOOGLE_MAPS_API_KEY"
+      }
+    },
+    "plugins": [
+      "expo-notifications",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "GeoAttend Pro needs camera access to capture your face for Face Verification registration.",
+          "microphonePermission": "GeoAttend Pro records a short guided video (blink, nod, turn your head) during face registration to confirm you're a live person."
+        }
+      ]
+    ],
+    "extra": {
+      "apiBaseUrl": "http://172.16.81.79:3000/api",
+      "googleWebClientId": "89052635165-n8l49e8ccn17fu054ll0fgcreinlv61c.apps.googleusercontent.com",
+      "googleIosClientId": "",
+      "googleAndroidClientId": "89052635165-kd3akbf6bdjr8m1f90gbft5g4a6cmi72.apps.googleusercontent.com",
+      "requiredWifiSsid": "CSPC Student Wi-Fi",
+      "eas": {
+        "projectId": "7dad9332-2a78-4043-b97e-f4a547128ad5"
+      }
+    }
+  }
+}

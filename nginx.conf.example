@@ -1,0 +1,30 @@
+# Example Nginx reverse-proxy config for the VPS deploy path
+# (DEPLOYMENT.md Part 4). Not used by Railway/PaaS deploys -- they handle
+# HTTPS and routing themselves.
+#
+# Install:
+#   sudo cp nginx.conf.example /etc/nginx/sites-available/geoattend-pro
+#   sudo ln -s /etc/nginx/sites-available/geoattend-pro /etc/nginx/sites-enabled/
+#   sudo nano /etc/nginx/sites-available/geoattend-pro   # replace your-domain.com below
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot --nginx -d your-domain.com   # adds HTTPS (see DEPLOYMENT.md)
+
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    # Employee face photos and other uploads can be a few MB each.
+    client_max_body_size 15M;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
