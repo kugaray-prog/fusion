@@ -418,27 +418,47 @@ const G_App = {
     },
 
     employees: {
-        // Sets a <select>'s value, but if that exact value isn't one of its
-        // options (e.g. an employee's classification came from the mobile
-        // app's free-text "Others" field, so it's something completely
-        // custom that this dropdown's own option list can't anticipate),
-        // inserts a temporary option for it first instead of silently
-        // falling back to nothing selected. Without this, saving the form
-        // untouched would submit whatever the browser defaults an
-        // unmatched <select> to -- silently overwriting that employee's
-        // real classification with the wrong one.
-        setSelectPreservingUnknown: (selectId, value) => {
+        // Position / Gender / Classification dropdowns each have an "Others"
+        // option that reveals a free-text `${selectId}-other` input, same as
+        // the mobile registration form (RegistrationScreen.js
+        // resolveDropdownValue). A value already on file that isn't one of
+        // the listed options -- e.g. something typed into "Others" on the
+        // phone -- selects "Others" with the raw value in the text field, so
+        // saving the form untouched never overwrites it.
+        toggleOther: (selectId) => {
+            const other = document.getElementById(`${selectId}-other`);
+            other.style.display = document.getElementById(selectId).value === 'Others' ? '' : 'none';
+        },
+        setDropdownWithOther: (selectId, value) => {
             const select = document.getElementById(selectId);
-            // Remove any custom option left over from a previous call for a
-            // different employee, so this doesn't grow indefinitely over an
-            // admin's session -- at most one exists at a time.
-            [...select.options].filter(o => o.dataset.custom).forEach(o => o.remove());
-            if (value && ![...select.options].some(o => o.value === value)) {
-                const opt = new Option(`${value} (custom)`, value);
-                opt.dataset.custom = '1';
-                select.add(opt);
-            }
-            select.value = value || select.options[0]?.value || '';
+            const other = document.getElementById(`${selectId}-other`);
+            const listed = value && value !== 'Others' && [...select.options].some(o => o.value === value);
+            select.value = !value ? select.options[0].value : (listed ? value : 'Others');
+            other.value = value && !listed ? value : '';
+            G_App.employees.toggleOther(selectId);
+        },
+        // Shows the employee's registered device(s) in the same
+        // MODEL / BRAND / OS / DEVICE ID layout as the mobile registration
+        // form's device card, from the values the app submitted.
+        renderDeviceInfo: async (employeeId) => {
+            const wrap = document.getElementById('inp-device-info-wrap');
+            const box = document.getElementById('inp-device-info');
+            wrap.style.display = 'none';
+            box.innerHTML = '';
+            if (!employeeId) return;
+            try {
+                const { data } = await apiFetch('/devices');
+                const devices = data.filter(d => d.employee_id == employeeId);
+                if (!devices.length || document.getElementById('inp-id').value != employeeId) return;
+                box.innerHTML = devices.map(d => `
+                    <div style="background: var(--primary-light); border-radius: 12px; padding: 14px 16px; margin-bottom: 8px; font-family: monospace; font-size: 0.8rem; line-height: 1.6; white-space: pre-line;">${escapeHtml(`MODEL: ${d.model || 'Unknown'}\nBRAND: ${d.brand || 'Unknown'}\nOS: ${d.os || 'Unknown'}\nDEVICE ID: ${d.device_uid || 'unknown-device'}`)}</div>
+                `).join('');
+                wrap.style.display = '';
+            } catch (err) { /* e.g. not a super admin -- leave the section hidden */ }
+        },
+        readDropdownWithOther: (selectId) => {
+            const value = document.getElementById(selectId).value;
+            return value === 'Others' ? document.getElementById(`${selectId}-other`).value.trim() : value;
         },
         openModal: (id = null) => {
             const modal = document.getElementById('crud-modal');
@@ -455,12 +475,14 @@ const G_App = {
                 document.getElementById('inp-middle-name').value = emp.middle_name || '';
                 document.getElementById('inp-suffix').value = emp.suffix || '';
                 document.getElementById('inp-dept').value = emp.department_name;
-                document.getElementById('inp-position').value = emp.position || '';
+                G_App.employees.setDropdownWithOther('inp-position', emp.position || '');
+                G_App.employees.setDropdownWithOther('inp-gender', emp.gender || '');
                 document.getElementById('inp-email').value = emp.email || '';
                 document.getElementById('inp-status').value = emp.status;
-                G_App.employees.setSelectPreservingUnknown('inp-classification', emp.classification || 'Permanent Administrative');
+                G_App.employees.setDropdownWithOther('inp-classification', emp.classification || 'Permanent Administrative');
                 document.getElementById('inp-remark').value = emp.remark || 'Active';
                 saveBtn.onclick = () => G_App.employees.update();
+                G_App.employees.renderDeviceInfo(emp.id);
             } else {
                 title.innerText = 'Register Member';
                 document.getElementById('inp-id').value = '';
@@ -469,12 +491,14 @@ const G_App = {
                 document.getElementById('inp-given-name').value = '';
                 document.getElementById('inp-middle-name').value = '';
                 document.getElementById('inp-suffix').value = '';
-                document.getElementById('inp-position').value = '';
+                G_App.employees.setDropdownWithOther('inp-position', '');
+                G_App.employees.setDropdownWithOther('inp-gender', '');
                 document.getElementById('inp-email').value = '';
                 document.getElementById('inp-status').value = 'Full-time';
-                document.getElementById('inp-classification').value = 'Permanent Administrative';
+                G_App.employees.setDropdownWithOther('inp-classification', 'Permanent Administrative');
                 document.getElementById('inp-remark').value = 'Active';
                 saveBtn.onclick = () => G_App.employees.save();
+                G_App.employees.renderDeviceInfo(null);
             }
             modal.classList.add('open');
         },
@@ -487,6 +511,12 @@ const G_App = {
             if (!employeeCode) { toast('Employee ID is required.', 'error'); return null; }
             if (!surname || !givenName) { toast('Surname and Given Name are required.', 'error'); return null; }
             if (!department) { toast('Please select a department. Use "+ Add New" if none exist yet.', 'error'); return null; }
+            const position = G_App.employees.readDropdownWithOther('inp-position');
+            const gender = G_App.employees.readDropdownWithOther('inp-gender');
+            const classification = G_App.employees.readDropdownWithOther('inp-classification');
+            if (!position) { toast('Please select a position, or choose "Others" and type it.', 'error'); return null; }
+            if (!gender) { toast('Please select a gender, or choose "Others" and type it.', 'error'); return null; }
+            if (!classification) { toast('Please select a classification, or choose "Others" and type it.', 'error'); return null; }
             return {
                 employee_code: employeeCode,
                 surname,
@@ -494,10 +524,11 @@ const G_App = {
                 middle_name: document.getElementById('inp-middle-name').value.trim(),
                 suffix: document.getElementById('inp-suffix').value,
                 department,
-                position: document.getElementById('inp-position').value,
+                position,
+                gender,
                 email: document.getElementById('inp-email').value,
                 status: document.getElementById('inp-status').value,
-                classification: document.getElementById('inp-classification').value,
+                classification,
                 remark: document.getElementById('inp-remark').value
             };
         },

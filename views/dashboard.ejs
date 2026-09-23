@@ -391,7 +391,43 @@
                 <a href="javascript:void(0)" style="font-size: 0.7rem; font-weight: 800; color: var(--primary);" onclick="G_App.departments.openModal()">+ Add New</a>
             </div>
             <select id="inp-dept" class="geo-input"></select>
-            <input type="text" id="inp-position" class="geo-input" placeholder="Job Position (e.g. Dean, Instructor)">
+            <!-- Position / Gender / Classification mirror the mobile app's registration
+                 form (mobile/src/screens/RegistrationScreen.js POSITION_OPTIONS,
+                 GENDER_OPTIONS, CLASSIFICATION_OPTIONS) -- keep the lists in sync.
+                 "Others" reveals a free-text field, same as the mobile picker. -->
+            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Position *</label>
+            <select id="inp-position" class="geo-input" onchange="G_App.employees.toggleOther('inp-position')">
+                <option value="">Select position</option>
+                <option value="Instructor I">Instructor I</option>
+                <option value="Instructor II">Instructor II</option>
+                <option value="Instructor III">Instructor III</option>
+                <option value="Assistant Professor">Assistant Professor</option>
+                <option value="Associate Professor">Associate Professor</option>
+                <option value="Professor">Professor</option>
+                <option value="Department Dean">Department Dean</option>
+                <option value="Program Chair">Program Chair</option>
+                <option value="Guidance Counselor">Guidance Counselor</option>
+                <option value="Librarian">Librarian</option>
+                <option value="Registrar Staff">Registrar Staff</option>
+                <option value="Accounting Staff">Accounting Staff</option>
+                <option value="Administrative Aide I">Administrative Aide I</option>
+                <option value="Administrative Aide II">Administrative Aide II</option>
+                <option value="Administrative Aide III">Administrative Aide III</option>
+                <option value="Administrative Officer">Administrative Officer</option>
+                <option value="Administrative Assistant">Administrative Assistant</option>
+                <option value="Security Guard">Security Guard</option>
+                <option value="Utility Worker">Utility Worker</option>
+                <option value="Others">Others</option>
+            </select>
+            <input type="text" id="inp-position-other" class="geo-input" placeholder="Enter position" style="display: none;">
+            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Gender *</label>
+            <select id="inp-gender" class="geo-input" onchange="G_App.employees.toggleOther('inp-gender')">
+                <option value="">Select gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Others">Others</option>
+            </select>
+            <input type="text" id="inp-gender-other" class="geo-input" placeholder="Enter gender" style="display: none;">
             <input type="email" id="inp-email" class="geo-input" placeholder="Email Address (e.g. juan.delacruz@my.cspc.edu.ph)">
             <select id="inp-status" class="geo-input">
                 <option value="Full-time">Full-time</option>
@@ -399,20 +435,29 @@
                 <option value="COS">COS (Contract of Service)</option>
                 <option value="Inactive">Inactive</option>
             </select>
-            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Classification</label>
-            <select id="inp-classification" class="geo-input">
+            <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Classification *</label>
+            <select id="inp-classification" class="geo-input" onchange="G_App.employees.toggleOther('inp-classification')">
                 <option value="Permanent Administrative">Permanent Administrative</option>
                 <option value="Permanent Academic">Permanent Academic</option>
                 <option value="Casual Administrative">Casual Administrative</option>
                 <option value="COS Administrative">COS Administrative</option>
                 <option value="COS Academic">COS Academic</option>
                 <option value="Job Order">Job Order</option>
+                <option value="Others">Others</option>
             </select>
+            <input type="text" id="inp-classification-other" class="geo-input" placeholder="Enter classification" style="display: none;">
             <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Remark</label>
             <select id="inp-remark" class="geo-input">
                 <option value="Active">Active</option>
                 <option value="On Leave">On Leave</option>
             </select>
+            <!-- Device info exactly as the mobile registration form showed it
+                 (RegistrationScreen.js device card) -- filled in when editing a
+                 member who registered from the app; hidden otherwise. -->
+            <div id="inp-device-info-wrap" style="display: none; margin-bottom: 10px;">
+                <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Device Information</label>
+                <div id="inp-device-info"></div>
+            </div>
             <div style="display: flex; gap: 15px; margin-top: 10px;">
                 <button class="btn-primary" style="background: var(--border); color: var(--text-main); flex: 1;" onclick="G_App.employees.closeModal()">Cancel</button>
                 <button class="btn-primary" style="flex: 2;" id="btn-save-member" onclick="G_App.employees.save()">Save Member</button>

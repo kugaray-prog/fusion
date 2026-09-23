@@ -56,7 +56,7 @@ async function getEmployees(req, res, next) {
     const [rows] = await pool.query(
       `SELECT e.id, e.employee_code, e.full_name, e.surname, e.given_name, e.middle_name, e.suffix,
               e.office, e.position, e.email, e.phone,
-              e.photo_path, e.status, e.remark, e.classification, e.attendance_score, e.rating_points,
+              e.photo_path, e.status, e.remark, e.classification, e.gender, e.attendance_score, e.rating_points,
               e.face_failed_attempts, e.face_locked_until, e.face_lock_reason,
               d.id AS department_id, d.name AS department_name
        FROM employees e
@@ -101,7 +101,7 @@ async function getEmployeeById(req, res, next) {
 async function createEmployee(req, res, next) {
   try {
     const {
-      department, office, position, email, phone, status, remark, classification, password, employee_code,
+      department, office, position, gender, email, phone, status, remark, classification, password, employee_code,
       surname, given_name, middle_name, suffix
     } = req.body;
 
@@ -121,6 +121,9 @@ async function createEmployee(req, res, next) {
     if (classification && !isValidClassification(classification)) {
       return res.status(400).json({ success: false, message: 'Classification must be 1-50 characters.' });
     }
+    if (gender && gender.trim().length > 40) {
+      return res.status(400).json({ success: false, message: 'Gender must be 40 characters or fewer.' });
+    }
 
     const [deptRows] = await pool.query('SELECT id FROM departments WHERE name = ?', [department]);
     if (!deptRows[0]) return res.status(400).json({ success: false, message: 'Unknown department.' });
@@ -138,9 +141,9 @@ async function createEmployee(req, res, next) {
     const photoPath = req.file ? `/uploads/photos/${req.file.filename}` : null;
 
     const [result] = await pool.query(
-      `INSERT INTO employees (employee_code, full_name, surname, given_name, middle_name, suffix, department_id, office, position, photo_path, email, phone, password_hash, status, remark, classification)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [employeeCode, fullName, surnameVal, givenNameVal, middleNameVal, suffixVal, deptRows[0].id, office || department, position || null, photoPath, email || null, phone || null, passwordHash, status || 'Full-time', remark || 'Active', classification || 'Permanent Administrative']
+      `INSERT INTO employees (employee_code, full_name, surname, given_name, middle_name, suffix, department_id, office, position, gender, photo_path, email, phone, password_hash, status, remark, classification)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [employeeCode, fullName, surnameVal, givenNameVal, middleNameVal, suffixVal, deptRows[0].id, office || department, position || null, (gender && gender.trim()) || null, photoPath, email || null, phone || null, passwordHash, status || 'Full-time', remark || 'Active', classification || 'Permanent Administrative']
     );
 
     await logAction({ adminId: req.admin.id, action: 'create', module: 'employees', details: { employeeCode }, ip: req.ip });
@@ -156,7 +159,7 @@ async function updateEmployee(req, res, next) {
   try {
     const { id } = req.params;
     const {
-      department, office, position, email, phone, status, remark, classification, employee_code,
+      department, office, position, gender, email, phone, status, remark, classification, employee_code,
       surname, given_name, middle_name, suffix
     } = req.body;
 
@@ -183,6 +186,9 @@ async function updateEmployee(req, res, next) {
     if (classification && !isValidClassification(classification)) {
       return res.status(400).json({ success: false, message: 'Classification must be 1-50 characters.' });
     }
+    if (gender && gender.trim().length > 40) {
+      return res.status(400).json({ success: false, message: 'Gender must be 40 characters or fewer.' });
+    }
     const middleNameVal = middle_name !== undefined ? (middle_name ? middle_name.trim() : null) : existing[0].middle_name;
     const suffixVal = suffix !== undefined ? (suffix ? suffix.trim() : null) : existing[0].suffix;
     const fullName = composeFullName({ given_name: givenNameVal, middle_name: middleNameVal, surname: surnameVal, suffix: suffixVal });
@@ -197,7 +203,7 @@ async function updateEmployee(req, res, next) {
     const photoPath = req.file ? `/uploads/photos/${req.file.filename}` : existing[0].photo_path;
 
     await pool.query(
-      `UPDATE employees SET employee_code = ?, full_name = ?, surname = ?, given_name = ?, middle_name = ?, suffix = ?, department_id = ?, office = ?, position = ?, email = ?, phone = ?, status = ?, remark = ?, classification = ?, photo_path = ?
+      `UPDATE employees SET employee_code = ?, full_name = ?, surname = ?, given_name = ?, middle_name = ?, suffix = ?, department_id = ?, office = ?, position = ?, gender = ?, email = ?, phone = ?, status = ?, remark = ?, classification = ?, photo_path = ?
        WHERE id = ?`,
       [
         employeeCode,
@@ -209,6 +215,7 @@ async function updateEmployee(req, res, next) {
         departmentId,
         office || existing[0].office,
         position || existing[0].position,
+        (gender && gender.trim()) || existing[0].gender,
         email || existing[0].email,
         phone || existing[0].phone,
         status || existing[0].status,
