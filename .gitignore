@@ -61,3 +61,6 @@ mobile/android/
 
 # --- Stray folder from an unexpanded Windows %ProgramData% path ---
 mobile/%ProgramData%/
+
+# --- Local copy of the Aiven CA cert (Render gets it via Secret Files) ---
+etc/
