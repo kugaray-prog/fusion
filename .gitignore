@@ -64,3 +64,6 @@ mobile/%ProgramData%/
 
 # --- Local copy of the Aiven CA cert (Render gets it via Secret Files) ---
 etc/
+
+# --- JMeter load-test output ---
+loadtest/results/
