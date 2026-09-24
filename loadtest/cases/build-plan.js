@@ -56,12 +56,14 @@ ${pairs.map(([k, v]) => `<elementProp name="" elementType="Header">${str('Header
 </HeaderManager>`);
 }
 
-function assertCode(pattern, name = `Status ${pattern}`) {
+// ignoreStatus: let this assertion decide pass/fail even for HTTP 4xx (JMeter
+// otherwise fails any 4xx before the assertion runs), e.g. an expected 409.
+function assertCode(pattern, name = `Status ${pattern}`, ignoreStatus = false) {
   return tree(`<ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="${esc(name)}">
 <collectionProp name="Asserion.test_strings">${str('p', pattern)}</collectionProp>
 ${str('Assertion.custom_message', '')}
 ${str('Assertion.test_field', 'Assertion.response_code')}
-${bool('Assertion.assume_success', false)}
+${bool('Assertion.assume_success', ignoreStatus)}
 <intProp name="Assertion.test_type">1</intProp>
 </ResponseAssertion>`);
 }
@@ -211,8 +213,8 @@ const groups = [
   // Group B re-sends the same 30 submissions 1 s later, while group A's are
   // still in flight: a phone retrying or a double-tap. Exactly one of each
   // pair may succeed (201); the other must be refused (409).
-  threadGroup({ name: 'LT-10 30 users on slow connections', caseId: 'LT-10', threads: 30, ramp: 0, children: [csv('LT-10.csv'), employeeHeaders, jsonRequest('POST /api/attendance/submit (first try)', 'POST', '/api/attendance/submit', submitBody, [syncTimer(30), assertCode('201|409', '201 or 409')])] }),
-  threadGroup({ name: 'LT-10 Same 30 users retry 1 s later', caseId: 'LT-10', threads: 30, ramp: 0, delay: 1, children: [csv('LT-10.csv'), employeeHeaders, jsonRequest('POST /api/attendance/submit (retry)', 'POST', '/api/attendance/submit', submitBody, [syncTimer(30), assertCode('201|409', '201 or 409')])] })
+  threadGroup({ name: 'LT-10 30 users on slow connections', caseId: 'LT-10', threads: 30, ramp: 0, children: [csv('LT-10.csv'), employeeHeaders, jsonRequest('POST /api/attendance/submit (first try)', 'POST', '/api/attendance/submit', submitBody, [syncTimer(30), assertCode('201|409', '201 or 409', true)])] }),
+  threadGroup({ name: 'LT-10 Same 30 users retry 1 s later', caseId: 'LT-10', threads: 30, ramp: 0, delay: 1, children: [csv('LT-10.csv'), employeeHeaders, jsonRequest('POST /api/attendance/submit (retry)', 'POST', '/api/attendance/submit', submitBody, [syncTimer(30), assertCode('201|409', '201 or 409', true)])] })
 ];
 
 const plan = `<?xml version="1.0" encoding="UTF-8"?>
