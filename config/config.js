@@ -79,10 +79,15 @@ module.exports = {
     heartbeatMinIntervalSeconds: Number(process.env.ATTENDANCE_HEARTBEAT_MIN_SECONDS) || 20,
     // Geo-anomaly ("one person carrying another's phone") detection: two
     // different employees' devices reporting positions within this many
-    // degrees of each other (~0.0001 = ~11m) within the last N minutes, for
-    // the same event, get flagged for face verification. See detectGeoAnomaly.
+    // degrees of each other (~0.0001 = ~11m) for the same event, get flagged
+    // for face verification once they've stayed together for
+    // anomalyConfirmSeconds. anomalyWindowMinutes is how fresh the OTHER
+    // device's last reported position must be to count (pings arrive every
+    // ~25s, so a couple of minutes means "still there right now"). See
+    // detectGeoAnomaly.
     anomalyCoordTolerance: Number(process.env.ANOMALY_COORD_TOLERANCE) || 0.0001,
-    anomalyWindowMinutes: Number(process.env.ANOMALY_WINDOW_MINUTES) || 15
+    anomalyWindowMinutes: Number(process.env.ANOMALY_WINDOW_MINUTES) || 2,
+    anomalyConfirmSeconds: Number(process.env.ANOMALY_CONFIRM_SECONDS) || 60
   },
   // Default/initial Geo-Fence location: CSPC (Camarines Sur Polytechnic
   // Colleges). Used to pre-fill the map/coordinates when an admin opens the

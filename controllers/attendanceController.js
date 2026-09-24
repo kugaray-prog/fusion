@@ -47,7 +47,20 @@ async function flagAttendanceForVerification({ attendanceId, employeeId, eventId
 // already passed face verification is never re-flagged, so a legitimate
 // employee standing next to a colleague isn't nagged in a loop.
 //
+// Co-location must be SUSTAINED for config.attendance.anomalyConfirmSeconds
+// (1 minute by default) before anyone is flagged: two employees merely
+// walking past each other shouldn't trigger it, but two phones that stay
+// together (one person carrying both) will. Once confirmed, EVERY open
+// record at that spot is flagged, however many there are.
+//
 // Returns whether THIS record currently requires face verification.
+//
+// attendanceId -> ms timestamp when this record was first seen next to
+// another employee's device, reset as soon as a ping finds nobody nearby.
+// Kept in memory rather than the database: pings arrive every ~25s, so a
+// server restart only restarts the one-minute count.
+const coLocatedSince = new Map();
+
 async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude }) {
   const [selfRows] = await pool.query(
     'SELECT requires_face_verification, face_verified_at FROM attendance WHERE id = ?',
@@ -67,6 +80,7 @@ async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, 
      FROM attendance a
      LEFT JOIN mobile_devices md ON a.device_id = md.id
      WHERE a.event_id = ? AND a.employee_id != ? AND a.id != ?
+       AND a.time_out IS NULL
        AND (
          (a.last_ping_at >= NOW() - INTERVAL ? MINUTE
            AND ABS(a.last_lat - ?) < ? AND ABS(a.last_lng - ?) < ?)
@@ -81,7 +95,17 @@ async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, 
       windowMinutes, latitude, tol, longitude, tol
     ]
   );
-  if (!rows.length) return false;
+  if (!rows.length) {
+    coLocatedSince.delete(attendanceId);
+    return false;
+  }
+
+  const nowMs = Date.now();
+  if (!coLocatedSince.has(attendanceId)) coLocatedSince.set(attendanceId, nowMs);
+  if (nowMs - coLocatedSince.get(attendanceId) < config.attendance.anomalyConfirmSeconds * 1000) {
+    return false;
+  }
+  coLocatedSince.delete(attendanceId);
 
   const first = rows[0];
   await flagAttendanceForVerification({
@@ -96,6 +120,7 @@ async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, 
   });
 
   for (const other of rows) {
+    coLocatedSince.delete(other.id);
     if (other.requires_face_verification || other.face_verified_at) continue;
     await flagAttendanceForVerification({
       attendanceId: other.id,
