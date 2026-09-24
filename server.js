@@ -15,7 +15,7 @@ const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
 const rateLimit = require('express-rate-limit');
-const { clientRateLimitOptions } = require('./middleware/rateLimitKey');
+const { accountRateLimitOptions } = require('./middleware/rateLimitKey');
 
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 const config = require('./config/config');
@@ -97,8 +97,9 @@ app.use(
 // ------------------------------------------------------------
 
 const apiLimiter = rateLimit({
-  // Per real client IP, not per Render proxy -- see middleware/rateLimitKey.js.
-  ...clientRateLimitOptions,
+  // Per signed-in account (or real client IP when signed out), not per Render
+  // proxy or shared campus IP -- see middleware/rateLimitKey.js.
+  ...accountRateLimitOptions,
   windowMs: 15 * 60 * 1000,
 
   // Production limit

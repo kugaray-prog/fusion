@@ -1,3 +1,5 @@
+const jwt = require('jsonwebtoken');
+const config = require('../config/config');
 const { getClientIp } = require('../services/networkService');
 
 // Shared options for every express-rate-limit limiter in the app.
@@ -17,4 +19,30 @@ const clientRateLimitOptions = {
   validate: { xForwardedForHeader: false }
 };
 
-module.exports = { clientRateLimitOptions };
+// Signed-in requests are keyed per ACCOUNT instead of per IP. Every phone on
+// the institutional Wi-Fi reaches the server through the same public IP, and
+// each one's background location pings alone use ~70 requests per 15
+// minutes -- keyed per IP, one campus shared a single bucket and everyone got
+// "Too many requests" at once. The token is verified (not just decoded) so a
+// forged token can't be used to mint fresh buckets; anything without a valid
+// token falls back to the client IP.
+function accountOrClientKey(req) {
+  const header = req.headers.authorization;
+  const token = (header && header.startsWith('Bearer ') ? header.slice(7) : null) || (req.cookies && req.cookies.token);
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, config.jwt.secret);
+      if (decoded && decoded.id != null) return `${decoded.type || 'admin'}:${decoded.id}`;
+    } catch (e) {
+      // Invalid/expired token -- rate-limit by IP like any anonymous request.
+    }
+  }
+  return getClientIp(req) || req.ip;
+}
+
+const accountRateLimitOptions = {
+  keyGenerator: accountOrClientKey,
+  validate: { xForwardedForHeader: false }
+};
+
+module.exports = { clientRateLimitOptions, accountRateLimitOptions };

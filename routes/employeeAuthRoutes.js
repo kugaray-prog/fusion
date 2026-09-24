@@ -6,10 +6,15 @@ const employeeAuthController = require('../controllers/employeeAuthController');
 const { requireEmployeeAuth } = require('../middleware/authMiddleware');
 const { uploadRegistration } = require('../middleware/uploadMiddleware');
 
+// Only FAILED attempts count: everyone on the institutional Wi-Fi shares one
+// public IP, so counting successful logins too meant the 16th person to sign
+// in on campus within 15 minutes was locked out. Failures still count, so
+// repeated bad attempts from one network are still blocked.
 const loginLimiter = rateLimit({
   ...clientRateLimitOptions,
   windowMs: 15 * 60 * 1000,
   max: 15,
+  skipSuccessfulRequests: true,
   message: { success: false, message: 'Too many login attempts. Please try again later.' }
 });
 
