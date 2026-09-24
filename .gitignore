@@ -67,3 +67,4 @@ etc/
 
 # --- JMeter load-test output ---
 loadtest/results/
+loadtest/cases/data/

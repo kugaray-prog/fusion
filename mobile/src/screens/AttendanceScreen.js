@@ -41,13 +41,22 @@ export default function AttendanceScreen({ route }) {
   const durationSeconds = eventId != null ? tracking?.getDurationSeconds?.(eventId) || 0 : 0;
   const sessionCount = session?.session_count || 0;
 
+  const checkInError = eventId != null ? tracking?.checkInErrors?.[eventId] : null;
+  const eventActive = geofence?.computed_status === 'active';
+
+  // presence is only computed for events the server reports as active, so
+  // "no presence" must not be shown as "outside" — it's either not started
+  // yet or still waiting on the first GPS fix.
   let statusLabel = 'Checking your location…';
   if (!geofence) statusLabel = 'This event is no longer available.';
   else if (isOpen) statusLabel = `You are inside "${geofence.title}" — time is being recorded.`;
+  else if (!eventActive) statusLabel = `"${geofence.title}" hasn't started yet — attendance opens at ${new Date(geofence.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
+  else if (!presence) statusLabel = 'Checking your location…';
   else if (isInside) statusLabel = 'Inside the geofence — timing in…';
   else statusLabel = `Outside the "${geofence.title}" geofence boundary.`;
 
   const statusIsGood = isInside || isOpen;
+  const statusIsNeutral = !statusIsGood && (!eventActive || !presence);
 
   // Soft pulsing "recording" dot next to the status line while a session is
   // actively open — a quick, ambient confirmation that time is ticking.
@@ -69,11 +78,12 @@ export default function AttendanceScreen({ route }) {
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
       <AppHeader title="Mark Attendance" />
       <FadeIn>
-        <View style={[styles.statusCard, { backgroundColor: statusIsGood ? colors.successBg : '#FEE2E2' }]}>
+        <View style={[styles.statusCard, { backgroundColor: statusIsGood ? colors.successBg : statusIsNeutral ? colors.infoBg : '#FEE2E2' }]}>
           <View style={styles.statusRow}>
             {isOpen && <Animated.View style={[styles.liveDot, { opacity: dotOpacity }]} />}
-            <Text style={[styles.statusText, { color: statusIsGood ? colors.success : colors.error }]}>{statusLabel}</Text>
+            <Text style={[styles.statusText, { color: statusIsGood ? colors.success : statusIsNeutral ? colors.infoText : colors.error }]}>{statusLabel}</Text>
           </View>
+          {!isOpen && isInside && !!checkInError && <Text style={styles.checkInErrorText}>{checkInError}</Text>}
           {tracking?.accuracy != null && <Text style={styles.accuracyText}>GPS accuracy: {Math.round(tracking.accuracy)}m</Text>}
         </View>
       </FadeIn>
@@ -116,6 +126,7 @@ const styles = StyleSheet.create({
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success },
   statusText: { fontWeight: '800', fontSize: 14, flexShrink: 1 },
+  checkInErrorText: { color: colors.error, fontSize: 12, marginTop: 8, fontWeight: '600' },
   accuracyText: { color: colors.textMain, fontSize: 12, marginTop: 6 },
   eventCard: { backgroundColor: colors.white, borderRadius: radius.md, padding: 18, marginBottom: 14, borderWidth: 1, borderColor: colors.border, ...shadow },
   eventTitle: { fontWeight: '800', color: colors.cspcBlue, fontSize: 16 },

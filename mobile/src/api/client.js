@@ -47,8 +47,14 @@ export async function registerDevice(payload) {
 // POST /api/employee-auth/google { credential, device_uid } — credential is the
 // Google ID token. device_uid lets the server report this specific device's
 // approval status (an employee may have more than one registered device).
+// Login is usually the first request after the free Render instance has gone
+// to sleep, so it gets the same long timeout as face uploads.
 export async function googleLogin(credential, deviceUid) {
-  const { data } = await api.post('/employee-auth/google', { credential, device_uid: deviceUid });
+  const { data } = await api.post(
+    '/employee-auth/google',
+    { credential, device_uid: deviceUid },
+    { timeout: FACE_UPLOAD_TIMEOUT_MS }
+  );
   return data;
 }
 

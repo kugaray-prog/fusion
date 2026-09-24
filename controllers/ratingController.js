@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { localDate } = require('../services/dateService');
 const { logAction } = require('../services/auditService');
 const { closeSessionsForEndedEvents } = require('./attendanceController');
 
@@ -58,7 +59,7 @@ async function generateRatingsForRange(rangeStart, rangeEnd) {
     const statusByEmployee = {};
     for (const r of attendanceRows) statusByEmployee[r.employee_id] = r.attendance_status;
 
-    const ratingDate = new Date(ev.start_datetime).toISOString().slice(0, 10);
+    const ratingDate = localDate(ev.start_datetime);
 
     for (const empId of employeeIds) {
       const status = statusByEmployee[empId]; // undefined = never checked in = no-show
@@ -107,7 +108,7 @@ async function getRatings(req, res, next) {
     const year = Number(req.query.year) || now.getFullYear();
     const rangeStart = `${year}-${String(month).padStart(2, '0')}-01`;
     const rangeEndDate = new Date(year, month, 1); // first day of next month
-    const rangeEnd = rangeEndDate.toISOString().slice(0, 10);
+    const rangeEnd = localDate(rangeEndDate);
 
     const employeeId = req.query.employee_id && req.query.employee_id !== 'all' ? req.query.employee_id : null;
     const department = req.query.department && req.query.department !== 'all' ? req.query.department : null;
@@ -180,7 +181,7 @@ async function getRatings(req, res, next) {
             event_id: ev.id,
             title: ev.title,
             venue: ev.venue,
-            date: new Date(ev.start_datetime).toISOString().slice(0, 10),
+            date: localDate(ev.start_datetime),
             rating: Number(r.rating),
             is_manual: r.is_manual
           };
@@ -208,7 +209,7 @@ async function getRatings(req, res, next) {
       title: e.title,
       venue: e.venue,
       department_name: e.department_name,
-      date: new Date(e.start_datetime).toISOString().slice(0, 10),
+      date: localDate(e.start_datetime),
       start_datetime: e.start_datetime,
       end_datetime: e.end_datetime
     }));
@@ -237,7 +238,7 @@ async function upsertRating(req, res, next) {
     if (!eventRows.length) {
       return res.status(404).json({ success: false, message: 'Event not found.' });
     }
-    const ratingDate = new Date(eventRows[0].start_datetime).toISOString().slice(0, 10);
+    const ratingDate = localDate(eventRows[0].start_datetime);
 
     await pool.query(
       `INSERT INTO employee_ratings (employee_id, event_id, rating_date, rating, is_manual, notes, updated_by)

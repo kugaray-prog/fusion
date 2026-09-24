@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { localDate } = require('../services/dateService');
 const geofenceService = require('../services/geofenceService');
 const faceService = require('../services/faceService');
 const config = require('../config/config');
@@ -513,7 +514,7 @@ async function submitAttendance(req, res, next) {
     // accumulates into that day's total_duration_seconds. `attendance` stays
     // one row per employee/event/day (status, ratings, running total);
     // `attendance_sessions` holds one row per individual time-in/time-out.
-    const today = now.toISOString().slice(0, 10);
+    const today = localDate(now);
     const [existingRows] = await pool.query(
       'SELECT * FROM attendance WHERE employee_id = ? AND attendance_date = ? AND event_id = ?',
       [employee_id, today, event_id]
@@ -684,7 +685,7 @@ async function recordVerificationAttendance({ employeeId, eventId, method, ocrRe
     return { success: false, status: 400, message: 'This event is not currently active — attendance can only be recorded during its scheduled window.' };
   }
 
-  const today = now.toISOString().slice(0, 10);
+  const today = localDate(now);
   const [existingRows] = await pool.query(
     'SELECT * FROM attendance WHERE employee_id = ? AND attendance_date = ? AND event_id = ?',
     [employeeId, today, eventId]

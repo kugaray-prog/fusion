@@ -1,9 +1,10 @@
 const pool = require('../config/db');
+const { localDate } = require('../services/dateService');
 
 // GET /api/dashboard/stats
 async function getStats(req, res, next) {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDate();
 
     const [[totalEmployees]] = await pool.query('SELECT COUNT(*) AS count FROM employees');
     const [[fullTime]] = await pool.query(`SELECT COUNT(*) AS count FROM employees WHERE status = 'Full-time'`);

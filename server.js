@@ -1,5 +1,13 @@
 require('dotenv').config();
 
+// Event start/end times are stored as Philippine local time with no zone
+// attached, and `new Date('2026-09-24 13:35:00')` parses them in the process's
+// timezone. Hosts like Render run in UTC, which made ongoing events show as
+// "Soon" (8 hours late) and blocked check-in. Must run before any Date is used.
+// Deliberately ignores any TZ the host sets (containers often set TZ=UTC);
+// override with APP_TIMEZONE if the app is ever used outside the Philippines.
+process.env.TZ = process.env.APP_TIMEZONE || 'Asia/Manila';
+
 const express = require('express');
 const path = require('path');
 const cors = require('cors');

@@ -44,6 +44,14 @@ const pool = mysql.createPool({
   ssl: buildSslConfig()
 });
 
+// Managed MySQL (Aiven) runs in UTC, but event times and the app's clock are
+// Philippine time — so NOW() would be 8 hours behind every stored event time
+// (auto time-outs firing late, check-ins saved in UTC). Pin each connection's
+// session to +08:00; an offset works even without MySQL's timezone tables.
+pool.pool.on('connection', (conn) => {
+  conn.query(`SET time_zone = '${process.env.DB_TIMEZONE || '+08:00'}'`);
+});
+
 pool.getConnection()
   .then(conn => {
     console.log('MySQL connected successfully.');

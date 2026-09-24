@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { localDate } = require('../services/dateService');
 const path = require('path');
 const certificateService = require('../services/certificateService');
 const { logAction } = require('../services/auditService');
@@ -15,7 +16,7 @@ async function generateCertificate(req, res, next) {
     if (!empRows[0]) return res.status(404).json({ success: false, message: 'Employee not found.' });
 
     const certificateNumber = `CERT-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
-    const issuedDate = new Date().toISOString().slice(0, 10);
+    const issuedDate = localDate();
 
     const { pdfPath } = await certificateService.generateCertificatePdf({
       certificateNumber,

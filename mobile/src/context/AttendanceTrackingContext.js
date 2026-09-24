@@ -11,11 +11,15 @@ import { alertFaceVerificationRequired, clearFaceVerificationAlert } from '../ut
 
 // Point-in-polygon test (ray-casting), mirroring the backend's geofenceService
 // so the app can tell "inside/outside" locally without waiting on a round trip.
+// Coerced to Number like the backend's version, so string coordinates can
+// never silently turn the math into string concatenation.
 function isInsidePolygon(lat, lng, points) {
+  lat = Number(lat);
+  lng = Number(lng);
   let inside = false;
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
-    const xi = points[i].lat, yi = points[i].lng;
-    const xj = points[j].lat, yj = points[j].lng;
+    const xi = Number(points[i].lat), yi = Number(points[i].lng);
+    const xj = Number(points[j].lat), yj = Number(points[j].lng);
     const intersect = (yi > lng) !== (yj > lng) && lat < ((xj - xi) * (lng - yi)) / (yj - yi) + xi;
     if (intersect) inside = !inside;
   }
@@ -42,6 +46,14 @@ const GEOFENCE_POLL_MS = 30000;
 // offline rather than only catching up once connectivity returns.
 const LOCAL_OUTSIDE_CONFIRM_READINGS = 2;
 
+// Today's date in the phone's local timezone as 'YYYY-MM-DD' -- matches the
+// server's attendance_date. toISOString() gives the UTC date, which is still
+// "yesterday" before 8:00 AM Philippine time.
+function localDateString(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 const AttendanceTrackingContext = createContext(null);
 
 export function AttendanceTrackingProvider({ children }) {
@@ -65,6 +77,10 @@ export function AttendanceTrackingProvider({ children }) {
   // accumulated duration) survives an app restart, not just an in-memory submit.
   const [sessions, setSessions] = useState({});
   const [autoSubmitting, setAutoSubmitting] = useState({}); // event_id -> bool, guards against double-submits
+  // event_id -> the server's reason for the last rejected auto time-in (e.g.
+  // "GPS accuracy too low"), shown on the Attendance screen so a failed
+  // check-in isn't indistinguishable from one that's still in progress.
+  const [checkInErrors, setCheckInErrors] = useState({});
 
   const watchRef = useRef(null);
   const heartbeatTimers = useRef({}); // attendanceId -> interval
@@ -201,7 +217,7 @@ export function AttendanceTrackingProvider({ children }) {
   const refreshSessionsFromHistory = useCallback(async () => {
     try {
       const history = await getMyHistory();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localDateString();
       const todays = (history.data || []).filter((a) => a.attendance_date === today);
       const map = {};
       todays.forEach((a) => {
@@ -283,6 +299,7 @@ export function AttendanceTrackingProvider({ children }) {
         longitude: coords.longitude,
         accuracy: acc
       });
+      setCheckInErrors((prev) => ({ ...prev, [eventId]: null }));
       if (result?.data?.id) {
         const nowIso = new Date().toISOString();
         setSessions((prev) => ({
@@ -313,11 +330,13 @@ export function AttendanceTrackingProvider({ children }) {
         }
       }
     } catch (err) {
-      // Common, expected rejections (outside geofence by the time the request
-      // lands, event window closed, GPS accuracy too low, a session already
-      // open, device not yet approved) are silent — the next location update
-      // or poll just tries again rather than nagging the user with an error
-      // for something that isn't really actionable.
+      // Expected rejections (outside geofence by the time the request lands,
+      // event window closed, GPS accuracy too low, device not yet approved)
+      // don't pop up an alert — the next location update just tries again —
+      // but the reason is kept so the Attendance screen can show it.
+      const message = err?.response?.data?.message
+        || (err?.request ? 'Could not reach the server to record your time-in. Retrying…' : 'Time-in failed. Retrying…');
+      setCheckInErrors((prev) => ({ ...prev, [eventId]: message }));
     } finally {
       setAutoSubmitting((prev) => ({ ...prev, [eventId]: false }));
     }
@@ -458,6 +477,7 @@ export function AttendanceTrackingProvider({ children }) {
     presence, // event_id -> { inside, geofence }
     sessions, // event_id -> { id, time_in, time_out, total_duration_seconds, open_session_time_in, session_count }
     isAutoSubmitting: (eventId) => !!autoSubmitting[eventId],
+    checkInErrors, // event_id -> last server rejection message for auto time-in, or null
     // Live accumulated duration in seconds for an event's session today —
     // keeps ticking upward while a session is open, across however many
     // separate time-in/time-out dips have happened so far.

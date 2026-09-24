@@ -4,7 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import { useAuth } from '../context/AuthContext';
 import { colors, radius, shadow, CSPC_LOGO_URL } from '../theme';
-import { GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, isGoogleConfigured } from '../config';
+import { API_BASE_URL, GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, isGoogleConfigured } from '../config';
 import { notify } from '../utils/notify';
 import FadeIn from '../components/FadeIn';
 
@@ -57,11 +57,16 @@ export default function LoginScreen({ navigation }) {
       if (err.response?.data?.message) {
         // Server reached and rejected the request — show its explanation.
         setErrorMsg(err.response.data.message);
+      } else if (err.response) {
+        // Something answered, but not our backend (e.g. Render's 404 for a
+        // deleted service) — the build points at a stale apiBaseUrl.
+        setErrorMsg(`Server at ${API_BASE_URL} responded with HTTP ${err.response.status}. This app build may be pointing at an old server address.`);
+      } else if (err.code === 'ECONNABORTED') {
+        setErrorMsg('The server took too long to respond (it may be waking up). Please try again in a minute.');
       } else if (err.request) {
         // Google auth succeeded (we have an idToken) but the app couldn't reach
-        // the backend at all — almost always a wrong/stale apiBaseUrl in
-        // mobile/app.json (extra.apiBaseUrl) rather than a Google problem.
-        setErrorMsg('Could not reach the server. Check that the app is connected to the same network as the server and that apiBaseUrl in app.json is correct.');
+        // the backend at all — no connectivity or a wrong apiBaseUrl.
+        setErrorMsg(`Could not reach the server at ${API_BASE_URL}. Check your internet connection and try again.`);
       } else {
         setErrorMsg('Google sign-in failed. Please try again.');
       }
