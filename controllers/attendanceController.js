@@ -862,12 +862,25 @@ async function faceVerify(req, res, next) {
     if (!record) return res.status(404).json({ success: false, message: 'Attendance record not found.' });
     if (!req.file) return res.status(400).json({ success: false, message: 'A selfie photo is required.' });
 
+    const selfiePath = `/uploads/selfies/${req.file.filename}`;
+    const livenessActions = typeof req.body.liveness_actions === 'string' ? req.body.liveness_actions.slice(0, 120) : null;
+    // Every attempt's photo is kept on record (face_records, source
+    // 'mobile_anomaly') and shown with the admin's Face Verification
+    // records, whether it matched or not.
+    const recordAttempt = (result, similarity = null) => pool.query(
+      `INSERT INTO face_records (employee_id, image_path, similarity, result, liveness_verified, liveness_actions, source)
+       VALUES (?, ?, ?, ?, ?, ?, 'mobile_anomaly')`,
+      [req.employee.id, selfiePath, similarity, result,
+        req.body.liveness_verified === 'true' || req.body.liveness_verified === true ? 1 : 0, livenessActions]
+    );
+
     // Face verification is only accepted while the event is still running —
     // once it ends, an unverified flagged record is settled as not recorded
     // (see rejectUnverifiedFlaggedAttendance).
     if (record.event_id) {
       const [eventRows] = await pool.query('SELECT end_datetime FROM events WHERE id = ?', [record.event_id]);
       if (eventRows[0] && new Date(eventRows[0].end_datetime) <= new Date()) {
+        await recordAttempt('expired');
         await closeSessionsForEndedEvents();
         return res.status(410).json({
           success: false,
@@ -881,7 +894,6 @@ async function faceVerify(req, res, next) {
     // verifyFace): a claimed-but-unverified liveness check is rejected before
     // the comparatively expensive face-recognition model even runs.
     const livenessVerified = req.body.liveness_verified === 'true' || req.body.liveness_verified === true;
-    const livenessActions = typeof req.body.liveness_actions === 'string' ? req.body.liveness_actions.slice(0, 120) : null;
     if (!livenessVerified) {
       return res.status(400).json({
         success: false,
@@ -890,12 +902,11 @@ async function faceVerify(req, res, next) {
       });
     }
 
-    const selfiePath = `/uploads/selfies/${req.file.filename}`;
-
     let embedding;
     try {
       embedding = await faceService.getEmbedding(req.file.path);
     } catch (err) {
+      await recordAttempt('no_face_detected');
       return res.status(502).json({
         success: false,
         result: 'no_face_detected',
@@ -919,8 +930,9 @@ async function faceVerify(req, res, next) {
     if (!match) {
       await pool.query(
         `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'face_verify_failed', ?)`,
-        [id, req.employee.id, JSON.stringify({ latitude, longitude, reason: 'no_match' })]
+        [id, req.employee.id, JSON.stringify({ latitude, longitude, reason: 'no_match', selfie_path: selfiePath })]
       );
+      await recordAttempt('no_match');
       return res.status(401).json({
         success: false,
         result: 'no_match',
@@ -944,6 +956,7 @@ async function faceVerify(req, res, next) {
        face_verified_at = NOW(), verification_status = 'Verified' WHERE id = ?`,
       [selfiePath, latitude || null, longitude || null, id]
     );
+    await recordAttempt('matched', Math.max(0, match.similarity) * 100);
 
     await pool.query(
       `UPDATE geo_anomalies SET resolved = 1, resolved_at = NOW() WHERE attendance_id = ? AND resolved = 0`,
@@ -952,7 +965,7 @@ async function faceVerify(req, res, next) {
 
     await pool.query(
       `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'face_verified', ?)`,
-      [id, req.employee.id, JSON.stringify({ latitude, longitude, similarity: match.similarity, liveness_actions: livenessActions })]
+      [id, req.employee.id, JSON.stringify({ latitude, longitude, similarity: match.similarity, liveness_actions: livenessActions, selfie_path: selfiePath })]
     );
 
     res.json({ success: true, result: 'matched', message: 'Face verification submitted. Your attendance is now confirmed.' });

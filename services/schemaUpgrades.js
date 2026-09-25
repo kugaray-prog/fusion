@@ -32,8 +32,18 @@ async function addEmployeeApproval() {
   console.log(`[schema] Added employees.is_approved (${result.affectedRows} pending self-registration(s)).`);
 }
 
+// face_records.source: where a face-verification photo came from -- the
+// admin's Verification kiosk ('kiosk', every existing row) or an employee's
+// own anomaly re-verification in the mobile app ('mobile_anomaly').
+async function addFaceRecordSource() {
+  if (await columnExists('face_records', 'source')) return;
+  await pool.query("ALTER TABLE face_records ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'kiosk'");
+  console.log('[schema] Added face_records.source.');
+}
+
 async function run() {
   await addEmployeeApproval();
+  await addFaceRecordSource();
 }
 
 module.exports = { run };

@@ -330,4 +330,8 @@ require('./services/schemaUpgrades').run()
   require('./services/faceService').warmUp()
     .then(() => console.log('Face recognition models loaded.'))
     .catch((err) => console.error('Face model warm-up failed:', err.message));
+
+  // Keep uploads/ filled with every captured photo (face verification, OCR,
+  // registrations) from the shared database -- see services/uploadStore.js.
+  require('./services/uploadStore').startDiskSync();
   }));

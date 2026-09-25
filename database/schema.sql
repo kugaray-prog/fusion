@@ -202,6 +202,9 @@ CREATE TABLE face_records (
   result ENUM('matched','no_match','no_face_detected','expired','duplicate') NOT NULL,
   liveness_verified TINYINT(1) NOT NULL DEFAULT 0,
   liveness_actions VARCHAR(120) NULL,
+  -- 'kiosk' (admin Verification page) or 'mobile_anomaly' (employee's own
+  -- re-verification after an anomaly flag, in the mobile app)
+  source VARCHAR(20) NOT NULL DEFAULT 'kiosk',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;

@@ -30,6 +30,13 @@ function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Clickable thumbnail of a captured photo (opens full size in a new tab).
+function photoThumb(src, alt = 'Captured photo') {
+    if (!src) return '<span style="color:var(--text-muted);">—</span>';
+    const url = escapeHtml(src);
+    return `<a href="${url}" target="_blank" rel="noopener" title="Open full size"><img src="${url}" alt="${escapeHtml(alt)}" loading="lazy" style="width:44px; height:44px; object-fit:cover; border-radius:10px; border:1px solid var(--border); display:block;"></a>`;
+}
+
 function toast(message, type = 'info') {
     const container = document.getElementById('toast-container');
     const el = document.createElement('div');
@@ -1843,13 +1850,14 @@ const G_App = {
                     const employeeNumber = r.employee_code || r.extracted_employee_code || '—';
                     return `
                     <tr>
-                        <td>${isMatch ? (r.full_name || 'Unknown') : '—'}</td>
-                        <td>${employeeNumber}</td>
-                        <td>${isMatch ? (r.position || '—') : '—'}</td>
+                        <td>${photoThumb(r.image_path, 'ID scan')}</td>
+                        <td>${isMatch ? escapeHtml(r.full_name || 'Unknown') : '—'}</td>
+                        <td>${escapeHtml(employeeNumber)}</td>
+                        <td>${isMatch ? escapeHtml(r.position || '—') : '—'}</td>
                         <td><span class="badge badge-${isMatch ? 'success' : 'danger'}">${isMatch ? 'Match' : 'No Match'}</span></td>
                     </tr>
                 `;
-                }).join('') || '<tr><td colspan="4" style="text-align:center; padding:20px;">No OCR records yet.</td></tr>';
+                }).join('') || '<tr><td colspan="5" style="text-align:center; padding:20px;">No OCR records yet.</td></tr>';
             } catch (err) { /* silent */ }
         }
     },
@@ -2253,12 +2261,14 @@ const G_App = {
                 const { data } = await apiFetch('/face/records');
                 document.getElementById('face-records-table').innerHTML = data.slice(0, 15).map(r => `
                     <tr>
-                        <td>${r.full_name || 'Unknown'}</td>
+                        <td>${photoThumb(r.image_path, 'Face photo')}</td>
+                        <td>${escapeHtml(r.full_name || 'Unknown')}</td>
+                        <td>${r.source === 'mobile_anomaly' ? '<span class="badge badge-info">Mobile · Anomaly</span>' : '<span class="badge badge-muted">Admin kiosk</span>'}</td>
                         <td>${r.similarity != null ? Number(r.similarity).toFixed(1) + '%' : '—'}</td>
                         <td><span class="liveness-badge ${r.liveness_verified ? 'pass' : 'fail'}">${r.liveness_verified ? 'Live' : 'N/A'}</span></td>
                         <td><span class="badge badge-${r.result === 'matched' ? 'success' : 'danger'}">${r.result}</span></td>
                     </tr>
-                `).join('') || '<tr><td colspan="4" style="text-align:center; padding:20px;">No face verification records yet.</td></tr>';
+                `).join('') || '<tr><td colspan="6" style="text-align:center; padding:20px;">No face verification records yet.</td></tr>';
             } catch (err) { /* silent */ }
         }
     },

@@ -283,6 +283,44 @@ const metersNorth = (m) => m / 111320;
     check(log.every((q) => !/FROM employees e/.test(q.sql) || /e\.is_approved = 1/.test(q.sql)), 'Employees list hides pending registrations');
   }
 
+  // ---- every mobile face-verification photo is recorded ----------------------
+  {
+    const faceService = require('../services/faceService');
+    const origEmb = faceService.getEmbedding;
+    const origMatch = faceService.findBestMatch;
+    const run = async (outcome) => {
+      faceService.getEmbedding = async () => { if (outcome === 'no_face') throw new Error('No face was detected'); return [1, 0]; };
+      faceService.findBestMatch = () => (outcome === 'matched' ? { employeeId: 7, similarity: 0.83 } : null);
+      log.length = 0;
+      handler = (sql) => {
+        if (/SELECT \* FROM attendance WHERE id = \? AND employee_id/.test(sql)) return [[{ id: 5, employee_id: 7, event_id: 3 }]];
+        if (/SELECT end_datetime FROM events/.test(sql)) return [[{ end_datetime: '2099-01-01 00:00:00' }]];
+        if (/FROM employee_faces WHERE employee_id/.test(sql)) return [[{ image_path: '/uploads/faces/x.jpg', embedding: '[1,0]' }]];
+        return [{ affectedRows: 1 }];
+      };
+      const r = await call(attendanceController.faceVerify, {
+        params: { id: 5 }, employee: { id: 7 },
+        body: { liveness_verified: 'true', liveness_actions: 'hold,blink' }
+      });
+      const rec = log.find((q) => /INSERT INTO face_records/.test(q.sql));
+      return { r, rec };
+    };
+    // call() doesn't pass req.file; add it through a wrapper.
+    const withFile = attendanceController.faceVerify;
+    attendanceController.faceVerify = (req, res, next) => withFile({ ...req, file: { filename: 'selfie-1.jpg', path: '/tmp/selfie-1.jpg' } }, res, next);
+    const noMatch = await run('no_match');
+    check(noMatch.r.status === 401 && noMatch.rec && noMatch.rec.params[1] === '/uploads/selfies/selfie-1.jpg' && noMatch.rec.params[3] === 'no_match' && /mobile_anomaly/.test(noMatch.rec.sql),
+      'failed mobile face verification keeps its photo on record', noMatch.rec);
+    const matched = await run('matched');
+    check(matched.r.status === 200 && matched.rec && matched.rec.params[3] === 'matched' && Math.round(matched.rec.params[2]) === 83,
+      'successful mobile face verification is recorded with its photo', matched.rec);
+    const noFace = await run('no_face');
+    check(noFace.r.status === 502 && noFace.rec && noFace.rec.params[3] === 'no_face_detected', 'photo with no face detected is recorded too', noFace.rec);
+    attendanceController.faceVerify = withFile;
+    faceService.getEmbedding = origEmb;
+    faceService.findBestMatch = origMatch;
+  }
+
   console.log(failures ? `\n${failures} failure(s)` : '\nAll checks passed.');
   process.exit(failures ? 1 : 0);
 })();

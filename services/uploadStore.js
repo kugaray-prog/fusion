@@ -123,4 +123,49 @@ async function serveStoredUpload(req, res, next) {
   }
 }
 
-module.exports = { saveUpload, hasUpload, persistRequestUploads, serveStoredUpload, publicPathFor, ensureTable };
+function diskPathFor(publicPath) {
+  return path.join(UPLOADS_DIR, ...publicPath.slice('/uploads/'.length).split('/'));
+}
+
+// Writes every stored photo that isn't on this machine's disk yet into
+// uploads/ (same subfolder and filename as its path). Local and deployed
+// servers share the one database, so a server running on localhost ends up
+// with every photo captured anywhere -- mobile face verification, OCR scans,
+// kiosk face checks, registrations -- in its own uploads folder, and a
+// freshly restarted host gets its wiped folder back. Returns how many files
+// were written.
+let syncing = false;
+async function syncToDisk() {
+  if (syncing) return 0;
+  syncing = true;
+  let written = 0;
+  try {
+    await ensureTable();
+    const [rows] = await pool.query('SELECT path FROM stored_uploads ORDER BY created_at');
+    for (const { path: publicPath } of rows) {
+      if (!publicPath.startsWith('/uploads/') || publicPath.includes('..')) continue;
+      const diskPath = diskPathFor(publicPath);
+      if (fs.existsSync(diskPath)) continue;
+      const [[row]] = await pool.query('SELECT data FROM stored_uploads WHERE path = ?', [publicPath]);
+      if (!row) continue;
+      await fs.promises.mkdir(path.dirname(diskPath), { recursive: true });
+      await fs.promises.writeFile(diskPath, row.data);
+      written++;
+    }
+  } finally {
+    syncing = false;
+  }
+  return written;
+}
+
+// Runs syncToDisk now and then every intervalMs (default 2 minutes), so new
+// photos appear in uploads/ shortly after they're captured elsewhere.
+function startDiskSync(intervalMs = Number(process.env.UPLOAD_SYNC_INTERVAL_MS) || 120000) {
+  const tick = () => syncToDisk()
+    .then((n) => { if (n) console.log(`[uploadStore] Saved ${n} photo(s) into uploads/.`); })
+    .catch((err) => console.error('[uploadStore] Sync to uploads/ failed:', err.message));
+  tick();
+  return setInterval(tick, intervalMs);
+}
+
+module.exports = { saveUpload, hasUpload, persistRequestUploads, serveStoredUpload, publicPathFor, ensureTable, syncToDisk, startDiskSync };
