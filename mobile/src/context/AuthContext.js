@@ -9,10 +9,11 @@ import { alertDeviceBlocked } from '../utils/deviceBlockedAlert';
 // rejected this device (also re-checked whenever the app comes back to the
 // foreground, and on any request the server refuses with DEVICE_BLOCKED).
 const DEVICE_CHECK_INTERVAL_MS = 60000;
-const BLOCKED_STATUSES = ['blacklisted', 'rejected'];
+const BLOCKED_STATUSES = ['blacklisted', 'rejected', 'removed'];
 const DEFAULT_BLOCKED_MESSAGE = {
   blacklisted: 'This device has been blacklisted by your administrator, so it can no longer be used to sign in or record attendance. Contact your administrator if you think this is a mistake.',
   rejected: "This device's registration was rejected by your administrator, so it can't be used to sign in or record attendance. Contact your administrator.",
+  removed: 'This device was removed by your administrator. Sign in again to register it.',
 };
 
 const AuthContext = createContext(null);
@@ -46,8 +47,9 @@ export function AuthProvider({ children }) {
   // Dashboard?" warning/crash).
   const [wifiVerified, setWifiVerified] = useState(false);
   const markWifiVerified = () => setWifiVerified(true);
-  // Why the app just signed itself out because an admin blacklisted or
-  // rejected this device -- shown on the Login screen. Null otherwise.
+  // Why the app just signed itself out because an admin blacklisted,
+  // rejected or removed this device -- { text, status }, shown on the Login
+  // screen. Null otherwise.
   const [deviceBlockedNotice, setDeviceBlockedNotice] = useState(null);
   const blockedHandledRef = useRef(false);
 
@@ -150,7 +152,7 @@ export function AuthProvider({ children }) {
   // so this can be reached from any API call.
   const handleDeviceBlocked = (message, status) => {
     const text = message || DEFAULT_BLOCKED_MESSAGE[status] || DEFAULT_BLOCKED_MESSAGE.blacklisted;
-    setDeviceBlockedNotice(text);
+    setDeviceBlockedNotice({ text, status });
     if (blockedHandledRef.current) return;
     blockedHandledRef.current = true;
     logout();

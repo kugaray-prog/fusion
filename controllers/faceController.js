@@ -55,7 +55,7 @@ async function verifyFace(req, res, next) {
 
     const [rows] = await pool.query(
       `SELECT ef.employee_id, ef.embedding FROM employee_faces ef
-       JOIN employees e ON e.id = ef.employee_id WHERE e.status != 'Inactive'`
+       JOIN employees e ON e.id = ef.employee_id WHERE e.status != 'Inactive' AND e.is_approved = 1`
     );
     const candidates = rows.map((r) => ({ employeeId: r.employee_id, embedding: JSON.parse(r.embedding) }));
 

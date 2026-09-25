@@ -308,7 +308,11 @@ app.use(errorHandler);
 // Start Server
 // ------------------------------------------------------------
 
-app.listen(PORT, () => {
+// Apply any pending schema upgrades before taking requests; a failure is
+// logged and the server starts anyway.
+require('./services/schemaUpgrades').run()
+  .catch((err) => console.error('Schema upgrade failed:', err.message))
+  .finally(() => app.listen(PORT, () => {
   console.log('');
   console.log('==========================================');
   console.log('       GeoAttend Server');
@@ -326,4 +330,4 @@ app.listen(PORT, () => {
   require('./services/faceService').warmUp()
     .then(() => console.log('Face recognition models loaded.'))
     .catch((err) => console.error('Face model warm-up failed:', err.message));
-}); 
+  }));

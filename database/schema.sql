@@ -86,6 +86,9 @@ CREATE TABLE employees (
   face_failed_attempts INT NOT NULL DEFAULT 0,
   face_locked_until DATETIME NULL,
   face_lock_reason VARCHAR(255) NULL,
+  -- 0 = registered themselves in the app, not yet accepted by an admin;
+  -- hidden from the Employees list until their device is approved.
+  is_approved TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (department_id) REFERENCES departments(id)

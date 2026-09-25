@@ -5,7 +5,7 @@ async function getDepartments(req, res, next) {
   try {
     const [rows] = await pool.query(
       `SELECT d.*, COUNT(e.id) AS employee_count
-       FROM departments d LEFT JOIN employees e ON e.department_id = d.id
+       FROM departments d LEFT JOIN employees e ON e.department_id = d.id AND e.is_approved = 1
        GROUP BY d.id ORDER BY d.name`
     );
     res.json({ success: true, data: rows });

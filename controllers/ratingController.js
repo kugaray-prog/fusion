@@ -11,7 +11,7 @@ async function expectedEmployeeIdsForEvent(event) {
   const params = [];
   // Inactive/On-leave employees aren't expected anywhere — never auto-mark
   // them Absent for an event they were never going to attend.
-  let where = "remark = 'Active'";
+  let where = "remark = 'Active' AND is_approved = 1";
   if (event.department_id) {
     where += ' AND department_id = ?';
     params.push(event.department_id);
@@ -126,7 +126,7 @@ async function getRatings(req, res, next) {
       [rangeStart, rangeEnd]
     );
 
-    const conditions = [];
+    const conditions = ['e.is_approved = 1'];
     const params = [];
     if (employeeId) {
       conditions.push('e.id = ?');

@@ -2273,14 +2273,15 @@ const G_App = {
                 G_App.mobile.raw = data;
                 document.getElementById('mobile-device-table').innerHTML = data.map(d => `
                     <tr>
-                        <td><b>${d.full_name}</b></td>
-                        <td>${d.model || 'N/A'}</td>
-                        <td><code>${d.device_uid || 'N/A'}</code></td>
+                        <td><b>${escapeHtml(d.full_name)}</b>${d.employee_approved ? '' : ' <span class="badge badge-warning" title="Registered in the app; not in the Employees list until this device is approved">New registration</span>'}</td>
+                        <td>${escapeHtml(d.model || 'N/A')}</td>
+                        <td><code>${escapeHtml(d.device_uid || 'N/A')}</code></td>
                         <td><span class="badge badge-${d.status === 'approved' ? 'success' : (d.status === 'pending' ? 'warning' : 'danger')}">${d.status}</span></td>
                         <td>
                             <button class="btn-icon btn-edit" title="View employee details and registration photo" onclick="G_App.mobile.openViewModal(${d.id})"><i data-lucide="eye" size="14"></i></button>
                             ${d.status !== 'approved' ? `<button class="btn-icon btn-edit" onclick="G_App.mobile.setStatus(${d.id},'approved')"><i data-lucide="check" size="14"></i></button>` : ''}
-                            <button class="btn-icon btn-delete" onclick="G_App.mobile.setStatus(${d.id},'blacklisted')"><i data-lucide="ban" size="14"></i></button>
+                            <button class="btn-icon btn-delete" title="Blacklist device" onclick="G_App.mobile.setStatus(${d.id},'blacklisted')"><i data-lucide="ban" size="14"></i></button>
+                            <button class="btn-icon btn-delete" title="Delete device" onclick="G_App.mobile.deleteDevice(${d.id})"><i data-lucide="trash-2" size="14"></i></button>
                         </td>
                     </tr>
                 `).join('') || '<tr><td colspan="5" style="text-align:center; padding:20px;">No devices registered yet.</td></tr>';
@@ -2300,6 +2301,21 @@ const G_App = {
                 if (document.getElementById('device-view-modal').classList.contains('open') && G_App.mobile.viewingId === id) {
                     G_App.mobile.openViewModal(id);
                 }
+            } catch (err) { toast(err.message, 'error'); }
+        },
+        deleteDevice: async (id) => {
+            const d = (G_App.mobile.raw || []).find(x => x.id === id);
+            if (!d) return;
+            const pendingOnly = !d.employee_approved && G_App.mobile.raw.filter(x => x.employee_id === d.employee_id).length === 1;
+            const msg = pendingOnly
+                ? `Delete this device and ${d.full_name}'s pending registration? They are not in the Employees list yet and will need to register again in the app.`
+                : `Delete ${d.full_name}'s device (${d.model || d.device_uid})? The phone will be signed out and must register again. Attendance history is kept.`;
+            if (!confirm(msg)) return;
+            try {
+                const res = await apiFetch(`/devices/${id}`, { method: 'DELETE' });
+                toast(res.message || 'Device deleted.', 'success');
+                if (G_App.mobile.viewingId === id) G_App.mobile.closeViewModal();
+                await G_App.mobile.render();
             } catch (err) { toast(err.message, 'error'); }
         },
         // Shows the employee's profile details plus the face photo captured
@@ -2367,6 +2383,7 @@ const G_App = {
             document.getElementById('device-view-actions').innerHTML = `
                 ${d.status !== 'approved' ? `<button class="btn-primary" style="flex:1;" onclick="G_App.mobile.setStatus(${d.id},'approved')"><i data-lucide="check"></i> Approve Device</button>` : ''}
                 <button class="btn-primary" style="flex:1; background:${d.status === 'blacklisted' ? 'var(--border)' : '#FEE2E2'}; color:${d.status === 'blacklisted' ? 'var(--text-main)' : 'var(--danger)'};" onclick="G_App.mobile.setStatus(${d.id},'blacklisted')" ${d.status === 'blacklisted' ? 'disabled' : ''}><i data-lucide="ban"></i> ${d.status === 'blacklisted' ? 'Blacklisted' : 'Blacklist Device'}</button>
+                <button class="btn-primary" style="flex:1; background:#FEE2E2; color:var(--danger);" onclick="G_App.mobile.deleteDevice(${d.id})"><i data-lucide="trash-2"></i> Delete Device</button>
                 <button class="btn-primary" style="flex:1; background: var(--border); color: var(--text-main);" onclick="G_App.mobile.closeViewModal()">Close</button>
             `;
 

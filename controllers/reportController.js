@@ -235,7 +235,7 @@ async function getInsights(req, res, next) {
 
     const [[departments], [employees], [attendanceRows]] = await Promise.all([
       pool.query('SELECT id, name, office FROM departments ORDER BY name'),
-      pool.query('SELECT id, employee_code, full_name, position, classification, remark, department_id FROM employees'),
+      pool.query('SELECT id, employee_code, full_name, position, classification, remark, department_id FROM employees WHERE is_approved = 1'),
       pool.query(
         'SELECT employee_id, event_id, attendance_status, time_in, time_out FROM attendance WHERE event_id IN (?)',
         [events.map((ev) => ev.id)]

@@ -6,10 +6,10 @@ async function getStats(req, res, next) {
   try {
     const today = localDate();
 
-    const [[totalEmployees]] = await pool.query('SELECT COUNT(*) AS count FROM employees');
-    const [[fullTime]] = await pool.query(`SELECT COUNT(*) AS count FROM employees WHERE status = 'Full-time'`);
-    const [[partTime]] = await pool.query(`SELECT COUNT(*) AS count FROM employees WHERE status = 'Part-time'`);
-    const [[inactive]] = await pool.query(`SELECT COUNT(*) AS count FROM employees WHERE status = 'Inactive'`);
+    const [[totalEmployees]] = await pool.query('SELECT COUNT(*) AS count FROM employees WHERE is_approved = 1');
+    const [[fullTime]] = await pool.query(`SELECT COUNT(*) AS count FROM employees WHERE is_approved = 1 AND status = 'Full-time'`);
+    const [[partTime]] = await pool.query(`SELECT COUNT(*) AS count FROM employees WHERE is_approved = 1 AND status = 'Part-time'`);
+    const [[inactive]] = await pool.query(`SELECT COUNT(*) AS count FROM employees WHERE is_approved = 1 AND status = 'Inactive'`);
     const [[departments]] = await pool.query('SELECT COUNT(*) AS count FROM departments');
     const [[activeEvents]] = await pool.query(
       `SELECT COUNT(*) AS count FROM events WHERE NOW() BETWEEN start_datetime AND end_datetime`
@@ -41,7 +41,7 @@ async function getStats(req, res, next) {
            ELSE 'Other'
          END AS classification,
          COUNT(*) AS count
-       FROM employees GROUP BY classification`
+       FROM employees WHERE is_approved = 1 GROUP BY classification`
     );
     // Always return all four buckets, even if one currently has zero employees.
     const classificationMap = { Permanent: 0, COS: 0, 'Casual/Job Order': 0, Other: 0 };
@@ -97,7 +97,7 @@ async function getDepartmentAttendance(req, res, next) {
     const [totals] = await pool.query(
       `SELECT d.id, d.name, COUNT(e.id) AS total_employees
        FROM departments d
-       LEFT JOIN employees e ON e.department_id = d.id ${empJoinExtra}
+       LEFT JOIN employees e ON e.department_id = d.id AND e.is_approved = 1 ${empJoinExtra}
        ${deptWhere}
        GROUP BY d.id ORDER BY d.name`,
       [...empParams, ...deptParams]

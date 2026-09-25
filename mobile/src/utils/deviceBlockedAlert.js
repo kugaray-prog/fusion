@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { ensureNotificationPermission } from './eventReminders';
 
 // A phone notification (banner + sound) telling the employee their device
-// was blacklisted or rejected by an admin -- shown once when the app finds
+// was blacklisted, rejected or removed by an admin -- shown once when the app finds
 // out, alongside the explanation on the Login screen it returns to.
 export async function alertDeviceBlocked(message, deviceStatus) {
   try {
@@ -18,7 +18,7 @@ export async function alertDeviceBlocked(message, deviceStatus) {
     await Notifications.scheduleNotificationAsync({
       identifier: 'device-blocked',
       content: {
-        title: deviceStatus === 'rejected' ? 'Device rejected' : 'Device blacklisted',
+        title: deviceStatus === 'rejected' ? 'Device rejected' : deviceStatus === 'removed' ? 'Device removed' : 'Device blacklisted',
         body: message,
         sound: true,
       },

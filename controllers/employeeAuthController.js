@@ -645,8 +645,10 @@ async function linkDevice(req, res, next) {
       const departmentId = await resolveDepartmentId(department);
 
       const [result] = await pool.query(
-        `INSERT INTO employees (employee_code, full_name, surname, given_name, middle_name, suffix, department_id, position, gender, classification, email, status, remark)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Full-time', 'Active')`,
+        // is_approved = 0: kept out of the Employees list until an admin
+        // approves this registration's device (deviceController.updateDeviceStatus).
+        `INSERT INTO employees (employee_code, full_name, surname, given_name, middle_name, suffix, department_id, position, gender, classification, email, status, remark, is_approved)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Full-time', 'Active', 0)`,
         [employee_code, fullName, surnameVal, givenNameVal, middleNameVal, suffixVal, departmentId, position || null, gender || null, classification || 'Permanent Administrative', decoded.email]
       );
 

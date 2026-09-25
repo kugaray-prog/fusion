@@ -33,7 +33,9 @@ async function getEmployees(req, res, next) {
     const { search = '', department = 'all', status = 'all', classification = 'all', page = 1, limit = 20 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
-    let where = 'WHERE 1=1';
+    // Self-registered employees stay hidden until an admin approves their
+    // device (see services/schemaUpgrades.js).
+    let where = 'WHERE e.is_approved = 1';
     const params = [];
 
     if (search) {
@@ -293,7 +295,7 @@ async function exportCsv(req, res, next) {
     const { Parser } = require('json2csv');
     const [rows] = await pool.query(
       `SELECT e.employee_code, e.full_name, d.name AS department, e.office, e.position, e.email, e.phone, e.status
-       FROM employees e JOIN departments d ON e.department_id = d.id ORDER BY e.full_name`
+       FROM employees e JOIN departments d ON e.department_id = d.id WHERE e.is_approved = 1 ORDER BY e.full_name`
     );
     const parser = new Parser();
     const csv = parser.parse(rows);
@@ -311,7 +313,7 @@ async function exportExcel(req, res, next) {
     const ExcelJS = require('exceljs');
     const [rows] = await pool.query(
       `SELECT e.employee_code, e.full_name, d.name AS department, e.office, e.position, e.email, e.phone, e.status
-       FROM employees e JOIN departments d ON e.department_id = d.id ORDER BY e.full_name`
+       FROM employees e JOIN departments d ON e.department_id = d.id WHERE e.is_approved = 1 ORDER BY e.full_name`
     );
 
     const workbook = new ExcelJS.Workbook();

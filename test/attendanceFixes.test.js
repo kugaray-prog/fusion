@@ -235,6 +235,54 @@ const metersNorth = (m) => m / 111320;
     check(r.status === 200 && notif && notif.params[0] === 7 && notif.params[1] === 'Device Blacklisted', 'blacklisting notifies the employee', { r: r.data, notif });
   }
 
+  // ---- new registrations wait for approval; devices can be deleted ---------
+  {
+    const jwt = require('jsonwebtoken');
+    const config = require('../config/config');
+    const { requireEmployeeAuth } = require('../middleware/authMiddleware');
+    const token = jwt.sign({ id: 7, type: 'employee' }, config.jwt.secret);
+    handler = () => [[]]; // device row gone
+    const r = await new Promise((resolve) => {
+      const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(data) { resolve({ status: this.statusCode, data }); } };
+      requireEmployeeAuth({ headers: { authorization: `Bearer ${token}`, 'x-device-uid': 'dev-7' } }, res, () => resolve({ status: 'next' }));
+    });
+    check(r.status === 403 && r.data.deviceStatus === 'removed', 'signed-in phone whose device was deleted is signed out', r);
+
+    const deviceRoutes = require('../routes/deviceRoutes');
+    const reg = deviceRoutes.stack.find((l) => l.route && l.route.path === '/register');
+    check(reg.route.stack[0].handle.name === 'requireEmployeeAuth', 'device self-registration requires a signed-in employee');
+    const del = deviceRoutes.stack.find((l) => l.route && l.route.path === '/:id' && l.route.methods.delete);
+    check(!!del, 'DELETE /api/devices/:id exists');
+  }
+  {
+    const deviceController = require('../controllers/deviceController');
+    const run = async (isApproved, remaining) => {
+      log.length = 0;
+      handler = (sql) => {
+        if (/FROM mobile_devices md JOIN employees e/.test(sql)) return [[{ id: 3, employee_id: 7, device_uid: 'dev-7', is_approved: isApproved, employee_code: 'E7' }]];
+        if (/COUNT\(\*\) AS remaining/.test(sql)) return [[{ remaining }]];
+        return [{ affectedRows: 1 }];
+      };
+      const r = await call(deviceController.deleteDevice, { params: { id: 3 } });
+      return { r, deletedEmployee: log.some((q) => /DELETE FROM employees/.test(q.sql)), deletedDevice: log.some((q) => /DELETE FROM mobile_devices/.test(q.sql)) };
+    };
+    const pending = await run(0, 0);
+    check(pending.r.status === 200 && pending.deletedDevice && pending.deletedEmployee, 'deleting a new registration\'s only device removes the pending employee', pending);
+    const approved = await run(1, 0);
+    check(approved.r.status === 200 && approved.deletedDevice && !approved.deletedEmployee, 'deleting an accepted employee\'s device keeps the employee', approved);
+
+    log.length = 0;
+    handler = (sql) => (/SELECT employee_id, status, model FROM mobile_devices/.test(sql) ? [[{ employee_id: 7, status: 'pending' }]] : [[]]);
+    await call(deviceController.updateDeviceStatus, { params: { id: 3 }, body: { status: 'approved' } });
+    check(log.some((q) => /UPDATE employees SET is_approved = 1/.test(q.sql) && q.params[0] === 7), 'approving the device accepts the employee');
+
+    const employeeController = require('../controllers/employeeController');
+    log.length = 0;
+    handler = (sql) => (/COUNT\(\*\) AS total/.test(sql) ? [[{ total: 0 }]] : [[]]);
+    await call(employeeController.getEmployees, {});
+    check(log.every((q) => !/FROM employees e/.test(q.sql) || /e\.is_approved = 1/.test(q.sql)), 'Employees list hides pending registrations');
+  }
+
   console.log(failures ? `\n${failures} failure(s)` : '\nAll checks passed.');
   process.exit(failures ? 1 : 0);
 })();

@@ -107,10 +107,10 @@ export default function LoginScreen({ navigation }) {
           <View style={styles.card}>
             {!!deviceBlockedNotice && (
               <View style={styles.blockedBanner}>
-                <Ionicons name="ban-outline" size={20} color={colors.dangerText} />
+                <Ionicons name={deviceBlockedNotice.status === 'removed' ? 'trash-outline' : 'ban-outline'} size={20} color={colors.dangerText} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.blockedTitle}>Access blocked on this device</Text>
-                  <Text style={styles.blockedText}>{deviceBlockedNotice}</Text>
+                  <Text style={styles.blockedTitle}>{deviceBlockedNotice.status === 'removed' ? 'This device was removed' : 'Access blocked on this device'}</Text>
+                  <Text style={styles.blockedText}>{deviceBlockedNotice.text}</Text>
                 </View>
               </View>
             )}
@@ -137,7 +137,7 @@ export default function LoginScreen({ navigation }) {
               </TouchableOpacity>
             </Animated.View>
 
-            {!!errorMsg && errorMsg !== deviceBlockedNotice && <Text style={styles.errorText}>{errorMsg}</Text>}
+            {!!errorMsg && errorMsg !== deviceBlockedNotice?.text && <Text style={styles.errorText}>{errorMsg}</Text>}
             {!errorMsg && staleSession && (
               <Text style={styles.errorText}>Your session ended because your account record changed. Please sign in again.</Text>
             )}

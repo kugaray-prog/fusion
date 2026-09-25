@@ -36,7 +36,7 @@ async function verifyId(req, res, next) {
     if (employeeCode) {
       const [rows] = await pool.query(
         `SELECT e.*, d.name AS department_name FROM employees e
-         JOIN departments d ON e.department_id = d.id WHERE e.employee_code = ?`,
+         JOIN departments d ON e.department_id = d.id WHERE e.employee_code = ? AND e.is_approved = 1`,
         [employeeCode]
       );
       if (rows[0]) {
