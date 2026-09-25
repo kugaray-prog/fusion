@@ -1845,6 +1845,7 @@ const G_App = {
         loadRecords: async () => {
             try {
                 const { data } = await apiFetch('/ocr/records');
+                G_App.verification.announce('ocr', data[0]);
                 document.getElementById('ocr-records-table').innerHTML = data.slice(0, 15).map(r => {
                     const isMatch = r.result === 'matched';
                     const employeeNumber = r.employee_code || r.extracted_employee_code || '—';
@@ -1875,7 +1876,41 @@ const G_App = {
     // admin action for that by design.
     verification: {
         activeTab: 'ocr',
+        liveTimer: null,
+        // Newest record id per table, so a new photo can be announced.
+        lastSeen: { ocr: null, face: null },
+        // While the Verification page is open (and the browser tab visible),
+        // re-load the flagged list and both photo tables every few seconds so
+        // photos from the mobile app, OCR scans and kiosk checks show up in
+        // real time. Stops by itself once another page is opened.
+        startLive: () => {
+            clearInterval(G_App.verification.liveTimer);
+            G_App.verification.liveTimer = setInterval(() => {
+                const view = document.getElementById('verification-section');
+                if (!view || !view.classList.contains('active')) {
+                    clearInterval(G_App.verification.liveTimer);
+                    G_App.verification.liveTimer = null;
+                    return;
+                }
+                if (document.hidden) return;
+                G_App.verification.loadAlerts();
+                G_App.ocr.loadRecords();
+                G_App.face.loadRecords();
+            }, 5000);
+        },
+        // Called by loadRecords with the newest record; toasts when it's new
+        // since the last refresh (not on the first load).
+        announce: (kind, newest) => {
+            if (!newest) return;
+            const prev = G_App.verification.lastSeen[kind];
+            G_App.verification.lastSeen[kind] = newest.id;
+            if (prev == null || newest.id === prev) return;
+            const who = newest.full_name || newest.employee_code || newest.extracted_employee_code || 'Unknown';
+            const what = kind === 'ocr' ? 'OCR scan' : (newest.source === 'mobile_anomaly' ? 'Mobile face verification' : 'Kiosk face check');
+            toast(`New ${what} photo: ${who}`, 'info');
+        },
         init: () => {
+            G_App.verification.startLive();
             G_App.verification.loadAlerts();
             // Only spin up the camera for whichever tab is currently visible.
             if (G_App.verification.activeTab === 'face') {
@@ -2259,6 +2294,7 @@ const G_App = {
         loadRecords: async () => {
             try {
                 const { data } = await apiFetch('/face/records');
+                G_App.verification.announce('face', data[0]);
                 document.getElementById('face-records-table').innerHTML = data.slice(0, 15).map(r => `
                     <tr>
                         <td>${photoThumb(r.image_path, 'Face photo')}</td>

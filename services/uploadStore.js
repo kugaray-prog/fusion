@@ -127,22 +127,32 @@ function diskPathFor(publicPath) {
   return path.join(UPLOADS_DIR, ...publicPath.slice('/uploads/'.length).split('/'));
 }
 
-// Writes every stored photo that isn't on this machine's disk yet into
-// uploads/ (same subfolder and filename as its path). Local and deployed
-// servers share the one database, so a server running on localhost ends up
-// with every photo captured anywhere -- mobile face verification, OCR scans,
-// kiosk face checks, registrations -- in its own uploads folder, and a
-// freshly restarted host gets its wiped folder back. Returns how many files
-// were written.
+// Writes stored photos that aren't on this machine's disk yet into uploads/
+// (same subfolder and filename as their path). Local and deployed servers
+// share one database, so a server running on localhost gets every photo
+// captured anywhere -- mobile face verification (including anomaly checks),
+// OCR scans, kiosk face checks, registrations -- in its own uploads folder,
+// and a freshly restarted host gets its wiped folder back.
+//
+// The first run checks everything; later runs only look at rows added since
+// the previous run (plus a minute of overlap), which keeps a 5-second
+// interval cheap. Returns how many files were written.
 let syncing = false;
-async function syncToDisk() {
+let syncedUpTo = null; // newest created_at seen, as the DB returned it
+async function syncToDisk({ full = false } = {}) {
   if (syncing) return 0;
   syncing = true;
   let written = 0;
   try {
     await ensureTable();
-    const [rows] = await pool.query('SELECT path FROM stored_uploads ORDER BY created_at');
-    for (const { path: publicPath } of rows) {
+    const since = full ? null : syncedUpTo;
+    const [rows] = since
+      // One minute of overlap covers a row committed a little after its
+      // created_at; files already on disk are skipped straight away.
+      ? await pool.query('SELECT path, created_at FROM stored_uploads WHERE created_at >= ? - INTERVAL 1 MINUTE ORDER BY created_at', [since])
+      : await pool.query('SELECT path, created_at FROM stored_uploads ORDER BY created_at');
+    for (const { path: publicPath, created_at: createdAt } of rows) {
+      syncedUpTo = createdAt;
       if (!publicPath.startsWith('/uploads/') || publicPath.includes('..')) continue;
       const diskPath = diskPathFor(publicPath);
       if (fs.existsSync(diskPath)) continue;
@@ -158,14 +168,14 @@ async function syncToDisk() {
   return written;
 }
 
-// Runs syncToDisk now and then every intervalMs (default 2 minutes), so new
-// photos appear in uploads/ shortly after they're captured elsewhere.
-function startDiskSync(intervalMs = Number(process.env.UPLOAD_SYNC_INTERVAL_MS) || 120000) {
-  const tick = () => syncToDisk()
+// Full sync now, then new photos every intervalMs (default 5 s) so a photo
+// captured on any server shows up in this machine's uploads/ within seconds.
+function startDiskSync(intervalMs = Number(process.env.UPLOAD_SYNC_INTERVAL_MS) || 5000) {
+  const tick = (full) => syncToDisk({ full })
     .then((n) => { if (n) console.log(`[uploadStore] Saved ${n} photo(s) into uploads/.`); })
     .catch((err) => console.error('[uploadStore] Sync to uploads/ failed:', err.message));
-  tick();
-  return setInterval(tick, intervalMs);
+  tick(true);
+  return setInterval(() => tick(false), intervalMs);
 }
 
 module.exports = { saveUpload, hasUpload, persistRequestUploads, serveStoredUpload, publicPathFor, ensureTable, syncToDisk, startDiskSync };
