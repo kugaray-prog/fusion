@@ -435,6 +435,19 @@ CREATE TABLE settings (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
+-- STORED UPLOADS (durable copies of uploaded photos, keyed by their
+-- /uploads/... path; the host's disk is wiped on restart). Also created
+-- automatically on first use -- see services/uploadStore.js.
+-- ------------------------------------------------------------
+CREATE TABLE stored_uploads (
+  path VARCHAR(255) NOT NULL PRIMARY KEY,
+  mime_type VARCHAR(50) NOT NULL,
+  data MEDIUMBLOB NOT NULL,
+  size_bytes INT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
 -- Indexes for common lookups
 -- ------------------------------------------------------------
 CREATE INDEX idx_attendance_date ON attendance(attendance_date);

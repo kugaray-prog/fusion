@@ -132,6 +132,13 @@ app.use(
   express.static(path.join(__dirname, 'uploads'))
 );
 
+// Not on disk (the host wiped it on restart)? Serve the copy kept in the
+// database -- see services/uploadStore.js.
+app.use(
+  '/uploads',
+  require('./services/uploadStore').serveStoredUpload
+);
+
 app.use(
   '/public',
   express.static(path.join(__dirname, 'public'))

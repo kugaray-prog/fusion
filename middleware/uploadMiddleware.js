@@ -99,4 +99,23 @@ const uploadImportFile = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB
 });
 
-module.exports = { uploadOcr, uploadPhoto, uploadSelfie, uploadFace, uploadRegistration, uploadImportFile };
+// Disk uploads also get a durable copy in the database (services/uploadStore.js)
+// because the host's disk doesn't survive restarts. `.single()` / `.fields()`
+// / `.array()` return [multer, store] -- Express runs the array in order.
+function withDurableCopy(uploader) {
+  const { persistRequestUploads } = require('../services/uploadStore');
+  const wrapped = Object.create(uploader);
+  for (const method of ['single', 'fields', 'array']) {
+    wrapped[method] = (...args) => [uploader[method](...args), persistRequestUploads];
+  }
+  return wrapped;
+}
+
+module.exports = {
+  uploadOcr: withDurableCopy(uploadOcr),
+  uploadPhoto: withDurableCopy(uploadPhoto),
+  uploadSelfie: withDurableCopy(uploadSelfie),
+  uploadFace: withDurableCopy(uploadFace),
+  uploadRegistration: withDurableCopy(uploadRegistration),
+  uploadImportFile
+};
