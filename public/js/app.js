@@ -1008,12 +1008,21 @@ const G_App = {
             if (recurrenceType === 'weekly' && (!recurrenceDays || !payload.recurrence_end_date)) {
                 return toast('Pick at least one weekday and a "Repeat Until" date for a recurring schedule.', 'error');
             }
+            // One save at a time: without this, every extra click while the
+            // first request was still in flight posted the event again.
+            if (G_App.geofence.saving) return;
+            G_App.geofence.saving = true;
+            const saveBtn = document.getElementById('btn-gf-save');
+            const saveBtnHtml = saveBtn.innerHTML;
+            saveBtn.disabled = true;
+            saveBtn.innerText = 'Saving…';
             try {
                 if (id) {
                     await apiFetch(`/geofences/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
                 } else {
                     await apiFetch('/geofences', { method: 'POST', body: JSON.stringify(payload) });
                 }
+                saveBtn.innerHTML = saveBtnHtml;
                 G_App.geofence.clearForm();
                 await G_App.geofence.load();
                 toast('Protocol saved successfully.', 'success');
@@ -1027,7 +1036,12 @@ const G_App = {
                     G_App.ui.updateDashboard();
                 }
             } catch (err) {
+                saveBtn.innerHTML = saveBtnHtml;
+                lucide.createIcons();
                 toast(err.message, 'error');
+            } finally {
+                G_App.geofence.saving = false;
+                saveBtn.disabled = false;
             }
         },
         edit: (id) => {

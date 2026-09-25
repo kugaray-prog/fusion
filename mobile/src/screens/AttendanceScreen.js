@@ -42,7 +42,9 @@ export default function AttendanceScreen({ route }) {
   const sessionCount = session?.session_count || 0;
 
   const checkInError = eventId != null ? tracking?.checkInErrors?.[eventId] : null;
-  const eventActive = geofence?.computed_status === 'active';
+  // presence exists as soon as the tracker sees the event as started, which
+  // can be up to one geofence poll before computed_status catches up.
+  const eventActive = geofence?.computed_status === 'active' || !!presence;
 
   // presence is only computed for events the server reports as active, so
   // "no presence" must not be shown as "outside" — it's either not started

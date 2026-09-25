@@ -4,7 +4,7 @@ const attendanceController = require('../controllers/attendanceController');
 const { requireAuth, requireEmployeeAuth, requireRole } = require('../middleware/authMiddleware');
 const { uploadSelfie } = require('../middleware/uploadMiddleware');
 
-router.post('/submit', attendanceController.submitAttendance);
+router.post('/submit', requireEmployeeAuth, attendanceController.submitAttendance);
 router.get('/my-history', requireEmployeeAuth, attendanceController.getMyHistory);
 router.get('/:id/sessions', requireEmployeeAuth, attendanceController.getSessions);router.post('/:id/face-verify', requireEmployeeAuth, uploadSelfie.single('selfie'), attendanceController.faceVerify);
 router.post('/:id/heartbeat', requireEmployeeAuth, attendanceController.heartbeat);

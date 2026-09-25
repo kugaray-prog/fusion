@@ -26,6 +26,62 @@ function isInsidePolygon(lat, lng, points) {
   return inside;
 }
 
+// GPS error allowance at the boundary, mirroring the backend's
+// config.attendance.edgeToleranceMeters (keep the two in sync): a reading
+// just outside the polygon still counts as inside when the edge is within
+// the reading's own accuracy, capped at this many meters. Without it, phone
+// GPS drift near the edge of a small geofence read employees who were
+// physically inside as "outside", so they never got timed in.
+const EDGE_TOLERANCE_METERS = 20;
+
+// Shortest distance in meters from a point to the polygon's boundary (flat
+// projection; accurate to well under a meter at geofence scale). Same math
+// as geofenceService.distanceToPolygonEdgeMeters on the backend.
+function distanceToEdgeMeters(lat, lng, points) {
+  lat = Number(lat);
+  lng = Number(lng);
+  const mPerDegLat = 111320;
+  const mPerDegLng = 111320 * Math.cos((lat * Math.PI) / 180);
+  const xy = points.map((p) => ({ x: (Number(p.lng) - lng) * mPerDegLng, y: (Number(p.lat) - lat) * mPerDegLat }));
+  let best = Infinity;
+  for (let i = 0, j = xy.length - 1; i < xy.length; j = i++) {
+    const a = xy[j];
+    const b = xy[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    const t = lenSq ? Math.max(0, Math.min(1, -(a.x * dx + a.y * dy) / lenSq)) : 0;
+    best = Math.min(best, Math.hypot(a.x + t * dx, a.y + t * dy));
+  }
+  return best;
+}
+
+function isInsideGeofence(lat, lng, points, acc) {
+  if (isInsidePolygon(lat, lng, points)) return true;
+  const tol = Math.min(Number(acc) > 0 ? Number(acc) : 0, EDGE_TOLERANCE_METERS);
+  return tol > 0 && distanceToEdgeMeters(lat, lng, points) <= tol;
+}
+
+// Whether an event's attendance window is open right now. The server's
+// computed_status is only as fresh as the last geofence poll (up to 30s
+// old), so an event that has just started is also recognized from its own
+// start/end times. Falls back to computed_status if they can't be parsed.
+function isEventActiveNow(g, nowMs = Date.now()) {
+  const start = new Date(String(g.start_datetime || '').replace(' ', 'T')).getTime();
+  const end = new Date(String(g.end_datetime || '').replace(' ', 'T')).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end)) return g.computed_status === 'active';
+  return nowMs >= start && nowMs <= end;
+}
+
+// How often the last known location is re-checked against the geofences
+// even when no new GPS reading arrives. Android only reports a new reading
+// after the phone moves (distanceInterval), so someone already standing
+// inside when an event starts would otherwise wait for the next poll.
+const REEVALUATE_MS = 5000;
+// After a rejected time-in, wait this long before trying again, instead of
+// resending on every GPS reading (every ~3s).
+const CHECK_IN_RETRY_MS = 5000;
+
 // How often a session already checked-in pings the server with the current
 // location so it can auto time-out once the device has left the geofence for
 // a couple of consecutive pings (see config.attendance.autoEndOutsideStreakThreshold
@@ -85,6 +141,10 @@ export function AttendanceTrackingProvider({ children }) {
   const watchRef = useRef(null);
   const heartbeatTimers = useRef({}); // attendanceId -> interval
   const locationRef = useRef(null);
+  // Android's mock-location flag for the latest reading (Fake GPS apps set
+  // it); sent with every time-in and heartbeat so the server can refuse it.
+  const mockedRef = useRef(false);
+  const lastCheckInFailureRef = useRef({}); // event_id -> ms of the last rejected time-in
   // attendanceId -> true, once FaceVerificationScreen has been opened for it
   // this app session -- stops a still-pending anomaly from re-navigating
   // there on every periodic history refresh while the employee has
@@ -177,7 +237,7 @@ export function AttendanceTrackingProvider({ children }) {
       const pending = pendingExitRef.current[eventId];
       const usingPending = pending && pending.attendanceId === attendanceId;
       const coords = usingPending
-        ? { latitude: pending.latitude, longitude: pending.longitude }
+        ? { latitude: pending.latitude, longitude: pending.longitude, accuracy: pending.accuracy }
         : locationRef.current;
       if (!coords) return;
       try {
@@ -185,7 +245,8 @@ export function AttendanceTrackingProvider({ children }) {
           attendanceId,
           coords.latitude,
           coords.longitude,
-          usingPending ? pending.observedAt : undefined
+          usingPending ? pending.observedAt : undefined,
+          { accuracy: coords.accuracy, mocked: usingPending ? pending.mocked : mockedRef.current }
         );
         if (result?.data?.ended) {
           if (usingPending) delete pendingExitRef.current[eventId];
@@ -289,6 +350,10 @@ export function AttendanceTrackingProvider({ children }) {
   const autoCheckIn = useCallback(async (geofence, coords, acc) => {
     const eventId = geofence.event_id;
     if (autoSubmittingRef.current[eventId]) return;
+    if (Date.now() - (lastCheckInFailureRef.current[eventId] || 0) < CHECK_IN_RETRY_MS) return;
+    // Set synchronously: the state -> ref sync below only lands after a
+    // re-render, and a second GPS reading can arrive before that.
+    autoSubmittingRef.current = { ...autoSubmittingRef.current, [eventId]: true };
     setAutoSubmitting((prev) => ({ ...prev, [eventId]: true }));
     try {
       const result = await submitAttendance({
@@ -297,8 +362,10 @@ export function AttendanceTrackingProvider({ children }) {
         event_id: eventId,
         latitude: coords.latitude,
         longitude: coords.longitude,
-        accuracy: acc
+        accuracy: acc,
+        ...(mockedRef.current ? { mocked: true } : {})
       });
+      delete lastCheckInFailureRef.current[eventId];
       setCheckInErrors((prev) => ({ ...prev, [eventId]: null }));
       if (result?.data?.id) {
         const nowIso = new Date().toISOString();
@@ -334,10 +401,20 @@ export function AttendanceTrackingProvider({ children }) {
       // event window closed, GPS accuracy too low, device not yet approved)
       // don't pop up an alert — the next location update just tries again —
       // but the reason is kept so the Attendance screen can show it.
+      lastCheckInFailureRef.current[eventId] = Date.now();
+      if (err?.response?.status === 409) {
+        // The server already has a session open for this event (e.g. timed
+        // in before an app restart and the history refresh failed). Sync
+        // instead of retrying a time-in that can never succeed.
+        await refreshSessionsFromHistoryRef.current?.();
+        setCheckInErrors((prev) => ({ ...prev, [eventId]: null }));
+        return;
+      }
       const message = err?.response?.data?.message
         || (err?.request ? 'Could not reach the server to record your time-in. Retrying…' : 'Time-in failed. Retrying…');
       setCheckInErrors((prev) => ({ ...prev, [eventId]: message }));
     } finally {
+      autoSubmittingRef.current = { ...autoSubmittingRef.current, [eventId]: false };
       setAutoSubmitting((prev) => ({ ...prev, [eventId]: false }));
     }
   }, [employee, deviceUid, startHeartbeat, goToFaceVerification]);
@@ -356,12 +433,16 @@ export function AttendanceTrackingProvider({ children }) {
   // to report it. The server's own autoEndOutsideStreakThreshold still
   // decides when the session is actually closed (once a ping gets through);
   // this only prevents the CLOCK from running away in the meantime.
-  const evaluateLocation = useCallback((coords, acc, observedAtMs) => {
-    const activeGeofences = geofencesRef.current.filter((g) => g.computed_status === 'active');
+  //
+  // `recheck` marks a re-evaluation of the last reading rather than a new
+  // one: it can time in, but doesn't count toward the outside streak, which
+  // must be made of separate GPS readings.
+  const evaluateLocation = useCallback((coords, acc, observedAtMs, { recheck = false } = {}) => {
+    const activeGeofences = geofencesRef.current.filter((g) => isEventActiveNow(g));
     const nextPresence = {};
     activeGeofences.forEach((g) => {
       if (!g.points || g.points.length < 3) return;
-      const inside = isInsidePolygon(coords.latitude, coords.longitude, g.points);
+      const inside = isInsideGeofence(coords.latitude, coords.longitude, g.points, acc);
       nextPresence[g.event_id] = { inside, geofence: g };
       const existingSession = sessionsRef.current[g.event_id];
       // A session is already open for today when we have a record with no
@@ -370,6 +451,7 @@ export function AttendanceTrackingProvider({ children }) {
       if (inside && !hasOpenSession) {
         autoCheckIn(g, coords, acc);
       } else if (!inside && hasOpenSession) {
+        if (recheck) return;
         const eventId = g.event_id;
         const streak = (localOutsideStreakRef.current[eventId] || 0) + 1;
         localOutsideStreakRef.current[eventId] = streak;
@@ -379,7 +461,9 @@ export function AttendanceTrackingProvider({ children }) {
             attendanceId: existingSession.id,
             observedAt: observedAtIso,
             latitude: coords.latitude,
-            longitude: coords.longitude
+            longitude: coords.longitude,
+            accuracy: acc,
+            mocked: mockedRef.current
           };
           setSessions((prev) => ({
             ...prev,
@@ -413,6 +497,36 @@ export function AttendanceTrackingProvider({ children }) {
       }
       if (!cancelled) setPermissionDenied(false);
 
+      // GPS starts first so the phone already has a fix by the time the
+      // server calls below finish (a sleeping server can take ~50s to answer).
+      // Nothing is evaluated until refreshGeofences loads the event list,
+      // which happens after today's sessions are restored, so this can't
+      // cause a duplicate time-in.
+      try {
+        const sub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 2 },
+          (loc) => {
+            setLocation(loc.coords);
+            locationRef.current = loc.coords;
+            mockedRef.current = !!loc.mocked;
+            setAccuracy(loc.coords.accuracy);
+            // loc.timestamp is when the GPS chip actually took this reading —
+            // works fine offline (no WiFi/data needed) and is what lets a
+            // "left the geofence" moment be captured accurately even before
+            // there's any connectivity to report it (see evaluateLocation).
+            evaluateLocation(loc.coords, loc.coords.accuracy, loc.timestamp);
+          }
+        );
+        if (cancelled) sub.remove();
+        else watchRef.current = sub;
+      } catch (e) {
+        // GPS could have been switched off in the instant between the last
+        // LocationStatusContext poll and this call — LocationGateOverlay
+        // will catch it on its own next poll tick either way, so there's
+        // nothing more to do here than avoid an unhandled rejection.
+      }
+      if (cancelled) return;
+
       try {
         // Same values the registration form showed and submitted.
         const device = getDeviceInfo();
@@ -430,35 +544,20 @@ export function AttendanceTrackingProvider({ children }) {
 
       await refreshSessionsFromHistory();
       await refreshGeofences();
-
-      try {
-        watchRef.current = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, timeInterval: 3000, distanceInterval: 2 },
-          (loc) => {
-            setLocation(loc.coords);
-            locationRef.current = loc.coords;
-            setAccuracy(loc.coords.accuracy);
-            // loc.timestamp is when the GPS chip actually took this reading —
-            // works fine offline (no WiFi/data needed) and is what lets a
-            // "left the geofence" moment be captured accurately even before
-            // there's any connectivity to report it (see evaluateLocation).
-            evaluateLocation(loc.coords, loc.coords.accuracy, loc.timestamp);
-          }
-        );
-      } catch (e) {
-        // GPS could have been switched off in the instant between the last
-        // LocationStatusContext poll and this call — LocationGateOverlay
-        // will catch it on its own next poll tick either way, so there's
-        // nothing more to do here than avoid an unhandled rejection.
-      }
     })();
 
     const geofencePoll = setInterval(refreshGeofences, GEOFENCE_POLL_MS);
+    const reevaluate = setInterval(() => {
+      const coords = locationRef.current;
+      if (coords) evaluateLocation(coords, coords.accuracy, undefined, { recheck: true });
+    }, REEVALUATE_MS);
 
     return () => {
       cancelled = true;
       if (watchRef.current) watchRef.current.remove();
+      watchRef.current = null;
       clearInterval(geofencePoll);
+      clearInterval(reevaluate);
       Object.keys(heartbeatTimers.current).forEach(stopHeartbeat);
     };
   }, [trackingEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -466,7 +565,7 @@ export function AttendanceTrackingProvider({ children }) {
   // Re-evaluate presence whenever the geofence list itself changes (e.g. a
   // new event just went active), using the last known location.
   useEffect(() => {
-    if (locationRef.current) evaluateLocation(locationRef.current, accuracy);
+    if (locationRef.current) evaluateLocation(locationRef.current, locationRef.current.accuracy, undefined, { recheck: true });
   }, [geofences]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const value = {

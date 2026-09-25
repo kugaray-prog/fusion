@@ -69,6 +69,18 @@ module.exports = {
     // Override via .env (ATTENDANCE_MAX_ACCURACY_METERS) if you need looser
     // testing on desktop; keep it at 50-100 for real phone deployments.
     maxAccuracyMeters: Number(process.env.ATTENDANCE_MAX_ACCURACY_METERS) || 100,
+    // A reading just outside the boundary still counts as inside if the
+    // boundary is within the reading's own GPS accuracy, up to this many
+    // meters. Phone GPS drifts 5-20m, so without it someone standing inside
+    // near the edge of a small geofence could be read as outside and never
+    // get timed in. The mobile app applies the same rule (keep them in sync:
+    // mobile/src/context/AttendanceTrackingContext.js). 0 turns it off.
+    edgeToleranceMeters: process.env.GEOFENCE_EDGE_TOLERANCE_METERS !== undefined
+      ? Number(process.env.GEOFENCE_EDGE_TOLERANCE_METERS)
+      : 20,
+    // Refuse check-ins (and treat heartbeats as "outside") when the phone
+    // reports the reading came from a mock-location provider (Fake GPS etc.).
+    rejectMockLocations: process.env.REJECT_MOCK_LOCATIONS !== 'false',
     // How many consecutive "outside the geofence" location pings from the
     // mobile app are required before the server auto-closes an attendance
     // session (sets time_out). Requiring more than one absorbs a single

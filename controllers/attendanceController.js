@@ -14,6 +14,20 @@ const { logAction } = require('../services/auditService');
 // Mondays) and also correctly rates a true no-show (nobody ever timed in for
 // that event) as Absent, which a time-in-triggered hook here never could.
 
+// `mocked` as sent by the mobile app (Android's mock-location flag).
+function isMockedLocation(mocked) {
+  return config.attendance.rejectMockLocations && (mocked === true || mocked === 'true');
+}
+
+// Boundary allowance for a GPS reading: its reported accuracy, capped at
+// config.attendance.edgeToleranceMeters so a client can't claim a huge
+// accuracy to stretch the geofence.
+function edgeTolerance(accuracy) {
+  const acc = Number(accuracy);
+  if (!Number.isFinite(acc) || acc <= 0) return 0;
+  return Math.min(acc, config.attendance.edgeToleranceMeters);
+}
+
 // Logs a geo_anomalies row for one attendance record, flags it for face
 // verification, and notifies its employee.
 async function flagAttendanceForVerification({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude, details }) {
@@ -427,10 +441,31 @@ async function getAttendanceByDepartment(req, res, next) {
  */
 async function submitAttendance(req, res, next) {
   try {
-    const { employee_id, device_uid, event_id, latitude, longitude, accuracy, ocr_record_id } = req.body;
+    const { employee_id, device_uid, event_id, latitude, longitude, accuracy, ocr_record_id, mocked } = req.body;
 
     if (!employee_id || !event_id || latitude === undefined || longitude === undefined) {
       return res.status(400).json({ success: false, message: 'employee_id, event_id, latitude, and longitude are required.' });
+    }
+    // An employee can only record their OWN attendance, from their own
+    // registered device (both apps always send device_uid).
+    if (Number(employee_id) !== Number(req.employee.id)) {
+      return res.status(403).json({ success: false, message: 'You can only record your own attendance.' });
+    }
+    if (!device_uid) {
+      return res.status(400).json({ success: false, message: 'device_uid is required.' });
+    }
+    // Android marks readings from a mock-location provider (Fake GPS and
+    // similar apps); the mobile app forwards that flag.
+    if (isMockedLocation(mocked)) {
+      await pool.query(
+        `INSERT INTO attendance_logs (employee_id, action, details) VALUES (?, 'attendance_rejected', ?)`,
+        [employee_id, JSON.stringify({ reason: 'mock_location', event_id, latitude, longitude })]
+      );
+      return res.status(403).json({
+        success: false,
+        code: 'MOCK_LOCATION',
+        message: 'A fake/mock GPS location was detected. Turn off any location-spoofing app and try again.'
+      });
     }
 
     // Same stale-local-session guard as deviceController.registerDevice —
@@ -446,22 +481,19 @@ async function submitAttendance(req, res, next) {
     }
 
     // 1. Device authorization
-    let device = null;
-    if (device_uid) {
-      const [deviceRows] = await pool.query(
-        'SELECT * FROM mobile_devices WHERE device_uid = ? AND employee_id = ?',
-        [device_uid, employee_id]
-      );
-      device = deviceRows[0];
-      if (!device) {
-        return res.status(403).json({ success: false, message: 'This device is not registered to this employee.' });
-      }
-      if (device.status === 'blacklisted' || device.status === 'rejected') {
-        return res.status(403).json({ success: false, message: 'This device is not authorized for attendance.' });
-      }
-      if (device.status === 'pending') {
-        return res.status(403).json({ success: false, message: 'This device is pending admin approval.' });
-      }
+    const [deviceRows] = await pool.query(
+      'SELECT * FROM mobile_devices WHERE device_uid = ? AND employee_id = ?',
+      [device_uid, employee_id]
+    );
+    const device = deviceRows[0];
+    if (!device) {
+      return res.status(403).json({ success: false, message: 'This device is not registered to this employee.' });
+    }
+    if (device.status === 'blacklisted' || device.status === 'rejected') {
+      return res.status(403).json({ success: false, message: 'This device is not authorized for attendance.' });
+    }
+    if (device.status === 'pending') {
+      return res.status(403).json({ success: false, message: 'This device is pending admin approval.' });
     }
 
     // 2. GPS accuracy
@@ -506,7 +538,8 @@ async function submitAttendance(req, res, next) {
     const { inside, distanceMeters } = geofenceService.isInsideGeofence(
       parseFloat(latitude),
       parseFloat(longitude),
-      { ...geofence, points }
+      { ...geofence, points },
+      edgeTolerance(accuracy)
     );
 
     // Debug logging — compares the submitted GPS point against the exact polygon
@@ -1082,7 +1115,7 @@ function resolveHeartbeatEndTime(observedAtRaw, sessionOpenedAt) {
 async function heartbeat(req, res, next) {
   try {
     const { id } = req.params;
-    const { latitude, longitude, observed_at } = req.body;
+    const { latitude, longitude, observed_at, accuracy, mocked } = req.body;
     if (latitude === undefined || longitude === undefined) {
       return res.status(400).json({ success: false, message: 'latitude and longitude are required.' });
     }
@@ -1125,8 +1158,12 @@ async function heartbeat(req, res, next) {
         const [pointRows] = await pool.query('SELECT lat, lng FROM geofence_points WHERE geofence_id = ? ORDER BY point_order', [geofence.id]);
         points = pointRows.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }));
       }
-      ({ inside } = geofenceService.isInsideGeofence(parseFloat(latitude), parseFloat(longitude), { ...geofence, points }));
+      ({ inside } = geofenceService.isInsideGeofence(parseFloat(latitude), parseFloat(longitude), { ...geofence, points }, edgeTolerance(accuracy)));
     }
+    // A mock (Fake GPS) reading proves nothing about where the phone is, so
+    // it counts toward leaving: turning on a spoofer after timing in can't
+    // keep a session open.
+    if (isMockedLocation(mocked)) inside = false;
 
     const newStreak = inside ? 0 : (record.outside_streak || 0) + 1;
     const shouldAutoEnd = newStreak >= config.attendance.autoEndOutsideStreakThreshold;

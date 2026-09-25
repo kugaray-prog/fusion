@@ -100,9 +100,13 @@ export async function submitAttendance(payload) {
 // taken on-device -- important when this ping is a delayed retry of a
 // reading captured while offline, so the server closes the session at the
 // moment the employee actually left rather than whenever the retry lands.
-export async function sendHeartbeat(attendanceId, latitude, longitude, observedAt) {
+// `accuracy` (meters) and `mocked` (Android's mock-location flag) belong to
+// that same reading.
+export async function sendHeartbeat(attendanceId, latitude, longitude, observedAt, { accuracy, mocked } = {}) {
   const body = { latitude, longitude };
   if (observedAt) body.observed_at = observedAt;
+  if (accuracy != null) body.accuracy = accuracy;
+  if (mocked) body.mocked = true;
   const { data } = await api.post(`/attendance/${attendanceId}/heartbeat`, body);
   return data;
 }

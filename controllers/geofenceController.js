@@ -54,6 +54,42 @@ function toMysqlDatetime(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// Returns a 409 message if any of `occurrences` clashes with an existing
+// event, or null. Two clashes are refused:
+//   - the same event again: same name and same start/end (e.g. "Initialize
+//     Protocol" clicked twice while the first request was still saving);
+//   - the same venue booked for an overlapping time by a different event.
+// Names and venues are compared trimmed and case-insensitively. Events
+// without a venue name are only checked for the first case. `excludeEventId`
+// skips the event being edited.
+async function findScheduleConflict(conn, { title, venue, occurrences, excludeEventId = null }) {
+  const normTitle = String(title || '').trim().toLowerCase();
+  const normVenue = String(venue || '').trim().toLowerCase();
+  for (const occ of occurrences) {
+    const start = toMysqlDatetime(occ.start);
+    const end = toMysqlDatetime(occ.end);
+    const [rows] = await conn.query(
+      `SELECT id, title, venue, start_datetime, end_datetime FROM events
+       WHERE start_datetime < ? AND end_datetime > ?
+         AND (id <> ? OR ? IS NULL)
+         AND (
+           (LOWER(TRIM(title)) = ? AND start_datetime = ? AND end_datetime = ?)
+           OR (? <> '' AND LOWER(TRIM(venue)) = ?)
+         )
+       LIMIT 1`,
+      [end, start, excludeEventId, excludeEventId, normTitle, start, end, normVenue, normVenue]
+    );
+    const clash = rows[0];
+    if (!clash) continue;
+    const when = `${clash.start_datetime.slice(0, 16)} to ${clash.end_datetime.slice(0, 16)}`;
+    if (clash.title.trim().toLowerCase() === normTitle && clash.start_datetime === start && clash.end_datetime === end) {
+      return `"${clash.title}" already exists for ${when}.`;
+    }
+    return `${clash.venue} is already booked for "${clash.title}" (${when}). Choose another venue or time.`;
+  }
+  return null;
+}
+
 // GET /api/geofences/default-location — CSPC coordinates used to pre-fill the
 // "create event" form. Admins can still override the location/radius per event.
 async function getDefaultLocation(req, res, next) {
@@ -124,6 +160,7 @@ async function getGeofences(req, res, next) {
 // its own attendance records, linked back to the first occurrence via parent_event_id.
 async function createGeofence(req, res, next) {
   const conn = await pool.getConnection();
+  let locked = false;
   try {
     const {
       title, venue, start, end, points, center_lat, center_lng,
@@ -154,6 +191,18 @@ async function createGeofence(req, res, next) {
     const center = hasManualCoords ? { lat: Number(center_lat), lng: Number(center_lng) } : centroidOf(points);
 
     const occurrences = expandRecurrenceDates({ recurrence_type, recurrence_days, start, end, recurrence_end_date });
+
+    // Serialize event creation so two requests arriving together (double
+    // click, two admins) can't both pass the conflict check before either
+    // has inserted. Released in `finally`.
+    const [[lock]] = await conn.query("SELECT GET_LOCK('geoattend_create_event', 10) AS got");
+    if (!lock.got) {
+      return res.status(503).json({ success: false, message: 'Another event is being saved. Please try again.' });
+    }
+    locked = true;
+
+    const conflict = await findScheduleConflict(conn, { title, venue, occurrences });
+    if (conflict) return res.status(409).json({ success: false, message: conflict });
 
     await conn.beginTransaction();
 
@@ -215,6 +264,7 @@ async function createGeofence(req, res, next) {
     await conn.rollback();
     next(err);
   } finally {
+    if (locked) await conn.query("SELECT RELEASE_LOCK('geoattend_create_event')").catch(() => {});
     conn.release();
   }
 }
@@ -240,6 +290,11 @@ async function updateGeofence(req, res, next) {
       return res.status(400).json({ success: false, message: 'Latitude and Longitude must be valid numbers.' });
     }
     const center = hasManualCoords ? { lat: Number(center_lat), lng: Number(center_lng) } : centroidOf(points);
+
+    const conflict = await findScheduleConflict(conn, {
+      title, venue, occurrences: [{ start: new Date(start), end: new Date(end) }], excludeEventId: existing[0].event_id
+    });
+    if (conflict) return res.status(409).json({ success: false, message: conflict });
 
     await conn.beginTransaction();
 
