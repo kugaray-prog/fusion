@@ -11,7 +11,7 @@ const config = require('../config/config');
 async function seed() {
   const conn = await pool.getConnection();
   try {
-    console.log('Seeding GeoAttend Pro database...');
+    console.log('Seeding GeoAttend database...');
 
     // 0. Email domain move: accounts created by earlier seeds still use the
     //    old @geoattend.pro domain. Rename them to @my.cspc.edu.ph instead of

@@ -259,7 +259,7 @@ app.use(
 app.get('/api/health', (req, res) => {
   res.json({
     success: true,
-    message: 'GeoAttend Pro API is running.',
+    message: 'GeoAttend API is running.',
     environment: NODE_ENV
   });
 });
@@ -304,7 +304,7 @@ app.use(errorHandler);
 app.listen(PORT, () => {
   console.log('');
   console.log('==========================================');
-  console.log('       GeoAttend Pro Server');
+  console.log('       GeoAttend Server');
   console.log('==========================================');
   console.log(`Server: http://localhost:${PORT}`);
   console.log(`Environment: ${NODE_ENV}`);

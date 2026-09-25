@@ -1,5 +1,5 @@
 // ============================================================
-// GeoAttend Pro — Admin Dashboard Frontend
+// GeoAttend — Admin Dashboard Frontend
 // Same UI/design as provided. All data now comes from the real
 // Node.js/Express/MySQL backend via fetch() calls.
 // ============================================================

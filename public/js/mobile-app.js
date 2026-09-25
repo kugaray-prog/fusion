@@ -1,7 +1,7 @@
 // ============================================================
 // CSPC GeoAttend — Mobile Web App
 // Same UI/design as provided. All data now comes from the real
-// GeoAttend Pro backend via fetch() calls — no simulated logic.
+// GeoAttend backend via fetch() calls — no simulated logic.
 // ============================================================
 
 const API = window.__API_BASE__ || '/api';

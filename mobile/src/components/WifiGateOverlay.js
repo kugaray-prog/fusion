@@ -65,7 +65,7 @@ export default function WifiGateOverlay() {
           </View>
           <Text style={styles.title}>Please turn on your Wi-Fi.</Text>
           <Text style={styles.subtitle}>
-            GeoAttend Pro needs your device's Wi-Fi turned on and connected to verify your location and attendance. Wi-Fi-dependent features are unavailable until it's turned back on.
+            GeoAttend needs your device's Wi-Fi turned on and connected to verify your location and attendance. Wi-Fi-dependent features are unavailable until it's turned back on.
           </Text>
           <TouchableOpacity style={styles.btn} onPress={openWifiSettings}>
             <Text style={styles.btnText}>Turn On Wi-Fi</Text>

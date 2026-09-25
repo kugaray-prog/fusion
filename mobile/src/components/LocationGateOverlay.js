@@ -56,7 +56,7 @@ export default function LocationGateOverlay() {
           </View>
           <Text style={styles.title}>Please turn on your Location/GPS.</Text>
           <Text style={styles.subtitle}>
-            GeoAttend Pro needs your device's Location/GPS turned on to verify your attendance and track your presence at the event area. Location-dependent features are unavailable until it's turned back on.
+            GeoAttend needs your device's Location/GPS turned on to verify your attendance and track your presence at the event area. Location-dependent features are unavailable until it's turned back on.
           </Text>
           <TouchableOpacity style={styles.btn} onPress={openLocationSettings}>
             <Text style={styles.btnText}>Turn On Location</Text>

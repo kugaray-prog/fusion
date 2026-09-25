@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "GeoAttend Pro",
+    "name": "GeoAttend",
     "slug": "geoattend-pro-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -37,8 +37,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.geoattend.pro",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "GeoAttend Pro needs your location to verify you are inside the event geofence when marking attendance, and to detect/join the location's Wi-Fi network.",
-        "NSCameraUsageDescription": "GeoAttend Pro needs camera access to capture your face for Face Verification registration.",
+        "NSLocationWhenInUseUsageDescription": "GeoAttend needs your location to verify you are inside the event geofence when marking attendance, and to detect/join the location's Wi-Fi network.",
+        "NSCameraUsageDescription": "GeoAttend needs camera access to capture your face for Face Verification registration.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "config": {
@@ -50,8 +50,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "GeoAttend Pro needs camera access to capture your face for Face Verification registration.",
-          "microphonePermission": "GeoAttend Pro records a short guided video (blink, nod, turn your head) during face registration to confirm you're a live person."
+          "cameraPermission": "GeoAttend needs camera access to capture your face for Face Verification registration.",
+          "microphonePermission": "GeoAttend records a short guided video (blink, nod, turn your head) during face registration to confirm you're a live person."
         }
       ]
     ],

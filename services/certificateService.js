@@ -45,7 +45,7 @@ async function generateCertificatePdf({ certificateNumber, employeeName, eventTi
     doc.image(qrPath, doc.page.width - 170, doc.page.height - 190, { width: 100 });
 
     doc.fontSize(10).fillColor('#999')
-      .text('Verified via GeoAttend Pro', doc.page.width - 175, doc.page.height - 85, { width: 110, align: 'center', lineBreak: false });
+      .text('Verified via GeoAttend', doc.page.width - 175, doc.page.height - 85, { width: 110, align: 'center', lineBreak: false });
 
     doc.end();
     stream.on('finish', resolve);
