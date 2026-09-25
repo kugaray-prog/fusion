@@ -50,9 +50,16 @@ async function apiFetch(path, options = {}) {
   const isFormData = options.body instanceof FormData;
   const headers = { ...(isFormData ? {} : { 'Content-Type': 'application/json' }), ...(options.headers || {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
+  headers['X-Device-Uid'] = getDeviceUid();
   const res = await fetch(`${API}${path}`, { ...options, headers });
   let data;
   try { data = await res.json(); } catch (e) { data = {}; }
+  // An admin blacklisted/rejected this device: sign out and say why.
+  if (data.code === 'DEVICE_BLOCKED' && getToken()) {
+    clearSession();
+    alert(data.message);
+    window.location.reload();
+  }
   if (!res.ok) throw new Error(data.message || `Request failed (${res.status})`);
   return data;
 }

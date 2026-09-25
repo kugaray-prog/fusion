@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
 const pool = require('../config/db');
+const { getBlockedStatus, sendDeviceBlocked } = require('../services/deviceAccess');
 
 /**
  * Verifies the JWT sent in the Authorization header (Bearer token)
@@ -73,8 +74,14 @@ function requireRole(...roles) {
 /**
  * Verifies an employee JWT (issued by /api/employee-auth/login) and attaches
  * the decoded payload to req.employee. Used by mobile-app-facing routes.
+ *
+ * The mobile app sends its device id as X-Device-Uid on every request. If
+ * that device has been blacklisted or rejected by an admin, the request is
+ * refused with code DEVICE_BLOCKED, which signs the app out -- so blocking a
+ * device takes effect on a phone that is already signed in, not only at its
+ * next sign-in.
  */
-function requireEmployeeAuth(req, res, next) {
+async function requireEmployeeAuth(req, res, next) {
   const header = req.headers.authorization;
   const token = header && header.startsWith('Bearer ') ? header.split(' ')[1] : null;
 
@@ -82,16 +89,24 @@ function requireEmployeeAuth(req, res, next) {
     return res.status(401).json({ success: false, message: 'Authentication required. Please log in.' });
   }
 
+  let decoded;
   try {
-    const decoded = jwt.verify(token, config.jwt.secret);
-    if (decoded.type !== 'employee') {
-      return res.status(403).json({ success: false, message: 'Invalid token type for this route.' });
-    }
-    req.employee = decoded;
-    next();
+    decoded = jwt.verify(token, config.jwt.secret);
   } catch (err) {
     return res.status(401).json({ success: false, message: 'Invalid or expired session. Please log in again.' });
   }
+  if (decoded.type !== 'employee') {
+    return res.status(403).json({ success: false, message: 'Invalid token type for this route.' });
+  }
+
+  try {
+    const blockedStatus = await getBlockedStatus(req.headers['x-device-uid'], decoded.id);
+    if (blockedStatus) return sendDeviceBlocked(res, blockedStatus);
+  } catch (err) {
+    return next(err);
+  }
+  req.employee = decoded;
+  next();
 }
 
 module.exports = { requireAuth, requireRole, requireEmployeeAuth };

@@ -15,7 +15,7 @@ WebBrowser.maybeCompleteAuthSession();
 // prototype, but using real Google Sign-In (expo-auth-session) instead of the
 // browser-only Google Identity Services script.
 export default function LoginScreen({ navigation }) {
-  const { loginWithGoogle, staleSession } = useAuth();
+  const { loginWithGoogle, staleSession, deviceBlockedNotice } = useAuth();
   const [authenticating, setAuthenticating] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const btnScale = useRef(new Animated.Value(1)).current;
@@ -105,6 +105,15 @@ export default function LoginScreen({ navigation }) {
       <FadeIn delay={120}>
         <View style={styles.body}>
           <View style={styles.card}>
+            {!!deviceBlockedNotice && (
+              <View style={styles.blockedBanner}>
+                <Ionicons name="ban-outline" size={20} color={colors.dangerText} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.blockedTitle}>Access blocked on this device</Text>
+                  <Text style={styles.blockedText}>{deviceBlockedNotice}</Text>
+                </View>
+              </View>
+            )}
             <Text style={styles.cardTitle}>Sign in</Text>
             <Text style={styles.cardLead}>Use your official CSPC Google account.</Text>
 
@@ -128,7 +137,7 @@ export default function LoginScreen({ navigation }) {
               </TouchableOpacity>
             </Animated.View>
 
-            {!!errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
+            {!!errorMsg && errorMsg !== deviceBlockedNotice && <Text style={styles.errorText}>{errorMsg}</Text>}
             {!errorMsg && staleSession && (
               <Text style={styles.errorText}>Your session ended because your account record changed. Please sign in again.</Text>
             )}
@@ -192,6 +201,12 @@ const styles = StyleSheet.create({
     paddingVertical: 16, borderRadius: radius.md, width: '100%',
   },
   googleBtnText: { fontWeight: '600', color: colors.textMain, fontSize: 15 },
+  blockedBanner: {
+    flexDirection: 'row', gap: 10, alignItems: 'flex-start', width: '100%',
+    backgroundColor: colors.dangerBg, borderRadius: radius.md, padding: 14, marginBottom: 18,
+  },
+  blockedTitle: { color: colors.dangerText, fontWeight: '700', fontSize: 14, marginBottom: 2 },
+  blockedText: { color: colors.dangerText, fontSize: 12, lineHeight: 17 },
   errorText: { color: colors.error, fontSize: 12, marginTop: 12, textAlign: 'center' },
   debugText: { color: colors.textSub, fontSize: 10, marginTop: 14, textAlign: 'center', textDecorationLine: 'underline' },
   secureTag: { textAlign: 'center', color: colors.textSub, fontSize: 11, fontWeight: '600', marginTop: 24, letterSpacing: 0.3 },

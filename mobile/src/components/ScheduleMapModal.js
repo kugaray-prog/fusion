@@ -70,6 +70,9 @@ export default function ScheduleMapModal({ visible, schedule, onClose }) {
   const region = center
     ? { ...center, latitudeDelta: 0.006, longitudeDelta: 0.006 }
     : null;
+  // Without a working map (no Maps API key configured, or web), the sheet
+  // skips the map area entirely; "Open in Maps" still shows the location.
+  const showMap = !!(MapView && region);
 
   const openInMaps = () => {
     if (!center) return;
@@ -88,8 +91,8 @@ export default function ScheduleMapModal({ visible, schedule, onClose }) {
         <View style={styles.sheet}>
           <View style={styles.handle} />
 
-          <View style={styles.mapWrap}>
-            {MapView && region ? (
+          {showMap && (
+            <View style={styles.mapWrap}>
               <MapView style={styles.map} initialRegion={region} pointerEvents="auto">
                 {points.length >= 3 && Polygon && (
                   <Polygon
@@ -101,31 +104,21 @@ export default function ScheduleMapModal({ visible, schedule, onClose }) {
                 )}
                 {Marker && <Marker coordinate={center} title={schedule.venue || schedule.title} />}
               </MapView>
-            ) : (
-              <View style={styles.mapFallback}>
-                <Ionicons name="location" size={30} color={colors.primary} style={{ marginBottom: 8 }} />
-                <Text style={styles.mapFallbackText}>
-                  {center
-                    ? `${center.latitude.toFixed(5)}, ${center.longitude.toFixed(5)}`
-                    : 'Location not yet set for this event.'}
-                </Text>
-                {Platform.OS === 'web' && (
-                  <Text style={styles.mapFallbackHint}>Map preview is available on the mobile app.</Text>
-                )}
-                {Platform.OS !== 'web' && !hasValidMapsKey && (
-                  <Text style={styles.mapFallbackHint}>
-                    Map view needs a Google Maps API key configured in app.json.
-                  </Text>
-                )}
-              </View>
-            )}
-            <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-              <Ionicons name="close" size={18} color="#fff" />
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity style={styles.closeBtn} onPress={onClose} accessibilityLabel="Close">
+                <Ionicons name="close" size={18} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.body}>
-            <Text style={styles.title}>{schedule.title}</Text>
+            <View style={styles.titleRow}>
+              <Text style={[styles.title, { flex: 1 }]}>{schedule.title}</Text>
+              {!showMap && (
+                <TouchableOpacity style={styles.closeInline} onPress={onClose} accessibilityLabel="Close">
+                  <Ionicons name="close" size={20} color={colors.textSub} />
+                </TouchableOpacity>
+              )}
+            </View>
             <View style={styles.venueRow}>
               <Ionicons name="location-outline" size={14} color={colors.textSub} />
               <Text style={styles.venue}>{schedule.venue || 'Venue TBA'}</Text>
@@ -177,19 +170,16 @@ const styles = StyleSheet.create({
   },
   mapWrap: { height: MAP_HEIGHT, marginTop: 8 },
   map: { width: '100%', height: '100%' },
-  mapFallback: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.primaryLight, paddingHorizontal: 24,
-  },
-  mapFallbackIcon: { fontSize: 30, marginBottom: 8 },
-  mapFallbackText: { color: colors.primary, fontWeight: '700', fontSize: 13, textAlign: 'center' },
-  mapFallbackHint: { color: colors.textSub, fontSize: 11, marginTop: 6, textAlign: 'center' },
   closeBtn: {
     position: 'absolute', top: 14, right: 14, width: 34, height: 34, borderRadius: 17,
     backgroundColor: 'rgba(27, 37, 89, 0.55)', alignItems: 'center', justifyContent: 'center',
   },
-  closeBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   body: { padding: 24, paddingTop: 20 },
+  titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  closeInline: {
+    width: 34, height: 34, borderRadius: 17, backgroundColor: colors.bg,
+    alignItems: 'center', justifyContent: 'center',
+  },
   title: { fontSize: 19, fontWeight: '700', color: colors.textMain, letterSpacing: -0.2 },
   venueRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   venue: { fontSize: 13, color: colors.textSub, fontWeight: '500' },

@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { logAction } = require('../services/auditService');
+const { isBlockedStatus, blockedMessage } = require('../services/deviceAccess');
 
 // GET /api/devices
 // Each device row is paired with the employee_faces row whose created_at is
@@ -98,8 +99,22 @@ async function updateDeviceStatus(req, res, next) {
     if (!['pending', 'approved', 'rejected', 'blacklisted'].includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status value.' });
     }
+    const [deviceRows] = await pool.query('SELECT employee_id, status, model FROM mobile_devices WHERE id = ?', [req.params.id]);
+    const device = deviceRows[0];
+    if (!device) return res.status(404).json({ success: false, message: 'Device not found.' });
+
     await pool.query('UPDATE mobile_devices SET status = ? WHERE id = ?', [status, req.params.id]);
     await logAction({ adminId: req.admin.id, action: 'update_status', module: 'devices', details: { id: req.params.id, status }, ip: req.ip });
+
+    // Tell the employee. A blocked phone is also signed out on its next
+    // request (see middleware/authMiddleware.js requireEmployeeAuth), where
+    // the app shows its own notification with the same explanation.
+    if (isBlockedStatus(status) && device.status !== status) {
+      await pool.query(
+        `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, ?, ?, 'device_blocked')`,
+        [device.employee_id, status === 'blacklisted' ? 'Device Blacklisted' : 'Device Rejected', blockedMessage(status)]
+      );
+    }
     res.json({ success: true, message: `Device marked as ${status}.` });
   } catch (err) {
     next(err);

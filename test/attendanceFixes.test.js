@@ -203,6 +203,38 @@ const metersNorth = (m) => m / 111320;
     check(r.status === 200 && q.params[2] === 42, 'editing an event excludes itself from the conflict check', { status: r.status, params: q && q.params });
   }
 
+  // ---- blacklisted / rejected devices are locked out ------------------------
+  {
+    const jwt = require('jsonwebtoken');
+    const config = require('../config/config');
+    const { requireEmployeeAuth } = require('../middleware/authMiddleware');
+    const token = jwt.sign({ id: 7, type: 'employee' }, config.jwt.secret);
+    const run = (deviceStatus, headers) => new Promise((resolve) => {
+      handler = (sql) => (/FROM mobile_devices WHERE device_uid/.test(sql) ? [deviceStatus ? [{ status: deviceStatus }] : []] : [[]]);
+      const res = {
+        statusCode: 200,
+        status(c) { this.statusCode = c; return this; },
+        json(data) { resolve({ status: this.statusCode, data }); }
+      };
+      requireEmployeeAuth({ headers: { authorization: `Bearer ${token}`, ...headers } }, res, () => resolve({ status: 'next' }));
+    });
+    const blacklisted = await run('blacklisted', { 'x-device-uid': 'dev-7' });
+    check(blacklisted.status === 403 && blacklisted.data.code === 'DEVICE_BLOCKED', 'signed-in request from a blacklisted device is refused', blacklisted);
+    const rejected = await run('rejected', { 'x-device-uid': 'dev-7' });
+    check(rejected.status === 403 && rejected.data.deviceStatus === 'rejected', 'rejected device is refused too', rejected);
+    check((await run('approved', { 'x-device-uid': 'dev-7' })).status === 'next', 'approved device passes');
+    check((await run('pending', { 'x-device-uid': 'dev-7' })).status === 'next', 'pending device passes (held on approval screen)');
+    check((await run(null, {})).status === 'next', 'no device header (older app) passes');
+  }
+  {
+    const deviceController = require('../controllers/deviceController');
+    log.length = 0;
+    handler = (sql) => (/SELECT employee_id, status, model FROM mobile_devices/.test(sql) ? [[{ employee_id: 7, status: 'approved' }]] : [[]]);
+    const r = await call(deviceController.updateDeviceStatus, { params: { id: 3 }, body: { status: 'blacklisted' } });
+    const notif = log.find((q) => /INSERT INTO notifications/.test(q.sql));
+    check(r.status === 200 && notif && notif.params[0] === 7 && notif.params[1] === 'Device Blacklisted', 'blacklisting notifies the employee', { r: r.data, notif });
+  }
+
   console.log(failures ? `\n${failures} failure(s)` : '\nAll checks passed.');
   process.exit(failures ? 1 : 0);
 })();

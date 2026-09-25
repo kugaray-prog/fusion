@@ -1,6 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../config';
+import { getDeviceUid } from '../utils/device';
 
 export { API_BASE_URL };
 
@@ -16,6 +17,9 @@ const FACE_UPLOAD_TIMEOUT_MS = 120000;
 api.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem('employee_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  // Lets the server refuse every request from a device an admin has
+  // blacklisted or rejected (code DEVICE_BLOCKED below).
+  config.headers['X-Device-Uid'] = getDeviceUid();
   return config;
 });
 
@@ -28,12 +32,22 @@ export function setStaleSessionHandler(fn) {
   staleSessionHandler = fn;
 }
 
+// Set by AuthContext. Called with (message, deviceStatus) when the server
+// reports this device was blacklisted/rejected by an admin.
+let deviceBlockedHandler = null;
+export function setDeviceBlockedHandler(fn) {
+  deviceBlockedHandler = fn;
+}
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     const code = error?.response?.data?.code;
     if ((code === 'EMPLOYEE_NOT_FOUND' || code === 'STALE_REFERENCE') && staleSessionHandler) {
       staleSessionHandler();
+    }
+    if (code === 'DEVICE_BLOCKED' && deviceBlockedHandler) {
+      deviceBlockedHandler(error.response.data.message, error.response.data.deviceStatus);
     }
     return Promise.reject(error);
   }

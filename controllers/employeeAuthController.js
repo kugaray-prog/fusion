@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
+const { isBlockedStatus, sendDeviceBlocked, getBlockedStatus } = require('../services/deviceAccess');
 const config = require('../config/config');
 const { logAction } = require('../services/auditService');
 const faceService = require('../services/faceService');
@@ -140,6 +141,7 @@ async function login(req, res, next) {
     );
 
     const deviceStatus = await getDeviceStatusFor(employee.id, device_uid);
+    if (isBlockedStatus(deviceStatus)) return sendDeviceBlocked(res, deviceStatus);
 
     // Same rule as googleLogin() below: a token is only issued for a device
     // already on file for THIS employee. A device can only ever belong to
@@ -215,6 +217,8 @@ async function googleLogin(req, res, next) {
       }
 
       const deviceStatus = await getDeviceStatusFor(employee.id, device_uid);
+      // A blacklisted/rejected device gets no token at all.
+      if (isBlockedStatus(deviceStatus)) return sendDeviceBlocked(res, deviceStatus);
 
       // A device can only ever belong to one employee, but an employee may
       // register and use multiple devices (see linkDevice() below) -- so
@@ -410,6 +414,9 @@ async function linkDevice(req, res, next) {
     if (!pendingToken || !employee_code || !surname || !given_name || !device_uid) {
       return res.status(400).json({ success: false, message: 'Missing required registration details.' });
     }
+    // Re-registering can't be used to get a blacklisted/rejected phone back in.
+    const blockedStatus = await getBlockedStatus(device_uid);
+    if (blockedStatus) return sendDeviceBlocked(res, blockedStatus);
     // Every registration-form field is required except Middle Name and
     // Suffix -- enforced here too, not just on the mobile form
     // (RegistrationScreen.js handleContinueToCapture), since a request

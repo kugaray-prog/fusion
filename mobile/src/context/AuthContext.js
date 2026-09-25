@@ -1,7 +1,19 @@
-import React, { createContext, useState, useEffect, useContext } from 'react';
+import React, { createContext, useState, useEffect, useContext, useRef } from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api, { googleLogin, linkDevice, getDeviceStatus, setStaleSessionHandler } from '../api/client';
+import api, { googleLogin, linkDevice, getDeviceStatus, setStaleSessionHandler, setDeviceBlockedHandler } from '../api/client';
 import { getDeviceUid } from '../utils/device';
+import { alertDeviceBlocked } from '../utils/deviceBlockedAlert';
+
+// How often a signed-in app re-checks whether an admin has blacklisted or
+// rejected this device (also re-checked whenever the app comes back to the
+// foreground, and on any request the server refuses with DEVICE_BLOCKED).
+const DEVICE_CHECK_INTERVAL_MS = 60000;
+const BLOCKED_STATUSES = ['blacklisted', 'rejected'];
+const DEFAULT_BLOCKED_MESSAGE = {
+  blacklisted: 'This device has been blacklisted by your administrator, so it can no longer be used to sign in or record attendance. Contact your administrator if you think this is a mistake.',
+  rejected: "This device's registration was rejected by your administrator, so it can't be used to sign in or record attendance. Contact your administrator.",
+};
 
 const AuthContext = createContext(null);
 
@@ -34,6 +46,10 @@ export function AuthProvider({ children }) {
   // Dashboard?" warning/crash).
   const [wifiVerified, setWifiVerified] = useState(false);
   const markWifiVerified = () => setWifiVerified(true);
+  // Why the app just signed itself out because an admin blacklisted or
+  // rejected this device -- shown on the Login screen. Null otherwise.
+  const [deviceBlockedNotice, setDeviceBlockedNotice] = useState(null);
+  const blockedHandledRef = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -61,6 +77,10 @@ export function AuthProvider({ children }) {
   const refreshDeviceStatus = async () => {
     try {
       const data = await getDeviceStatus(getDeviceUid());
+      if (BLOCKED_STATUSES.includes(data.deviceStatus)) {
+        handleDeviceBlocked(DEFAULT_BLOCKED_MESSAGE[data.deviceStatus], data.deviceStatus);
+        return data.deviceStatus;
+      }
       await persistDeviceStatus(data.deviceStatus);
       return data.deviceStatus;
     } catch (err) {
@@ -81,6 +101,8 @@ export function AuthProvider({ children }) {
   const loginWithGoogle = async (idToken) => {
     const data = await googleLogin(idToken, getDeviceUid());
     setStaleSession(false);
+    setDeviceBlockedNotice(null);
+    blockedHandledRef.current = false;
     if (data.matched) {
       await AsyncStorage.setItem('employee_token', data.token);
       await AsyncStorage.setItem('employee_data', JSON.stringify(data.employee));
@@ -103,6 +125,8 @@ export function AuthProvider({ children }) {
     if (!pendingGoogle) throw new Error('Your Google sign-in session expired. Please sign in again.');
     formData.append('pendingToken', pendingGoogle.pendingToken);
     const data = await linkDevice(formData);
+    setDeviceBlockedNotice(null);
+    blockedHandledRef.current = false;
     await AsyncStorage.setItem('employee_token', data.token);
     await AsyncStorage.setItem('employee_data', JSON.stringify(data.employee));
     setEmployee(data.employee);
@@ -120,6 +144,37 @@ export function AuthProvider({ children }) {
     setWifiVerified(false);
   };
 
+  // An admin blacklisted or rejected this device: sign out, notify the
+  // employee once, and leave the reason for the Login screen. Every request
+  // from this device is refused from now on (server: requireEmployeeAuth),
+  // so this can be reached from any API call.
+  const handleDeviceBlocked = (message, status) => {
+    const text = message || DEFAULT_BLOCKED_MESSAGE[status] || DEFAULT_BLOCKED_MESSAGE.blacklisted;
+    setDeviceBlockedNotice(text);
+    if (blockedHandledRef.current) return;
+    blockedHandledRef.current = true;
+    logout();
+    alertDeviceBlocked(text, status);
+  };
+
+  useEffect(() => {
+    setDeviceBlockedHandler(handleDeviceBlocked);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // While signed in, re-check this device's status periodically and each
+  // time the app returns to the foreground.
+  useEffect(() => {
+    if (!employee) return undefined;
+    const interval = setInterval(refreshDeviceStatus, DEVICE_CHECK_INTERVAL_MS);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshDeviceStatus();
+    });
+    return () => {
+      clearInterval(interval);
+      sub.remove();
+    };
+  }, [employee]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Registered once so ANY API call (device registration, attendance submit,
   // heartbeat, etc.) can trigger this — see api/client.js's response
   // interceptor. Clears the stale local session and returns the user to
@@ -132,7 +187,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ employee, loading, deviceStatus, pendingGoogle, staleSession, wifiVerified, markWifiVerified, loginWithGoogle, completeRegistration, cancelRegistration, refreshDeviceStatus, logout }}>
+    <AuthContext.Provider value={{ employee, loading, deviceStatus, pendingGoogle, staleSession, deviceBlockedNotice, wifiVerified, markWifiVerified, loginWithGoogle, completeRegistration, cancelRegistration, refreshDeviceStatus, logout }}>
       {children}
     </AuthContext.Provider>
   );
