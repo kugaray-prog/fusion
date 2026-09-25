@@ -62,8 +62,10 @@ export const shadow = {
   elevation: 4,
 };
 
-// CSPC logo image used across the login screen and profile avatar fallback.
-export const CSPC_LOGO_URL =
-  'https://upload.wikimedia.org/wikipedia/en/thumb/0/08/Camarines_Sur_Polytechnic_Colleges_Logo.png/220px-Camarines_Sur_Polytechnic_Colleges_Logo.png';
+// CSPC logo used across the login screen and header. Bundled with the app
+// (from Wikimedia Commons, "Camarines Sur Polytechnic Colleges Logo.png") so
+// it shows offline and doesn't break when a hotlinked URL changes. Use as an
+// <Image source={CSPC_LOGO}>.
+export const CSPC_LOGO = require('../assets/cspc-logo.png');
 
-export default { colors, radius, shadow, CSPC_LOGO_URL };
+export default { colors, radius, shadow, CSPC_LOGO };

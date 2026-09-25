@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image, Scr
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import { useAuth } from '../context/AuthContext';
-import { colors, radius, shadow, CSPC_LOGO_URL } from '../theme';
+import { colors, radius, shadow, CSPC_LOGO } from '../theme';
 import { API_BASE_URL, GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, isGoogleConfigured } from '../config';
 import { notify } from '../utils/notify';
 import FadeIn from '../components/FadeIn';
@@ -96,7 +96,7 @@ export default function LoginScreen({ navigation }) {
       <FadeIn delay={0}>
         <View style={styles.brandSection}>
           <View style={styles.logoContainer}>
-            <Image source={{ uri: CSPC_LOGO_URL }} style={styles.logoImage} resizeMode="contain" />
+            <Image source={CSPC_LOGO} style={styles.logoImage} resizeMode="contain" />
           </View>
           <Text style={styles.brandTitle}>CSPC GeoAttend</Text>
           <Text style={styles.brandSubtitle}>Institutional Identity Access</Text>

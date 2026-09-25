@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, radius, CSPC_LOGO_URL } from '../theme';
+import { colors, radius, CSPC_LOGO } from '../theme';
 
 // App identity mark (the CSPC seal, the same image already used on the
 // Login screen) paired with the app name, in the upper-left corner of every
@@ -21,7 +21,7 @@ export default function AppHeader({ title }) {
       <View style={styles.mark}>
         {!logoFailed ? (
           <Image
-            source={{ uri: CSPC_LOGO_URL }}
+            source={CSPC_LOGO}
             style={styles.logoImage}
             resizeMode="contain"
             onError={() => setLogoFailed(true)}
