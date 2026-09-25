@@ -23,6 +23,7 @@ async function getAllEvents(req, res, next) {
       `SELECT e.id, e.title, e.venue, e.start_datetime, e.end_datetime, e.recurrence_type,
               e.recurrence_days, e.recurrence_end_date, e.is_recurring_parent, e.parent_event_id,
               e.created_at, g.id AS geofence_id, g.is_active AS geofence_active,
+              g.center_lat, g.center_lng,
               (SELECT COUNT(*) FROM attendance a WHERE a.event_id = e.id) AS attendance_count
        FROM events e
        LEFT JOIN geofences g ON g.event_id = e.id

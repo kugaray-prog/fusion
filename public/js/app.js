@@ -722,15 +722,17 @@ const G_App = {
                 if (!tbody) return;
                 tbody.innerHTML = data.map(e => `
                     <tr>
-                        <td><b>${e.title}</b>${e.recurrence_type === 'weekly' ? ' <span class="badge badge-info" style="font-size:0.6rem;">Recurring</span>' : ''}</td>
-                        <td>${e.venue || 'N/A'}</td>
+                        <td><b>${escapeHtml(e.title)}</b>${e.recurrence_type === 'weekly' ? ' <span class="badge badge-info" style="font-size:0.6rem;">Recurring</span>' : ''}</td>
+                        <td>${escapeHtml(e.venue || 'N/A')}</td>
+                        <td style="font-variant-numeric: tabular-nums;">${e.center_lat != null ? Number(e.center_lat).toFixed(6) : '—'}</td>
+                        <td style="font-variant-numeric: tabular-nums;">${e.center_lng != null ? Number(e.center_lng).toFixed(6) : '—'}</td>
                         <td>${new Date(e.start_datetime).toLocaleString()}</td>
                         <td>${new Date(e.end_datetime).toLocaleString()}</td>
                         <td>${e.recurrence_type === 'weekly' ? `Weekly until ${e.recurrence_end_date || ''}` : 'One-time'}</td>
                         <td>${e.attendance_count}</td>
                         <td><span class="badge badge-${e.computed_status === 'ongoing' ? 'success' : (e.computed_status === 'completed' ? 'danger' : 'warning')}">${e.computed_status}</span></td>
                     </tr>
-                `).join('') || '<tr><td colspan="7" style="text-align:center; padding:30px;">No events found.</td></tr>';
+                `).join('') || '<tr><td colspan="9" style="text-align:center; padding:30px;">No events found.</td></tr>';
                 lucide.createIcons();
             } catch (err) { toast(err.message, 'error'); }
         }
