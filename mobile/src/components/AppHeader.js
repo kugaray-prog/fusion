@@ -27,7 +27,7 @@ export default function AppHeader({ title }) {
             onError={() => setLogoFailed(true)}
           />
         ) : (
-          <Ionicons name="globe-outline" size={18} color="#fff" />
+          <Ionicons name="school-outline" size={20} color={colors.primary} />
         )}
       </View>
       <View style={styles.textCol}>
@@ -39,13 +39,14 @@ export default function AppHeader({ title }) {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
   mark: {
-    width: 36, height: 36, borderRadius: radius.sm, backgroundColor: colors.primary,
+    width: 40, height: 40, borderRadius: radius.pill, backgroundColor: colors.white,
+    borderWidth: 1, borderColor: colors.border,
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
-  logoImage: { width: 26, height: 26 },
+  logoImage: { width: 32, height: 32 },
   textCol: { flex: 1, minWidth: 0 },
-  appName: { fontSize: 10, fontWeight: '800', color: colors.textSub, textTransform: 'uppercase', letterSpacing: 0.6 },
-  screenTitle: { fontSize: 19, fontWeight: '800', color: colors.textMain, marginTop: 1 },
+  appName: { fontSize: 11, fontWeight: '700', color: colors.textSub, textTransform: 'uppercase', letterSpacing: 0.8 },
+  screenTitle: { fontSize: 20, fontWeight: '700', color: colors.textMain, marginTop: 1, letterSpacing: -0.3 },
 });

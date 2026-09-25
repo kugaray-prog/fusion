@@ -52,10 +52,10 @@ export default function PrimaryButton({
 }
 
 const styles = StyleSheet.create({
-  base: { borderRadius: radius.md, padding: 16, alignItems: 'center', justifyContent: 'center' },
-  solid: { backgroundColor: colors.primary, ...shadow, shadowColor: colors.primary, shadowOpacity: 0.3 },
-  solidText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  base: { borderRadius: radius.md, paddingVertical: 15, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' },
+  solid: { backgroundColor: colors.primary, ...shadow, shadowColor: colors.primary, shadowOpacity: 0.25 },
+  solidText: { color: '#fff', fontWeight: '700', fontSize: 15, letterSpacing: 0.1 },
   light: { backgroundColor: '#fff' },
-  lightText: { color: colors.primary, fontWeight: '800', fontSize: 14 },
+  lightText: { color: colors.primary, fontWeight: '700', fontSize: 15 },
   disabled: { opacity: 0.5 },
 });

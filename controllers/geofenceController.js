@@ -56,8 +56,8 @@ function toMysqlDatetime(d) {
 
 // Returns a 409 message if any of `occurrences` clashes with an existing
 // event, or null. Two clashes are refused:
-//   - the same event again: same name and same start/end (e.g. "Initialize
-//     Protocol" clicked twice while the first request was still saving);
+//   - the same event again: same name and same start/end (e.g. "Create
+//     Event" clicked twice while the first request was still saving);
 //   - the same venue booked for an overlapping time by a different event.
 // Names and venues are compared trimmed and case-insensitively. Events
 // without a venue name are only checked for the first case. `excludeEventId`
@@ -256,8 +256,8 @@ async function createGeofence(req, res, next) {
     res.status(201).json({
       success: true,
       message: occurrences.length > 1
-        ? `Geofence protocol initialized for ${occurrences.length} occurrences.`
-        : 'Geofence protocol initialized.',
+        ? `Event created (${occurrences.length} occurrences).`
+        : 'Event created.',
       data: { id: firstGeofenceId, event_id: parentEventId, occurrence_count: occurrences.length, event_ids: createdEventIds }
     });
   } catch (err) {
@@ -319,7 +319,7 @@ async function updateGeofence(req, res, next) {
     await conn.commit();
     await logAction({ adminId: req.admin.id, action: 'update', module: 'geofence', details: { id, pointCount: points.length }, ip: req.ip });
 
-    res.json({ success: true, message: 'Geofence protocol updated.' });
+    res.json({ success: true, message: 'Event updated.' });
   } catch (err) {
     await conn.rollback();
     next(err);
@@ -338,7 +338,7 @@ async function deleteGeofence(req, res, next) {
     await pool.query('DELETE FROM events WHERE id = ?', [rows[0].event_id]);
     await logAction({ adminId: req.admin.id, action: 'delete', module: 'geofence', details: { id: req.params.id }, ip: req.ip });
 
-    res.json({ success: true, message: 'Geofence protocol terminated.' });
+    res.json({ success: true, message: 'Event deleted.' });
   } catch (err) {
     next(err);
   }

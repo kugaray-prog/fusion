@@ -22,13 +22,13 @@ export default function StatusPill({ label, variant = 'default' }) {
 
 const styles = StyleSheet.create({
   pill: {
-    fontSize: 9,
-    fontWeight: '800',
-    paddingVertical: 5,
+    fontSize: 10,
+    fontWeight: '700',
+    paddingVertical: 4,
     paddingHorizontal: 10,
-    borderRadius: 12,
+    borderRadius: 999,
     textTransform: 'uppercase',
-    letterSpacing: 0.3,
+    letterSpacing: 0.4,
     overflow: 'hidden',
   },
 });

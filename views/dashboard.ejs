@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GeoAttend | Institutional Intelligence Dashboard</title>
+    <title>GeoAttend | Admin Dashboard</title>
     <link rel="icon" type="image/png" href="/img/favicon.png">
     <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
 
@@ -28,12 +28,15 @@
             --text-main: #1B2559;
             --text-muted: #A3AED0;
             --border: #E9EDF7;
-            --shadow-sm: 0px 10px 30px rgba(112, 144, 176, 0.15);
-            --shadow-lg: 0px 25px 50px -12px rgba(0, 0, 165, 0.2);
-            --radius-xl: 30px;
-            --radius-lg: 24px;
-            --radius-md: 16px;
-            --transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            --shadow-sm: 0 1px 2px rgba(27, 37, 89, 0.04), 0 4px 16px rgba(112, 144, 176, 0.10);
+            --shadow-md: 0 2px 4px rgba(27, 37, 89, 0.05), 0 12px 28px rgba(112, 144, 176, 0.16);
+            --shadow-lg: 0 24px 48px -16px rgba(13, 0, 165, 0.22);
+            --ring: 0 0 0 3px rgba(67, 24, 255, 0.18);
+            --radius-xl: 20px;
+            --radius-lg: 16px;
+            --radius-md: 12px;
+            --radius-sm: 10px;
+            --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         body.dark-mode {
@@ -346,6 +349,122 @@
             .btn-primary { padding: 12px 18px; font-size: 0.9rem; }
             th, td { padding: 14px 16px; font-size: 0.85rem; }
         }
+
+        /* ------------------------------------------------------------
+           MODERN LAYER — cleaner type, tighter radii, subtle depth and
+           real hover/focus states. Colors come only from the :root
+           tokens above, so the CSPC theme is unchanged.
+        ------------------------------------------------------------ */
+        body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; font-size: 15px; }
+        h1, h2, h3, h4, h5 { letter-spacing: -0.01em; }
+        ::-webkit-scrollbar-thumb { background: var(--border); }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        :focus-visible { outline: none; box-shadow: var(--ring); }
+
+        .card { padding: 24px; box-shadow: var(--shadow-sm); }
+
+        /* Sidebar */
+        aside { width: 264px; padding: 28px 18px; }
+        aside > div:first-child h1 { font-size: 1.25rem !important; letter-spacing: -0.02em; }
+        .nav-item { gap: 12px; padding: 11px 14px; border-radius: var(--radius-sm); font-weight: 600; font-size: 0.92rem; margin-bottom: 4px; transition: background 0.15s ease, color 0.15s ease; }
+        .nav-item svg { width: 19px; height: 19px; flex-shrink: 0; }
+        .nav-item:hover:not(.active) { background: var(--primary-light); color: var(--primary); }
+        .nav-item.active { box-shadow: 0 6px 16px rgba(13, 0, 165, 0.22); }
+        .nav-item.nav-logout { color: var(--danger) !important; background: transparent !important; border: 1px solid var(--border); margin-top: 16px; }
+        .nav-item.nav-logout:hover { background: #FEE2E2 !important; border-color: #FECACA; }
+
+        /* Top bar */
+        header { padding: 24px 36px; }
+        header h2 { font-weight: 700 !important; letter-spacing: -0.02em; }
+        .nav-tool-btn { width: 42px; height: 42px; border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); }
+        .nav-tool-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+        /* Stat cards */
+        .stats-grid { gap: 20px; }
+        .stat-card { padding: 20px; gap: 16px; box-shadow: var(--shadow-sm); transition: var(--transition); }
+        .stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+        .stat-icon { width: 52px; height: 52px; border-radius: 14px; }
+        .stat-info span { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
+        .stat-info h4 { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; margin-bottom: 6px; }
+        .mini-stat-card, .quick-action-btn { box-shadow: var(--shadow-sm); transition: var(--transition); }
+        .mini-stat-card .mini-val { font-weight: 700; }
+        .quick-action-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .widget-title { font-weight: 700; }
+
+        /* Tables */
+        .table-container { box-shadow: var(--shadow-sm); }
+        th { padding: 13px 20px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; white-space: nowrap; }
+        td { padding: 14px 20px; font-size: 0.9rem; font-weight: 500; vertical-align: middle; }
+        tbody tr { transition: background 0.12s ease; }
+        tbody tr:hover td { background: var(--bg-body); }
+        tbody tr:last-child td { border-bottom: none; }
+
+        /* Badges */
+        .badge, .badge-select, .liveness-badge { border-radius: 999px; padding: 4px 11px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em; display: inline-flex; align-items: center; gap: 4px; }
+
+        /* Forms */
+        .geo-input { padding: 11px 14px; border-radius: var(--radius-sm); background: var(--bg-card); font-weight: 500; font-size: 0.92rem; }
+        .geo-input:hover { border-color: var(--text-muted); }
+        .geo-input:focus { border-color: var(--accent); box-shadow: var(--ring); }
+        .geo-input::placeholder { color: var(--text-muted); font-weight: 400; }
+
+        /* Buttons */
+        .btn-primary { padding: 11px 20px; border-radius: var(--radius-sm); font-weight: 600; font-size: 0.9rem; box-shadow: 0 1px 2px rgba(13, 0, 165, 0.12); }
+        .btn-primary:hover:not(:disabled) { filter: brightness(0.93); box-shadow: 0 6px 14px rgba(13, 0, 165, 0.18); }
+        .btn-primary:active:not(:disabled) { transform: translateY(1px); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-primary svg { width: 17px; height: 17px; }
+        .btn-icon { width: 34px; height: 34px; border-radius: 9px; transition: var(--transition); }
+        .btn-icon:hover { filter: brightness(0.94); transform: translateY(-1px); }
+        .btn-icon svg { width: 16px; height: 16px; }
+
+        /* Modals, drawer, toasts */
+        .modal-overlay { background: rgba(11, 20, 55, 0.45); backdrop-filter: blur(6px); transition: 0.2s; }
+        .modal-card { padding: 32px; transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+        .modal-overlay.open .modal-card { transform: none; }
+        .modal-card label { letter-spacing: 0.04em; }
+        #notif-drawer { padding: 28px; box-shadow: -12px 0 32px rgba(27, 37, 89, 0.12); }
+        .toast { padding: 14px 18px; border-radius: var(--radius-md); font-weight: 600; font-size: 0.9rem; box-shadow: var(--shadow-md); animation: toastIn 0.25s ease; }
+        @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+        .view { animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+        /* Sign-in — solid white card on the brand gradient */
+        .login-card { background: var(--bg-card); backdrop-filter: none; color: var(--text-main); padding: 44px 40px; border: none; box-shadow: var(--shadow-lg); max-width: 420px; }
+        .login-card h1 { color: var(--text-main); font-weight: 700 !important; letter-spacing: -0.02em; }
+        .login-card p { color: var(--text-muted); opacity: 1 !important; }
+        .login-card > div:first-child { border: 1px solid var(--border); }
+        .login-input { padding: 13px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-body); color: var(--text-main); margin-bottom: 14px; font-weight: 500; }
+        .login-input::placeholder { color: var(--text-muted); }
+        .login-input:focus { border-color: var(--accent); box-shadow: var(--ring); background: var(--bg-card); }
+        .login-btn { padding: 14px; border-radius: var(--radius-sm); background: var(--primary); color: #fff; font-weight: 600; margin-top: 6px; }
+        .login-btn:hover { background: var(--primary-hover); }
+        .login-error { color: var(--danger); font-weight: 600; }
+
+        /* Re-apply the responsive sizing above over this layer's defaults. */
+        @media (max-height: 820px) {
+            aside { padding: 20px 16px; }
+            .nav-item { padding: 9px 12px; margin-bottom: 2px; }
+        }
+        @media (max-width: 1180px) and (min-width: 901px) {
+            aside { width: 236px; }
+            header { padding: 20px 28px; }
+        }
+        @media (max-width: 900px) {
+            header { padding: 16px 20px; }
+            .modal-card { padding: 24px; }
+            .login-card { padding: 32px 24px; }
+        }
+        @media (max-width: 460px) {
+            .card { padding: 18px; }
+            header { padding: 14px 16px; }
+            th, td { padding: 12px 14px; }
+            .login-card { padding: 26px 18px; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+        }
     </style>
 </head>
 <body class="light-mode">
@@ -355,12 +474,12 @@
     <!-- NOTIFICATION DRAWER -->
     <div id="notif-drawer">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-            <h3 style="font-weight: 800; font-size: 1.4rem;">Live Feed</h3>
+            <h3 style="font-weight: 800; font-size: 1.4rem;">Notifications</h3>
             <button class="nav-tool-btn" onclick="G_App.ui.toggleNotifs()"><i data-lucide="x"></i></button>
         </div>
         <div id="notif-list">
             <div class="notif-item" style="padding: 18px; border-radius: 18px; background: var(--bg-body); border-left: 5px solid var(--primary); margin-bottom: 12px;">
-                <h5>System Active</h5><p style="font-size: 0.85rem; color: var(--text-muted);">Admin interface established.</p>
+                <h5>You're all caught up</h5><p style="font-size: 0.85rem; color: var(--text-muted);">New activity will appear here.</p>
             </div>
         </div>
     </div>
@@ -368,7 +487,7 @@
     <!-- MODAL PARA SA CRUD (CREATE/EDIT) -->
     <div id="crud-modal" class="modal-overlay">
         <div class="modal-card">
-            <h2 id="modal-title" style="margin-bottom: 25px; font-weight: 800;">Register Member</h2>
+            <h2 id="modal-title" style="margin-bottom: 25px; font-weight: 800;">Add Employee</h2>
             <input type="hidden" id="inp-id">
             <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Employee ID *</label>
             <input type="text" id="inp-code" class="geo-input" placeholder="e.g. E004" required>
@@ -472,11 +591,11 @@
         <div class="login-card">
             <div style="margin: 0 auto 30px; background: white; width: 96px; height: 96px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 6px;"><img src="/img/cspc-logo.png" alt="CSPC Logo" style="width: 100%; height: 100%; object-fit: contain;"></div>
             <h1 style="font-size: 1.8rem; font-weight: 800;">GeoAttend</h1>
-            <p style="margin-bottom: 30px; opacity: 0.7;">Institutional Intelligence Gateway</p>
+            <p style="margin-bottom: 30px; opacity: 0.7;">CSPC Admin Portal</p>
             <div class="login-error" id="login-error"></div>
             <input type="email" id="login-email" class="login-input" placeholder="Admin Email" value="<%= typeof defaultAdminEmail !== 'undefined' ? defaultAdminEmail : 'admin@my.cspc.edu.ph' %>">
             <input type="password" id="login-password" class="login-input" placeholder="Password" onkeypress="if(event.key==='Enter') G_App.auth.login()">
-            <button class="login-btn" id="login-btn" onclick="G_App.auth.login()">Verify & Authorize</button>
+            <button class="login-btn" id="login-btn" onclick="G_App.auth.login()">Sign In</button>
         </div>
     </div>
 
@@ -499,7 +618,7 @@
             <div class="nav-item" data-target="mobile-app"><i data-lucide="smartphone"></i> Device Management</div>
             <div class="nav-item" data-target="settings"><i data-lucide="sliders"></i> Settings</div>
         </nav>
-        <div class="nav-item" style="color: var(--danger); background: #FFF1F0; margin-top: 20px;" onclick="G_App.auth.logout()"><i data-lucide="power"></i> Terminate</div>
+        <div class="nav-item nav-logout" onclick="G_App.auth.logout()"><i data-lucide="log-out"></i> Log Out</div>
     </aside>
 
     <!-- MAIN WRAPPER -->
@@ -576,7 +695,7 @@
                         </button>
                         <button class="quick-action-btn" onclick="G_App.ui.switchView('reports');">
                             <div class="qa-icon"><i data-lucide="file-bar-chart" size="18"></i></div>
-                            Generate Report<small>Attendance intelligence</small>
+                            Generate Report<small>Attendance summaries</small>
                         </button>
                         <button class="quick-action-btn" onclick="G_App.ui.switchView('verification-section');">
                             <div class="qa-icon"><i data-lucide="scan-face" size="18"></i></div>
@@ -747,7 +866,7 @@
             <!-- REPORTS SECTION -->
             <div id="reports" class="view">
                 <div class="card">
-                    <h3 style="margin-bottom: 25px; font-weight: 800;">Intelligence Report Generator</h3>
+                    <h3 style="margin-bottom: 25px; font-weight: 800;">Generate Report</h3>
                     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px;">
                         <div>
                             <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display: block;">Office/Dept</label>
@@ -862,7 +981,7 @@
                 <div style="display: grid; grid-template-columns: 1fr 400px; gap: 25px; height: 720px;">
                     <div id="geo-map" style="border-radius: 24px; border: 1px solid var(--border); background: var(--bg-card);"></div>
                     <div class="card" style="overflow-y: auto;">
-                        <h3 id="gf-form-title" style="margin-bottom: 20px; font-weight: 800;">Boundary Protocol</h3>
+                        <h3 id="gf-form-title" style="margin-bottom: 20px; font-weight: 800;">Create Event &amp; Geofence</h3>
                         <div style="display: flex; flex-direction: column;">
                             <input type="hidden" id="gf-id">
                             <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px;">Event Name</label>
@@ -934,7 +1053,7 @@
                                     Cancel
                                 </button>
                                 <button id="btn-gf-save" class="btn-primary" style="flex: 2; padding: 18px;" onclick="G_App.geofence.save()">
-                                    <i data-lucide="shield-check"></i> Initialize Protocol
+                                    <i data-lucide="calendar-plus"></i> Create Event
                                 </button>
                             </div>
                         </div>
@@ -1083,7 +1202,7 @@
             <!-- DEVICE MANAGEMENT -->
             <div id="mobile-app" class="view">
                 <div class="card">
-                    <h3 style="margin-bottom: 10px; font-weight: 800;">Device Registry</h3>
+                    <h3 style="margin-bottom: 10px; font-weight: 800;">Registered Devices</h3>
                     <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 25px;">Hardware linked to employee accounts.</p>
                     <div class="table-container">
                         <table>

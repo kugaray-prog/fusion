@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, RefreshControl, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import api from '../api/client';
-import { colors, radius, shadow } from '../theme';
+import { colors, radius, shadow, type } from '../theme';
 import BottomNav from '../components/BottomNav';
 import StatusPill from '../components/StatusPill';
 import FadeIn from '../components/FadeIn';
@@ -91,7 +92,15 @@ export default function HistoryScreen({ navigation }) {
           data={filteredRecords}
           keyExtractor={(item) => String(item.id)}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
-          ListEmptyComponent={<Text style={styles.empty}>📋{'\n'}No attendance history found{filter !== 'all' ? ' for this filter.' : '.'}</Text>}
+          ListEmptyComponent={
+            <View style={styles.emptyWrap}>
+              <View style={styles.emptyIcon}>
+                <Ionicons name="document-text-outline" size={26} color={colors.primary} />
+              </View>
+              <Text style={styles.emptyTitle}>No attendance yet</Text>
+              <Text style={styles.empty}>No attendance history found{filter !== 'all' ? ' for this filter.' : '.'}</Text>
+            </View>
+          }
           renderItem={({ item, index }) => {
             const completed = !!item.time_out;
             const durationSeconds = liveDurationSeconds(item);
@@ -110,12 +119,20 @@ export default function HistoryScreen({ navigation }) {
                       <StatusPill label={completed ? 'Completed' : 'On-going'} variant={completed ? 'success' : 'waiting'} />
                     </View>
                   </View>
-                  <Text style={styles.metaLine}>📅 {item.attendance_date}</Text>
-                  <Text style={styles.metaLine}>
-                    <Text style={{ color: colors.success }}>In: {item.time_in ? new Date(item.time_in).toLocaleTimeString() : '--:--'}</Text>
-                    {'  |  '}
-                    <Text style={{ color: colors.error }}>Out: {item.time_out ? new Date(item.time_out).toLocaleTimeString() : '--:--'}</Text>
-                  </Text>
+                  <View style={styles.metaRow}>
+                    <Ionicons name="calendar-outline" size={13} color={colors.textSub} />
+                    <Text style={styles.metaLine}>{item.attendance_date}</Text>
+                  </View>
+                  <View style={styles.timesRow}>
+                    <View style={styles.timeBox}>
+                      <Text style={styles.timeLabel}>Time in</Text>
+                      <Text style={[styles.timeValue, { color: colors.successText }]}>{item.time_in ? new Date(item.time_in).toLocaleTimeString() : '--:--'}</Text>
+                    </View>
+                    <View style={styles.timeBox}>
+                      <Text style={styles.timeLabel}>Time out</Text>
+                      <Text style={[styles.timeValue, { color: item.time_out ? colors.dangerText : colors.textSub }]}>{item.time_out ? new Date(item.time_out).toLocaleTimeString() : '--:--'}</Text>
+                    </View>
+                  </View>
                   <View style={styles.durationRow}>
                     <Text style={styles.durationLabel}>Duration</Text>
                     <Text style={[styles.durationValue, !completed && { color: colors.warningText }]}>
@@ -138,30 +155,39 @@ export default function HistoryScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
-  header: { fontSize: 20, fontWeight: '800', color: colors.textMain },
-  filterRow: { flexGrow: 0, marginTop: 14 },
+  filterRow: { flexGrow: 0, marginTop: 2 },
   filterChip: {
-    paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20,
+    paddingVertical: 8, paddingHorizontal: 16, borderRadius: radius.pill,
     backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border,
   },
   filterChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  filterChipText: { fontSize: 12, fontWeight: '700', color: colors.textSub },
+  filterChipText: { fontSize: 13, fontWeight: '600', color: colors.textSub },
   filterChipTextActive: { color: '#fff' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { flex: 1 },
-  empty: { textAlign: 'center', color: colors.textSub, marginTop: 40, fontSize: 13 },
+  emptyWrap: { alignItems: 'center', marginTop: 48, paddingHorizontal: 24 },
+  emptyIcon: {
+    width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+  },
+  emptyTitle: { ...type.heading, marginBottom: 4 },
+  empty: { ...type.caption, textAlign: 'center' },
   card: {
     backgroundColor: colors.white, borderRadius: radius.lg, padding: 16,
     marginBottom: 12, borderWidth: 1, borderColor: colors.border, ...shadow,
   },
-  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  eventTitle: { fontWeight: '700', color: colors.textMain, fontSize: 13, flex: 1, marginRight: 8 },
-  metaLine: { fontSize: 12, color: colors.textSub, marginTop: 2 },
+  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8 },
+  eventTitle: { fontWeight: '600', color: colors.textMain, fontSize: 15, flex: 1 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  metaLine: { ...type.caption },
+  timesRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  timeBox: { flex: 1, backgroundColor: colors.bg, borderRadius: radius.sm, paddingVertical: 8, paddingHorizontal: 12 },
+  timeLabel: { fontSize: 11, fontWeight: '600', color: colors.textSub },
+  timeValue: { fontSize: 14, fontWeight: '700', marginTop: 2 },
   durationRow: {
-    flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingTop: 10,
-    borderTopWidth: 1, borderTopColor: colors.bg,
+    flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingTop: 12,
+    borderTopWidth: 1, borderTopColor: colors.border,
   },
-  durationLabel: { fontSize: 11, fontWeight: '700', color: colors.textSub, textTransform: 'uppercase', letterSpacing: 0.4, marginRight: 8 },
-  durationValue: { fontSize: 14, fontWeight: '800', color: colors.primary },
-  sessionCountText: { fontSize: 11, color: colors.textSub, fontWeight: '600', marginLeft: 6 },
+  durationLabel: { ...type.overline, marginRight: 8 },
+  durationValue: { fontSize: 15, fontWeight: '700', color: colors.primary },
+  sessionCountText: { ...type.caption, marginLeft: 6 },
 });

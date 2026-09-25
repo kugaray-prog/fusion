@@ -1,16 +1,17 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { colors, radius, shadow } from '../theme';
+import { Ionicons } from '@expo/vector-icons';
+import { colors, radius } from '../theme';
 
 const ITEMS = [
-  { key: 'Dashboard', label: 'Home', icon: '🏠' },
-  { key: 'History', label: 'Logs', icon: '📋' },
-  { key: 'Profile', label: 'Profile', icon: '👤' },
+  { key: 'Dashboard', label: 'Home', icon: 'home-outline', iconActive: 'home' },
+  { key: 'History', label: 'Logs', icon: 'time-outline', iconActive: 'time' },
+  { key: 'Profile', label: 'Profile', icon: 'person-outline', iconActive: 'person' },
 ];
 
 // Bottom tab bar rendered inside each main screen (Home / Logs / Profile).
-// Active item mirrors the admin sidebar's .nav-item.active treatment: a
-// solid indigo pill with white content, floating above a plain white bar.
+// The active tab gets a tinted pill behind a filled icon; the others stay
+// as quiet outline icons.
 export default function BottomNav({ active, navigation }) {
   return (
     <View style={styles.nav}>
@@ -19,11 +20,20 @@ export default function BottomNav({ active, navigation }) {
         return (
           <TouchableOpacity
             key={item.key}
-            style={[styles.navItem, isActive && styles.navItemActive]}
+            style={styles.navItem}
             onPress={() => navigation.navigate(item.key)}
-            activeOpacity={0.8}
+            activeOpacity={0.7}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: isActive }}
+            accessibilityLabel={item.label}
           >
-            <Text style={[styles.icon, isActive && styles.iconActive]}>{item.icon}</Text>
+            <View style={[styles.iconPill, isActive && styles.iconPillActive]}>
+              <Ionicons
+                name={isActive ? item.iconActive : item.icon}
+                size={21}
+                color={isActive ? colors.primary : colors.textSub}
+              />
+            </View>
             <Text style={[styles.label, isActive && styles.labelActive]}>{item.label}</Text>
           </TouchableOpacity>
         );
@@ -40,26 +50,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingTop: 10,
-    paddingBottom: 22,
+    paddingTop: 8,
+    paddingBottom: 20,
     paddingHorizontal: 12,
-    gap: 8,
   },
-  navItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
-    paddingVertical: 8,
-    borderRadius: radius.md,
+  navItem: { flex: 1, alignItems: 'center', gap: 3 },
+  iconPill: {
+    width: 56, height: 30, borderRadius: radius.pill,
+    alignItems: 'center', justifyContent: 'center',
   },
-  navItemActive: {
-    backgroundColor: colors.primary,
-    ...shadow,
-    shadowColor: colors.primary,
-    shadowOpacity: 0.3,
-  },
-  icon: { fontSize: 17, marginBottom: 2 },
-  iconActive: {},
-  label: { fontSize: 10, fontWeight: '700', color: colors.textSub },
-  labelActive: { color: '#fff', fontWeight: '800' },
+  iconPillActive: { backgroundColor: colors.primaryLight },
+  label: { fontSize: 11, fontWeight: '600', color: colors.textSub },
+  labelActive: { color: colors.primary, fontWeight: '700' },
 });

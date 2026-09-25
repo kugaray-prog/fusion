@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, Platform, Linking
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { checkOfficeNetwork } from '../api/client';
 import { colors, radius, shadow } from '../theme';
 import { notify } from '../utils/notify';
@@ -66,6 +67,9 @@ export default function WifiCheckScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20, flexGrow: 1, justifyContent: 'center' }}>
       <View style={styles.card}>
+        <View style={styles.heroIcon}>
+          <Ionicons name="wifi" size={28} color={colors.primary} />
+        </View>
         <Text style={styles.title}>Verifying Location Network</Text>
         <Text style={styles.subtitle}>
           To confirm you're within the designated area, connect to the office Wi-Fi. Any router, extender or repeater on the office internet connection works.
@@ -85,7 +89,10 @@ export default function WifiCheckScreen() {
 
         {phase === 'matched' && (
           <View style={[styles.statusBanner, { backgroundColor: colors.successBg }]}>
-            <Text style={[styles.statusBannerText, { color: colors.success }]}>✅ Connected to the office network</Text>
+            <View style={styles.bannerRow}>
+              <Ionicons name="checkmark-circle" size={18} color={colors.successText} />
+              <Text style={[styles.statusBannerText, { color: colors.successText }]}>Connected to the office network</Text>
+            </View>
           </View>
         )}
 
@@ -105,7 +112,7 @@ export default function WifiCheckScreen() {
               <Text style={styles.btnGoldText}>Open Wi-Fi Settings</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.btnOutline} onPress={checkNetwork}>
-              <Text style={styles.btnOutlineText}>I've connected — Recheck</Text>
+              <Text style={styles.btnOutlineText}>I've connected, check again</Text>
             </TouchableOpacity>
           </>
         )}
@@ -120,7 +127,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white, borderRadius: radius.lg, padding: 22,
     borderWidth: 1, borderColor: colors.border, ...shadow,
   },
-  title: { fontSize: 18, fontWeight: '800', color: colors.cspcBlue, textAlign: 'center' },
+  heroIcon: { width: 60, height: 60, borderRadius: 30, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 14 },
+  bannerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  title: { fontSize: 19, fontWeight: '700', color: colors.textMain, textAlign: 'center', letterSpacing: -0.2 },
   subtitle: { color: colors.textSub, fontSize: 13, textAlign: 'center', marginTop: 8, marginBottom: 18, lineHeight: 18 },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   infoLabel: { fontSize: 11, color: colors.textSub, fontWeight: '700', textTransform: 'uppercase' },
@@ -131,7 +140,7 @@ const styles = StyleSheet.create({
   statusBannerText: { fontWeight: '700', fontSize: 13, textAlign: 'center' },
   errorText: { color: colors.error, fontSize: 12, marginTop: 10, textAlign: 'center' },
   btnGold: { backgroundColor: colors.primary, borderRadius: radius.md, padding: 14, alignItems: 'center', marginTop: 16, ...shadow, shadowColor: colors.primary, shadowOpacity: 0.3 },
-  btnGoldText: { color: '#fff', fontWeight: '800', fontSize: 14 },
-  btnOutline: { borderWidth: 2, borderColor: colors.border, borderRadius: radius.md, padding: 14, alignItems: 'center', marginTop: 12 },
+  btnGoldText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  btnOutline: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: 14, alignItems: 'center', marginTop: 12 },
   btnOutlineText: { color: colors.primary, fontWeight: '700', fontSize: 14 },
 });

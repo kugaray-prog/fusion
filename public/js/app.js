@@ -81,7 +81,7 @@ const G_App = {
                 }, 400);
             } catch (err) {
                 errorEl.innerText = err.message;
-                btn.innerText = 'Verify & Authorize';
+                btn.innerText = 'Sign In';
             }
         },
         logout: async () => {
@@ -467,7 +467,7 @@ const G_App = {
 
             if (id) {
                 const emp = G_App.state.employees.find(e => e.id == id);
-                title.innerText = 'Edit Member';
+                title.innerText = 'Edit Employee';
                 document.getElementById('inp-id').value = emp.id;
                 document.getElementById('inp-code').value = emp.employee_code;
                 document.getElementById('inp-surname').value = emp.surname || '';
@@ -484,7 +484,7 @@ const G_App = {
                 saveBtn.onclick = () => G_App.employees.update();
                 G_App.employees.renderDeviceInfo(emp.id);
             } else {
-                title.innerText = 'Register Member';
+                title.innerText = 'Add Employee';
                 document.getElementById('inp-id').value = '';
                 document.getElementById('inp-code').value = '';
                 document.getElementById('inp-surname').value = '';
@@ -1025,7 +1025,7 @@ const G_App = {
                 saveBtn.innerHTML = saveBtnHtml;
                 G_App.geofence.clearForm();
                 await G_App.geofence.load();
-                toast('Protocol saved successfully.', 'success');
+                toast('Event saved.', 'success');
                 // Only refresh the Dashboard's charts/stats if that page is
                 // actually the visible view — refreshing it while on the
                 // Geo-Fences page reaches into hidden canvases and can throw
@@ -1047,7 +1047,7 @@ const G_App = {
         edit: (id) => {
             const gf = G_App.state.geofences.find(g => g.id == id);
             if (!gf) return;
-            document.getElementById('gf-form-title').innerText = 'Edit Boundary Protocol';
+            document.getElementById('gf-form-title').innerText = 'Edit Event & Geofence';
             document.getElementById('gf-id').value = gf.id;
             document.getElementById('gf-title').value = gf.title;
             document.getElementById('gf-venue').value = gf.venue || '';
@@ -1060,7 +1060,7 @@ const G_App = {
             document.getElementById('gf-lat').value = gf.center_lat != null ? Number(gf.center_lat).toFixed(7) : '';
             document.getElementById('gf-lng').value = gf.center_lng != null ? Number(gf.center_lng).toFixed(7) : '';
             document.getElementById('btn-gf-cancel').classList.remove('hidden');
-            document.getElementById('btn-gf-save').innerHTML = '<i data-lucide="save"></i> Update Protocol';
+            document.getElementById('btn-gf-save').innerHTML = '<i data-lucide="save"></i> Save Changes';
             lucide.createIcons();
 
             // Load the existing polygon onto the map so it can be redrawn/adjusted.
@@ -1073,15 +1073,15 @@ const G_App = {
             }
         },
         delete: async (id) => {
-            if (!confirm('Terminate this Geo-Fence protocol?')) return;
+            if (!confirm('Delete this event and its geofence? This cannot be undone.')) return;
             try {
                 await apiFetch(`/geofences/${id}`, { method: 'DELETE' });
                 await G_App.geofence.load();
-                toast('Geofence terminated.', 'success');
+                toast('Event deleted.', 'success');
             } catch (err) { toast(err.message, 'error'); }
         },
         clearForm: () => {
-            document.getElementById('gf-form-title').innerText = 'Boundary Protocol';
+            document.getElementById('gf-form-title').innerText = 'Create Event & Geofence';
             ['gf-id', 'gf-title', 'gf-venue', 'gf-start', 'gf-end', 'gf-lat', 'gf-lng'].forEach(id => document.getElementById(id).value = '');
             document.getElementById('gf-recurrence-type').value = 'none';
             document.getElementById('gf-recurrence-end').value = '';
@@ -1090,7 +1090,7 @@ const G_App = {
             document.querySelectorAll('#gf-weekday-picker input:checked').forEach(el => el.checked = false);
             document.getElementById('gf-recurrence-fields').classList.add('hidden');
             document.getElementById('btn-gf-cancel').classList.add('hidden');
-            document.getElementById('btn-gf-save').innerHTML = '<i data-lucide="shield-check"></i> Initialize Protocol';
+            document.getElementById('btn-gf-save').innerHTML = '<i data-lucide="calendar-plus"></i> Create Event';
             G_App.geofence.clearPoints();
             if (G_App.geofence.centerMarker) {
                 G_App.geofence.centerMarker.setMap(null);

@@ -1,12 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
-import { colors, radius, shadow } from '../theme';
+import { colors, radius, shadow, type } from '../theme';
 import BottomNav from '../components/BottomNav';
 import { getDeviceInfo } from '../utils/device';
 import { assetUrl } from '../config';
 import FadeIn from '../components/FadeIn';
 import AppHeader from '../components/AppHeader';
+
+function InfoRow({ icon, label, value, mono }) {
+  return (
+    <View style={styles.infoRow}>
+      <View style={styles.infoIcon}>
+        <Ionicons name={icon} size={17} color={colors.primary} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.infoLabel}>{label}</Text>
+        <Text style={[styles.infoValue, mono && styles.mono]} numberOfLines={mono ? 1 : 2}>{value}</Text>
+      </View>
+    </View>
+  );
+}
 
 // Mirrors the #screen-profile card from the CSPC GeoAttend web prototype:
 // avatar circle, name/employee id, and a monospace device-info block.
@@ -42,7 +57,7 @@ export default function ProfileScreen({ navigation }) {
                     onError={() => setPhotoFailed(true)}
                   />
                 ) : (
-                  <Text style={styles.avatarText}>👤</Text>
+                  <Ionicons name="person" size={34} color="#fff" />
                 )}
               </View>
               <Text style={styles.name}>{employee?.full_name || 'User'}</Text>
@@ -52,14 +67,15 @@ export default function ProfileScreen({ navigation }) {
             <View style={styles.divider} />
 
             <View style={styles.infoBlock}>
-              <Text style={styles.infoLine}><Text style={styles.infoLabel}>DEPARTMENT: </Text>{employee?.department || '--'}</Text>
-              <Text style={styles.infoLine}><Text style={styles.infoLabel}>DEVICE MODEL: </Text>{device.model}</Text>
-              <Text style={styles.infoLine}><Text style={styles.infoLabel}>DEVICE ID: </Text>{device.uid}</Text>
+              <InfoRow icon="business-outline" label="Department" value={employee?.department || '--'} />
+              <InfoRow icon="phone-portrait-outline" label="Device model" value={device.model} />
+              <InfoRow icon="finger-print-outline" label="Device ID" value={device.uid} mono />
             </View>
           </View>
 
           <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.85}>
-            <Text style={styles.logoutText}>Logout from Device</Text>
+            <Ionicons name="log-out-outline" size={19} color={colors.dangerText} />
+            <Text style={styles.logoutText}>Log out from this device</Text>
           </TouchableOpacity>
         </FadeIn>
       </ScrollView>
@@ -70,24 +86,33 @@ export default function ProfileScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
-  header: { fontSize: 20, fontWeight: '800', color: colors.textMain, marginBottom: 16 },
   card: {
-    backgroundColor: colors.white, borderRadius: radius.lg, padding: 18,
+    backgroundColor: colors.white, borderRadius: radius.lg, padding: 20,
     borderWidth: 1, borderColor: colors.border, ...shadow, marginBottom: 16,
   },
-  avatarWrap: { alignItems: 'center', marginBottom: 15 },
+  avatarWrap: { alignItems: 'center', marginBottom: 18 },
   avatar: {
-    width: 60, height: 60, borderRadius: 30, backgroundColor: colors.cspcBlue,
-    alignItems: 'center', justifyContent: 'center', marginBottom: 10, overflow: 'hidden',
+    width: 76, height: 76, borderRadius: 38, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 12, overflow: 'hidden',
+    borderWidth: 3, borderColor: colors.primaryLight,
   },
   avatarPhoto: { width: '100%', height: '100%' },
-  avatarText: { fontSize: 24 },
-  name: { color: colors.cspcBlue, fontWeight: '800', fontSize: 16 },
-  empId: { color: colors.textSub, fontSize: 12, marginTop: 2 },
-  divider: { borderTopWidth: 1, borderTopColor: '#EEE', marginTop: 5, marginBottom: 15 },
-  infoBlock: { gap: 8 },
-  infoLine: { fontSize: 13, color: colors.textMain, fontFamily: 'monospace' },
-  infoLabel: { fontWeight: '800' },
-  logoutBtn: { backgroundColor: colors.dangerBg, borderRadius: radius.md, padding: 16, alignItems: 'center' },
-  logoutText: { color: colors.error, fontWeight: '700', fontSize: 15 },
+  name: { ...type.heading, textAlign: 'center' },
+  empId: { ...type.caption, marginTop: 2 },
+  divider: { borderTopWidth: 1, borderTopColor: colors.border, marginBottom: 6 },
+  infoBlock: {},
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  infoIcon: {
+    width: 36, height: 36, borderRadius: radius.sm, backgroundColor: colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  infoLabel: { fontSize: 11, fontWeight: '600', color: colors.textSub },
+  infoValue: { fontSize: 14, fontWeight: '600', color: colors.textMain, marginTop: 1 },
+  mono: { fontFamily: 'monospace', fontSize: 12 },
+  logoutBtn: {
+    flexDirection: 'row', gap: 8, backgroundColor: colors.white, borderRadius: radius.md,
+    paddingVertical: 15, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: colors.dangerBg,
+  },
+  logoutText: { color: colors.dangerText, fontWeight: '700', fontSize: 15 },
 });

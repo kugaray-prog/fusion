@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, Animated, Easing } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAttendanceTracking } from '../context/AttendanceTrackingContext';
 import { colors, radius, shadow } from '../theme';
 import { formatDuration } from '../utils/duration';
@@ -94,7 +95,10 @@ export default function AttendanceScreen({ route }) {
         <FadeIn delay={60}>
           <View style={styles.eventCard}>
             <Text style={styles.eventTitle}>{geofence.title}</Text>
-            <Text style={styles.eventVenue}>📍 {geofence.venue}</Text>
+            <View style={styles.venueRow}>
+              <Ionicons name="location-outline" size={14} color={colors.textSub} />
+              <Text style={styles.eventVenue}>{geofence.venue || 'Venue TBA'}</Text>
+            </View>
           </View>
         </FadeIn>
       )}
@@ -127,18 +131,19 @@ const styles = StyleSheet.create({
   statusCard: { borderRadius: radius.md, padding: 18, marginBottom: 14 },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success },
-  statusText: { fontWeight: '800', fontSize: 14, flexShrink: 1 },
+  statusText: { fontWeight: '700', fontSize: 14, flexShrink: 1, lineHeight: 20 },
   checkInErrorText: { color: colors.error, fontSize: 12, marginTop: 8, fontWeight: '600' },
   accuracyText: { color: colors.textMain, fontSize: 12, marginTop: 6 },
   eventCard: { backgroundColor: colors.white, borderRadius: radius.md, padding: 18, marginBottom: 14, borderWidth: 1, borderColor: colors.border, ...shadow },
-  eventTitle: { fontWeight: '800', color: colors.cspcBlue, fontSize: 16 },
-  eventVenue: { color: colors.textSub, marginTop: 4, fontSize: 12 },
+  eventTitle: { fontWeight: '700', color: colors.textMain, fontSize: 17, letterSpacing: -0.2 },
+  venueRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  eventVenue: { color: colors.textSub, fontSize: 13, fontWeight: '500' },
   durationCard: {
     backgroundColor: colors.primary, borderRadius: radius.md, padding: 22, marginBottom: 14,
     alignItems: 'center', ...shadow, shadowColor: colors.primary, shadowOpacity: 0.3,
   },
-  durationLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
-  durationValue: { color: '#fff', fontSize: 34, fontWeight: '800', marginTop: 8 },
+  durationLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
+  durationValue: { color: '#fff', fontSize: 38, fontWeight: '700', marginTop: 8, letterSpacing: -0.5 },
   sessionCountText: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '600', marginTop: 8 },
   infoCard: { backgroundColor: colors.successBg, borderRadius: radius.md, padding: 14, marginBottom: 14 },
   infoText: { color: colors.success, fontSize: 12, fontWeight: '600' },

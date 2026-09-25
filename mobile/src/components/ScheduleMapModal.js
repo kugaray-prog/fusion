@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Modal, TouchableOpacity, StyleSheet, Platform, Linking } from 'react-native';
 import Constants from 'expo-constants';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, shadow } from '../theme';
 
 // react-native-maps has no web implementation, and this app's dev/browser
@@ -102,7 +103,7 @@ export default function ScheduleMapModal({ visible, schedule, onClose }) {
               </MapView>
             ) : (
               <View style={styles.mapFallback}>
-                <Text style={styles.mapFallbackIcon}>📍</Text>
+                <Ionicons name="location" size={30} color={colors.primary} style={{ marginBottom: 8 }} />
                 <Text style={styles.mapFallbackText}>
                   {center
                     ? `${center.latitude.toFixed(5)}, ${center.longitude.toFixed(5)}`
@@ -119,13 +120,16 @@ export default function ScheduleMapModal({ visible, schedule, onClose }) {
               </View>
             )}
             <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-              <Text style={styles.closeBtnText}>✕</Text>
+              <Ionicons name="close" size={18} color="#fff" />
             </TouchableOpacity>
           </View>
 
           <View style={styles.body}>
             <Text style={styles.title}>{schedule.title}</Text>
-            <Text style={styles.venue}>📍 {schedule.venue || 'Venue TBA'}</Text>
+            <View style={styles.venueRow}>
+              <Ionicons name="location-outline" size={14} color={colors.textSub} />
+              <Text style={styles.venue}>{schedule.venue || 'Venue TBA'}</Text>
+            </View>
 
             <View style={styles.metaRow}>
               <View style={styles.metaItem}>
@@ -186,8 +190,9 @@ const styles = StyleSheet.create({
   },
   closeBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   body: { padding: 24, paddingTop: 20 },
-  title: { fontSize: 18, fontWeight: '800', color: colors.textMain },
-  venue: { fontSize: 13, color: colors.textSub, marginTop: 4, fontWeight: '600' },
+  title: { fontSize: 19, fontWeight: '700', color: colors.textMain, letterSpacing: -0.2 },
+  venueRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  venue: { fontSize: 13, color: colors.textSub, fontWeight: '500' },
   metaRow: {
     flexDirection: 'row', alignItems: 'center', marginTop: 18,
     backgroundColor: colors.primaryLight, borderRadius: radius.md, padding: 16,
@@ -198,7 +203,7 @@ const styles = StyleSheet.create({
   metaValue: { fontSize: 13, fontWeight: '700', color: colors.textMain },
   actionsRow: { flexDirection: 'row', gap: 12, marginTop: 22 },
   btnOutline: {
-    flex: 1, borderWidth: 2, borderColor: colors.border, borderRadius: radius.md,
+    flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
     paddingVertical: 14, alignItems: 'center',
   },
   btnOutlineText: { color: colors.textSub, fontWeight: '700', fontSize: 13 },

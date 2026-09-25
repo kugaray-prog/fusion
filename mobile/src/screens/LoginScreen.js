@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image, ScrollView, Animated } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
+import { Ionicons } from '@expo/vector-icons';
 import * as Google from 'expo-auth-session/providers/google';
 import { useAuth } from '../context/AuthContext';
 import { colors, radius, shadow, CSPC_LOGO } from '../theme';
@@ -9,8 +10,6 @@ import { notify } from '../utils/notify';
 import FadeIn from '../components/FadeIn';
 
 WebBrowser.maybeCompleteAuthSession();
-
-const GOOGLE_G_ICON_URL = 'https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg';
 
 // Mirrors the #screen-login → #screen-choice flow from the CSPC GeoAttend web
 // prototype, but using real Google Sign-In (expo-auth-session) instead of the
@@ -99,14 +98,15 @@ export default function LoginScreen({ navigation }) {
             <Image source={CSPC_LOGO} style={styles.logoImage} resizeMode="contain" />
           </View>
           <Text style={styles.brandTitle}>CSPC GeoAttend</Text>
-          <Text style={styles.brandSubtitle}>Institutional Identity Access</Text>
+          <Text style={styles.brandSubtitle}>Employee Attendance</Text>
         </View>
       </FadeIn>
 
       <FadeIn delay={120}>
         <View style={styles.body}>
           <View style={styles.card}>
-            <Text style={styles.cardLead}>Sign in with your official CSPC Google Account.</Text>
+            <Text style={styles.cardTitle}>Sign in</Text>
+            <Text style={styles.cardLead}>Use your official CSPC Google account.</Text>
 
             <Animated.View style={{ width: '100%', transform: [{ scale: btnScale }] }}>
               <TouchableOpacity
@@ -121,7 +121,7 @@ export default function LoginScreen({ navigation }) {
                   <ActivityIndicator color={colors.cspcBlue} />
                 ) : (
                   <>
-                    <Image source={{ uri: GOOGLE_G_ICON_URL }} style={styles.googleIcon} />
+                    <Ionicons name="logo-google" size={20} color="#4285F4" />
                     <Text style={styles.googleBtnText}>Continue with Google</Text>
                   </>
                 )}
@@ -147,7 +147,7 @@ export default function LoginScreen({ navigation }) {
               </TouchableOpacity>
             )}
           </View>
-          <Text style={styles.secureTag}>● SECURE ENCLAVE</Text>
+          <Text style={styles.secureTag}>Camarines Sur Polytechnic Colleges</Text>
         </View>
       </FadeIn>
     </ScrollView>
@@ -172,7 +172,7 @@ const styles = StyleSheet.create({
     marginBottom: 16, alignItems: 'center', justifyContent: 'center',
   },
   logoImage: { width: '100%', height: '100%' },
-  brandTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  brandTitle: { color: '#fff', fontSize: 24, fontWeight: '700', letterSpacing: -0.3 },
   brandSubtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 4 },
   body: { paddingHorizontal: 20, marginTop: -30 },
   card: {
@@ -184,15 +184,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...shadow,
   },
-  cardLead: { color: colors.textSub, fontSize: 14, marginBottom: 22, textAlign: 'center', fontWeight: '600' },
+  cardTitle: { fontSize: 20, fontWeight: '700', color: colors.textMain, marginBottom: 4, letterSpacing: -0.2 },
+  cardLead: { color: colors.textSub, fontSize: 14, marginBottom: 22, textAlign: 'center', fontWeight: '500' },
   googleBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,
     backgroundColor: '#fff', borderWidth: 1, borderColor: colors.border,
     paddingVertical: 16, borderRadius: radius.md, width: '100%',
   },
-  googleIcon: { width: 20, height: 20 },
-  googleBtnText: { fontWeight: '700', color: colors.textMain, fontSize: 15 },
+  googleBtnText: { fontWeight: '600', color: colors.textMain, fontSize: 15 },
   errorText: { color: colors.error, fontSize: 12, marginTop: 12, textAlign: 'center' },
   debugText: { color: colors.textSub, fontSize: 10, marginTop: 14, textAlign: 'center', textDecorationLine: 'underline' },
-  secureTag: { textAlign: 'center', color: colors.textSub, fontSize: 10, fontWeight: '800', marginTop: 24, letterSpacing: 0.5 },
+  secureTag: { textAlign: 'center', color: colors.textSub, fontSize: 11, fontWeight: '600', marginTop: 24, letterSpacing: 0.3 },
 });

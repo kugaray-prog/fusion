@@ -124,7 +124,7 @@ function handleGoogleClick() {
 }
 
 async function handleGoogleCredential(response) {
-  showOverlay('🔐 Authenticating', 'Verifying with Google...');
+  showOverlay('Signing In', 'Verifying with Google…');
   try {
     const data = await apiFetch('/employee-auth/google', {
       method: 'POST',
@@ -155,7 +155,7 @@ function skipToHome() {
     switchScreen('register');
     return;
   }
-  showOverlay('🔄 Syncing', 'Connecting to Secure Enclave...');
+  showOverlay('Loading', 'Opening your dashboard…');
   setTimeout(() => {
     hideOverlay();
     switchScreen('home');
@@ -511,7 +511,7 @@ async function finalizeRegistration(passedActions) {
   canvas.height = video.videoHeight;
   canvas.getContext('2d').drawImage(video, 0, 0);
 
-  showOverlay('🛰️ Binding Device', 'Registering this device & enrolling your face...');
+  showOverlay('Registering Device', 'Registering this device and enrolling your face…');
 
   canvas.toBlob(async (blob) => {
     try {
@@ -589,7 +589,7 @@ function renderAttendanceCard(active) {
 
   if (!active) {
     nameEl.textContent = 'No active event';
-    venueEl.textContent = '📍 --';
+    venueEl.textContent = '--';
     btn.textContent = 'No Active Event';
     btn.disabled = true;
     btn.className = 'btn btn-gold';
@@ -597,7 +597,7 @@ function renderAttendanceCard(active) {
   }
 
   nameEl.textContent = active.title;
-  venueEl.textContent = `📍 ${active.venue || 'TBA'}`;
+  venueEl.textContent = active.venue || 'TBA';
   btn.disabled = false;
   btn.className = 'btn btn-gold';
   btn.textContent = currentAttendanceRecordAction === 'time_in' ? 'End Attendance' : 'Start Attendance';
@@ -698,7 +698,7 @@ async function handleAttendance() {
   const btn = document.getElementById('btn-checkin');
   const isStarting = currentAttendanceRecordAction !== 'time_in';
 
-  showOverlay(isStarting ? '📍 Geofencing' : '🛰️ Finalizing', isStarting ? 'Recording Start Time...' : 'Recording End Time...');
+  showOverlay('Recording Attendance', isStarting ? 'Recording your start time…' : 'Recording your end time…');
   try {
     const pos = await getCurrentPosition();
     const result = await apiFetch('/attendance/submit', {
@@ -752,7 +752,7 @@ async function loadLogs() {
 function renderLogs(logs) {
   const container = document.getElementById('logs-container');
   if (logs.length === 0) {
-    container.innerHTML = '<div style="text-align:center; padding:40px; color:gray;">📋<br>No attendance history found.</div>';
+    container.innerHTML = '<div style="text-align:center; padding:40px; color:gray;"><svg class="ico" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4M12 16h4M8 11h.01M8 16h.01"/></svg><br>No attendance history found.</div>';
     return;
   }
   container.innerHTML = logs.map(log => `
@@ -763,7 +763,7 @@ function renderLogs(logs) {
           <span class="status-pill ${log.time_out ? 'success' : 'waiting'}">${log.time_out ? 'Completed' : 'On-going'}</span>
         </div>
         <div style="font-size: 12px; color: var(--text-sub);">
-          📅 ${log.attendance_date}<br>
+          <span style="display:inline-flex; align-items:center; gap:4px;"><svg class="ico" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>${log.attendance_date}</span><br>
           <span style="color: var(--success);">In: ${log.time_in ? new Date(log.time_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</span> |
           <span style="color: var(--error);">Out: ${log.time_out ? new Date(log.time_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</span>
         </div>
@@ -778,7 +778,7 @@ function renderProfile() {
   const info = parseDeviceInfo();
   document.getElementById('profile-card').innerHTML = `
     <div style="text-align:center; margin-bottom:15px;">
-      <div style="width:60px; height:60px; background:var(--cspc-blue); border-radius:50%; margin:0 auto 10px; display:flex; align-items:center; justify-content:center; color:white; font-size:24px;">👤</div>
+      <div style="width:60px; height:60px; background:var(--cspc-blue); border-radius:50%; margin:0 auto 10px; display:flex; align-items:center; justify-content:center; color:white;"><svg class="ico" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
       <h3 style="color:var(--cspc-blue);">${employee ? employee.full_name : 'Unknown'}</h3>
       <p style="font-size:12px; color:gray;">${employee ? employee.employee_code : '--'} ${employee && employee.department ? '· ' + employee.department : ''}</p>
     </div>

@@ -47,19 +47,38 @@ export const colors = {
 };
 
 export const radius = {
-  xl: 30,
-  lg: 24,
-  md: 16,
+  xl: 24,
+  lg: 18,
+  md: 14,
   sm: 10,
+  pill: 999,
 };
 
-// Mirrors --shadow-sm: 0px 10px 30px rgba(112, 144, 176, 0.15)
+// Soft, low elevation -- mirrors the admin dashboard's --shadow-sm.
 export const shadow = {
   shadowColor: '#7090B0',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.12,
+  shadowRadius: 12,
+  elevation: 2,
+};
+
+// Stronger lift for the one hero card per screen and floating elements.
+export const shadowLg = {
+  shadowColor: '#0D00A5',
   shadowOffset: { width: 0, height: 10 },
-  shadowOpacity: 0.15,
+  shadowOpacity: 0.22,
   shadowRadius: 20,
-  elevation: 4,
+  elevation: 6,
+};
+
+// Type scale shared by every screen, so headings and labels line up.
+export const type = {
+  title: { fontSize: 22, fontWeight: '700', color: colors.textMain, letterSpacing: -0.3 },
+  heading: { fontSize: 17, fontWeight: '700', color: colors.textMain, letterSpacing: -0.2 },
+  body: { fontSize: 14, fontWeight: '500', color: colors.textMain },
+  caption: { fontSize: 12, fontWeight: '500', color: colors.textSub },
+  overline: { fontSize: 11, fontWeight: '700', color: colors.textSub, letterSpacing: 0.6, textTransform: 'uppercase' },
 };
 
 // CSPC logo used across the login screen and header. Bundled with the app
@@ -68,4 +87,4 @@ export const shadow = {
 // <Image source={CSPC_LOGO}>.
 export const CSPC_LOGO = require('../assets/cspc-logo.png');
 
-export default { colors, radius, shadow, CSPC_LOGO };
+export default { colors, radius, shadow, shadowLg, type, CSPC_LOGO };
