@@ -188,7 +188,15 @@ function StepProgress({ current, labels, dark }) {
 // (detectFaceHold(), then detectBlink()) before the flow automatically
 // advances to capture.
 export default function RegistrationScreen({ navigation }) {
-  const { pendingGoogle, completeRegistration, cancelRegistration } = useAuth();
+  const { employee, pendingGoogle, completeRegistration, cancelRegistration } = useAuth();
+  // Set once registration succeeds: from then on AuthContext has an
+  // `employee`, and RootNavigator (App.js) swaps this whole stack out for
+  // WaitingApproval/WifiCheck. This screen must not navigate or set state
+  // after that -- a late navigation.replace('Login') sent while the stack
+  // was being swapped is what left the app on a blank white screen.
+  const registeredRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   const [step, setStep] = useState('details'); // 'details' | 'capture'
 
   // -- Step 1: employee details --
@@ -232,6 +240,9 @@ export default function RegistrationScreen({ navigation }) {
 
   useEffect(() => {
     if (!pendingGoogle) {
+      // Cleared because registration just finished (or the user is already
+      // signed in): RootNavigator handles where to go next.
+      if (registeredRef.current || employee) return;
       navigation.replace('Login');
       return;
     }
@@ -594,11 +605,14 @@ export default function RegistrationScreen({ navigation }) {
         name: 'face.jpg',
         type: 'image/jpeg',
       });
+      registeredRef.current = true;
       await completeRegistration(formData);
       // RootNavigator (App.js) reacts to `employee` + `deviceStatus` automatically:
       // a 'pending' device is routed to the WaitingApproval screen, which will in
       // turn redirect to Home the moment an admin approves it.
     } catch (err) {
+      registeredRef.current = false;
+      if (!mountedRef.current) return;
       // DoubleSafe checkpoint (see employeeAuthController.linkDevice): registering a
       // new device for an identity that already has a face on file requires the live
       // selfie to match it. A 423 means too many failed attempts have locked the
@@ -611,7 +625,7 @@ export default function RegistrationScreen({ navigation }) {
         setErrorMsg(err.response?.data?.message || 'Registration failed. Please check your details and try again.');
       }
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current) setSubmitting(false);
     }
   };
 

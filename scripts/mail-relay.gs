@@ -31,7 +31,7 @@ function doPost(e) {
       subject: String(req.subject || '').slice(0, 250),
       body: String(req.text || ''),
       htmlBody: String(req.html || ''),
-      name: String(req.name || 'GeoAttend CSPC').slice(0, 80)
+      name: String(req.name || 'GeoAttend').slice(0, 80)
     });
     return reply({ ok: true, remaining: MailApp.getRemainingDailyQuota() });
   } catch (err) {

@@ -11,6 +11,7 @@ import { WifiStatusProvider } from './src/context/WifiStatusContext';
 import { navigationRef } from './src/navigation/navigationRef';
 import LocationGateOverlay from './src/components/LocationGateOverlay';
 import WifiGateOverlay from './src/components/WifiGateOverlay';
+import AppErrorBoundary from './src/components/AppErrorBoundary';
 import LoginScreen from './src/screens/LoginScreen';
 import RegistrationScreen from './src/screens/RegistrationScreen';
 import WaitingApprovalScreen from './src/screens/WaitingApprovalScreen';
@@ -107,7 +108,9 @@ export default function App() {
           <AttendanceTrackingProvider>
             <NavigationContainer ref={navigationRef}>
               <StatusBar style="auto" />
-              <RootNavigator />
+              <AppErrorBoundary>
+                <RootNavigator />
+              </AppErrorBoundary>
               {/* App-wide gates: block every screen behind a "turn on your
                   Location/GPS" or "turn on your Wi-Fi" prompt for as long as
                   the employee is signed in and that check is failing,

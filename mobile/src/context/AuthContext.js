@@ -127,13 +127,22 @@ export function AuthProvider({ children }) {
     if (!pendingGoogle) throw new Error('Your Google sign-in session expired. Please sign in again.');
     formData.append('pendingToken', pendingGoogle.pendingToken);
     const data = await linkDevice(formData);
-    setDeviceBlockedNotice(null);
     blockedHandledRef.current = false;
-    await AsyncStorage.setItem('employee_token', data.token);
-    await AsyncStorage.setItem('employee_data', JSON.stringify(data.employee));
-    setEmployee(data.employee);
-    await persistDeviceStatus(data.deviceStatus || null);
+    // Persist first, then flip every piece of auth state in ONE synchronous
+    // batch. Setting `employee` before `pendingGoogle`/`deviceStatus` (with
+    // awaits in between) made RootNavigator swap stacks more than once while
+    // RegistrationScreen was still mounted -- which could leave the app on a
+    // blank white screen right after the face scan.
+    await AsyncStorage.multiSet([
+      ['employee_token', data.token],
+      ['employee_data', JSON.stringify(data.employee)],
+    ]);
+    if (data.deviceStatus) await AsyncStorage.setItem('device_status', data.deviceStatus);
+    else await AsyncStorage.removeItem('device_status');
+    setDeviceBlockedNotice(null);
+    setDeviceStatus(data.deviceStatus || null);
     setPendingGoogle(null);
+    setEmployee(data.employee);
     return data;
   };
 
