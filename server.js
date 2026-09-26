@@ -314,7 +314,24 @@ app.get('/api/nav/:section', (req, res) => {
 // Admin Dashboard
 // ------------------------------------------------------------
 
-app.get('/', (req, res) => {
+// "/" plus one path per sidebar section (see VIEW_PATHS in public/js/app.js),
+// so /dashboard, /employees, ... load the dashboard on that section.
+const DASHBOARD_PATHS = [
+  '/',
+  '/dashboard',
+  '/employees',
+  '/departments',
+  '/attendance',
+  '/events',
+  '/reports',
+  '/geofences',
+  '/verification',
+  '/ratings',
+  '/devices',
+  '/settings'
+];
+
+app.get(DASHBOARD_PATHS, (req, res) => {
   res.render('dashboard', {
     googleMapsApiKey:
       process.env.GOOGLE_MAPS_API_KEY || '',

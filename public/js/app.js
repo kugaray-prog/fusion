@@ -96,7 +96,7 @@ const G_App = {
             localStorage.removeItem('ga_token');
             localStorage.removeItem('ga_admin');
             localStorage.removeItem(G_App.ui.ACTIVE_VIEW_KEY);
-            location.reload();
+            location.replace('/');
         },
         checkSession: () => {
             const token = localStorage.getItem('ga_token');
@@ -116,17 +116,46 @@ const G_App = {
         // looking at, so a manual browser refresh (F5) reopens the same page
         // instead of always snapping back to the Dashboard.
         ACTIVE_VIEW_KEY: 'ga_active_view',
+        // URL path for each sidebar section, e.g. /dashboard, /employees.
+        // server.js serves the dashboard page at each of these paths.
+        VIEW_PATHS: {
+            'dashboard': '/dashboard',
+            'employees': '/employees',
+            'departments': '/departments',
+            'attendance': '/attendance',
+            'events': '/events',
+            'reports': '/reports',
+            'geofence': '/geofences',
+            'verification-section': '/verification',
+            'ratings': '/ratings',
+            'mobile-app': '/devices',
+            'settings': '/settings'
+        },
+        viewFromPath: (pathname) => Object.keys(G_App.ui.VIEW_PATHS)
+            .find(target => G_App.ui.VIEW_PATHS[target] === pathname.replace(/\/+$/, '')) || null,
+        // Puts the section's path in the address bar: a new history entry for
+        // a click, or a replacement when restoring/redirecting on load.
+        setViewUrl: (target, replace = false) => {
+            const path = G_App.ui.VIEW_PATHS[target];
+            if (!path || location.pathname === path) return;
+            history[replace ? 'replaceState' : 'pushState']({ view: target }, '', path);
+        },
         initNav: () => {
             document.querySelectorAll('.nav-item[data-target]').forEach(item => {
                 item.addEventListener('click', () => {
                     G_App.ui.switchView(item.getAttribute('data-target'), item);
                 });
             });
+            // Browser back/forward moves between sections without adding history.
+            window.addEventListener('popstate', () => {
+                const target = G_App.ui.viewFromPath(location.pathname);
+                if (target) G_App.ui.switchView(target, null, { updateUrl: false });
+            });
         },
         // Shared by the click handler above and by the reload-restore logic in
         // init() below, so both paths do exactly the same work (activate the
         // nav item + view, run that section's loaders, and remember the choice).
-        switchView: (target, item) => {
+        switchView: (target, item, { updateUrl = true, replaceUrl = false } = {}) => {
             item = item || document.querySelector(`.nav-item[data-target="${target}"]`);
             const viewEl = document.getElementById(target);
             if (!item || !viewEl) return false;
@@ -137,6 +166,7 @@ const G_App = {
                     document.getElementById(target).classList.add('active');
                     document.getElementById('view-title').innerText = item.innerText.trim();
                     localStorage.setItem(G_App.ui.ACTIVE_VIEW_KEY, target);
+                    if (updateUrl) G_App.ui.setViewUrl(target, replaceUrl);
                     // Logged by the server so each navigation shows in the terminal.
                     apiFetch(`/nav/${encodeURIComponent(target)}`).catch(() => {});
 
@@ -227,6 +257,7 @@ const G_App = {
             document.getElementById('verification-section').classList.add('active');
             document.getElementById('view-title').innerText = 'Verification';
             document.getElementById('view-subtitle').innerText = 'Restricted Access — Identity Verification Only';
+            G_App.ui.setViewUrl('verification-section', true);
         },
         updateDashboard: async () => {
             try {
@@ -2786,11 +2817,14 @@ const G_App = {
         G_App.ui.startAutoRefresh();
         lucide.createIcons();
 
-        // Reopen whichever section was on screen before a reload (F5 / browser
-        // refresh) instead of always landing back on the Dashboard.
-        const savedView = localStorage.getItem(G_App.ui.ACTIVE_VIEW_KEY);
-        if (savedView && savedView !== 'dashboard') {
-            G_App.ui.switchView(savedView);
+        // Open the section named in the URL (/employees, /events, ...); on a
+        // bare "/" fall back to whichever section was on screen last, then to
+        // the Dashboard -- and put that section's path in the address bar.
+        const startView = G_App.ui.viewFromPath(location.pathname)
+            || localStorage.getItem(G_App.ui.ACTIVE_VIEW_KEY)
+            || 'dashboard';
+        if (!G_App.ui.switchView(startView, null, { replaceUrl: true })) {
+            G_App.ui.switchView('dashboard', null, { replaceUrl: true });
         }
     }
 };
