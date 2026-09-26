@@ -137,6 +137,8 @@ const G_App = {
                     document.getElementById(target).classList.add('active');
                     document.getElementById('view-title').innerText = item.innerText.trim();
                     localStorage.setItem(G_App.ui.ACTIVE_VIEW_KEY, target);
+                    // Logged by the server so each navigation shows in the terminal.
+                    apiFetch(`/nav/${encodeURIComponent(target)}`).catch(() => {});
 
                     if (target === 'geofence') {
                         if (!G_App.geofence.map) {

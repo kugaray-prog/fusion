@@ -149,6 +149,35 @@ app.use(
 );
 
 // ------------------------------------------------------------
+// Request Logging
+// ------------------------------------------------------------
+// Prints every API/page request to the terminal once it finishes, e.g.
+//   [10:42:07] GET    /api/nav/employees 200 3ms
+// Registered after the static handlers so asset/photo hits stay quiet.
+
+const METHOD_COLORS = {
+  GET: '\x1b[32m',
+  POST: '\x1b[33m',
+  PUT: '\x1b[34m',
+  PATCH: '\x1b[36m',
+  DELETE: '\x1b[31m'
+};
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const time = new Date().toLocaleTimeString('en-GB');
+    const color = METHOD_COLORS[req.method] || '\x1b[37m';
+    const statusColor = res.statusCode >= 400 ? '\x1b[31m' : '\x1b[90m';
+    console.log(
+      `[${time}] ${color}${req.method.padEnd(6)}\x1b[0m ${req.originalUrl} ` +
+      `${statusColor}${res.statusCode}\x1b[0m ${Date.now() - start}ms`
+    );
+  });
+  next();
+});
+
+// ------------------------------------------------------------
 // View Engine
 // ------------------------------------------------------------
 
@@ -269,6 +298,16 @@ app.get('/api/health', (req, res) => {
     message: 'GeoAttend API is running.',
     environment: NODE_ENV
   });
+});
+
+// ------------------------------------------------------------
+// Sidebar Navigation
+// ------------------------------------------------------------
+// The dashboard switches sections client-side; it calls this on every
+// sidebar click so each navigation shows up in the request log above.
+
+app.get('/api/nav/:section', (req, res) => {
+  res.json({ success: true, section: req.params.section });
 });
 
 // ------------------------------------------------------------
