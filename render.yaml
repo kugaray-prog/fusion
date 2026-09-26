@@ -61,5 +61,12 @@ services:
         sync: false
       - key: GOOGLE_ANDROID_CLIENT_ID
         sync: false
+      # Brevo email API -- admin verification codes (see .env.example)
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM_EMAIL
+        sync: false
+      - key: MAIL_FROM_NAME
+        value: GeoAttend CSPC
       - key: ATTENDANCE_MAX_ACCURACY_METERS
         value: '100'

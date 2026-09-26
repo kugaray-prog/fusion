@@ -41,9 +41,49 @@ async function addFaceRecordSource() {
   console.log('[schema] Added face_records.source.');
 }
 
+// One-time codes emailed to a new admin's address before the account is
+// created (adminAccountController.sendAdminOtp / createAdminAccount), which
+// proves the address is real and belongs to them.
+async function addAdminEmailOtps() {
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS admin_email_otps (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       email VARCHAR(150) NOT NULL,
+       code_hash VARCHAR(255) NOT NULL,
+       attempts INT NOT NULL DEFAULT 0,
+       expires_at DATETIME NOT NULL,
+       created_by INT NULL,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       INDEX idx_admin_email_otps_email (email)
+     ) ENGINE=InnoDB`
+  );
+}
+
+// Alerts shown in the admin dashboard's notification bell (see
+// services/adminNotificationService.js).
+async function addAdminNotifications() {
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS admin_notifications (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       type VARCHAR(60) NOT NULL,
+       severity ENUM('info','success','warning','danger') NOT NULL DEFAULT 'info',
+       title VARCHAR(200) NOT NULL,
+       message TEXT NOT NULL,
+       target_view VARCHAR(40) NULL,
+       employee_id INT NULL,
+       is_read TINYINT(1) NOT NULL DEFAULT 0,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       INDEX idx_admin_notifications_read (is_read, created_at),
+       FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL
+     ) ENGINE=InnoDB`
+  );
+}
+
 async function run() {
   await addEmployeeApproval();
   await addFaceRecordSource();
+  await addAdminEmailOtps();
+  await addAdminNotifications();
 }
 
 module.exports = { run };

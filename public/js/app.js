@@ -21,7 +21,7 @@ async function apiFetch(path, options = {}) {
     });
     let data;
     try { data = await res.json(); } catch (e) { data = {}; }
-    if (!res.ok) throw new Error(data.message || `Request failed (${res.status})`);
+    if (!res.ok) throw Object.assign(new Error(data.message || `Request failed (${res.status})`), { status: res.status, data });
     return data;
 }
 
@@ -75,20 +75,48 @@ const G_App = {
                     method: 'POST',
                     body: JSON.stringify({ email, password })
                 });
-                localStorage.setItem('ga_token', data.token);
-                localStorage.setItem('ga_admin', JSON.stringify(data.admin));
-
-                document.getElementById('login-screen').style.opacity = '0';
-                setTimeout(() => {
-                    document.getElementById('login-screen').classList.add('hidden');
-                    document.getElementById('app-sidebar').classList.remove('hidden');
-                    document.getElementById('main-wrapper').classList.remove('hidden');
-                    document.getElementById('main-wrapper').style.display = 'flex';
-                    G_App.init();
-                }, 400);
+                G_App.auth.enterDashboard(data);
             } catch (err) {
                 errorEl.innerText = err.message;
                 btn.innerText = 'Sign In';
+            }
+        },
+        // Stores the session and swaps the login screen for the dashboard.
+        enterDashboard: (data) => {
+            localStorage.setItem('ga_token', data.token);
+            localStorage.setItem('ga_admin', JSON.stringify(data.admin));
+            document.getElementById('login-screen').style.opacity = '0';
+            setTimeout(() => {
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('app-sidebar').classList.remove('hidden');
+                document.getElementById('main-wrapper').classList.remove('hidden');
+                document.getElementById('main-wrapper').style.display = 'flex';
+                G_App.init();
+            }, 400);
+        },
+        // SSO: renders Google's own "Sign in with Google" button on the login screen.
+        initGoogleSignIn: () => {
+            const slot = document.getElementById('google-signin-btn');
+            if (!slot || !window.__GOOGLE_CLIENT_ID__) return;
+            if (!window.google || !google.accounts || !google.accounts.id) {
+                setTimeout(G_App.auth.initGoogleSignIn, 300); // Google's script still loading
+                return;
+            }
+            google.accounts.id.initialize({
+                client_id: window.__GOOGLE_CLIENT_ID__,
+                callback: G_App.auth.googleLogin,
+                ux_mode: 'popup'
+            });
+            google.accounts.id.renderButton(slot, { type: 'standard', theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', width: 300 });
+        },
+        googleLogin: async (response) => {
+            const errorEl = document.getElementById('login-error');
+            errorEl.innerText = '';
+            try {
+                const data = await apiFetch('/auth/google', { method: 'POST', body: JSON.stringify({ credential: response.credential }) });
+                G_App.auth.enterDashboard(data);
+            } catch (err) {
+                errorEl.innerText = err.message;
             }
         },
         logout: async () => {
@@ -232,12 +260,17 @@ const G_App = {
                         break;
                     case 'ratings':
                         await G_App.ratings.load();
+                        if (!document.getElementById('ratings-perf-pane').classList.contains('hidden')) await G_App.performance.load();
                         break;
                     default:
                         break;
                 }
             } catch (err) { /* non-fatal — next tick tries again */ }
-        },        toggleNotifs: () => document.getElementById('notif-drawer').classList.toggle('open'),
+        },
+        toggleNotifs: () => {
+            const open = document.getElementById('notif-drawer').classList.toggle('open');
+            if (open) G_App.notifications.load();
+        },
         toggleMobileNav: () => document.getElementById('app-sidebar').classList.toggle('mobile-open'),
         applyRoleRestrictions: () => {
             const badge = document.getElementById('admin-name-badge');
@@ -246,6 +279,8 @@ const G_App = {
 
             if (G_App.state.role !== 'admin') return; // super_admin sees everything, nothing to restrict
 
+            // The notification bell's alerts are Super Admin only.
+            document.getElementById('notif-bell').classList.add('hidden');
             // Verification-only admin: hide every nav item except Verification, and jump straight there.
             document.querySelectorAll('.nav-item[data-target]').forEach(item => {
                 if (item.getAttribute('data-target') !== 'verification-section') item.classList.add('hidden');
@@ -752,28 +787,83 @@ const G_App = {
     },
 
     events: {
+        status: 'all',
+        page: 1,
+        pageSize: 25,
+        searchTimer: null,
+        onSearch: () => {
+            clearTimeout(G_App.events.searchTimer);
+            G_App.events.searchTimer = setTimeout(() => { G_App.events.page = 1; G_App.events.load(); }, 250);
+        },
+        setStatus: (status) => {
+            G_App.events.status = status;
+            G_App.events.page = 1;
+            document.querySelectorAll('#events-status-chips button').forEach(b => {
+                const on = b.dataset.status === status;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+            G_App.events.load();
+        },
+        goPage: (delta) => {
+            G_App.events.page = Math.max(1, G_App.events.page + delta);
+            G_App.events.load();
+        },
+        formatDate: (d) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+        formatTime: (d) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }),
+        // "Sep 1, 2028" over "12:58 AM – 1:30 PM" (end date included when the event spans days).
+        scheduleCell: (e) => {
+            const ev = G_App.events;
+            const start = new Date(e.start_datetime);
+            const end = new Date(e.end_datetime);
+            const sameDay = start.toDateString() === end.toDateString();
+            return `<div class="ev-when"><b>${ev.formatDate(start)}</b>
+                <span class="ev-sub">${ev.formatTime(start)} – ${sameDay ? '' : ev.formatDate(end) + ', '}${ev.formatTime(end)}</span></div>`;
+        },
         load: async () => {
-            const search = document.getElementById('events-search') ? document.getElementById('events-search').value : '';
-            const status = document.getElementById('events-status-filter') ? document.getElementById('events-status-filter').value : 'all';
+            const ev = G_App.events;
+            const searchEl = document.getElementById('events-search');
+            const search = searchEl ? searchEl.value.trim() : '';
             try {
-                const params = new URLSearchParams({ search, status, limit: 'all' });
-                const { data } = await apiFetch(`/events?${params.toString()}`);
+                const params = new URLSearchParams({ search, status: ev.status, page: String(ev.page), limit: String(ev.pageSize) });
+                const { data, pagination, counts } = await apiFetch(`/events?${params.toString()}`);
+                const pages = Math.max(1, Math.ceil(pagination.total / ev.pageSize));
+                if (ev.page > pages) { ev.page = pages; return ev.load(); }
+
+                if (counts) {
+                    document.querySelectorAll('#events-status-chips [data-count]').forEach(el => {
+                        el.textContent = (counts[el.dataset.count] ?? 0).toLocaleString();
+                    });
+                }
+
                 const tbody = document.getElementById('events-table-body');
                 if (!tbody) return;
+                const statusBadge = { ongoing: 'success', completed: 'danger', upcoming: 'warning' };
                 tbody.innerHTML = data.map(e => `
                     <tr>
-                        <td><b>${escapeHtml(e.title)}</b>${e.recurrence_type === 'weekly' ? ' <span class="badge badge-info" style="font-size:0.6rem;">Recurring</span>' : ''}</td>
-                        <td>${escapeHtml(e.venue || 'N/A')}</td>
-                        <td style="font-variant-numeric: tabular-nums;">${e.center_lat != null ? Number(e.center_lat).toFixed(6) : '—'}</td>
-                        <td style="font-variant-numeric: tabular-nums;">${e.center_lng != null ? Number(e.center_lng).toFixed(6) : '—'}</td>
-                        <td>${new Date(e.start_datetime).toLocaleString()}</td>
-                        <td>${new Date(e.end_datetime).toLocaleString()}</td>
-                        <td>${e.recurrence_type === 'weekly' ? `Weekly until ${e.recurrence_end_date || ''}` : 'One-time'}</td>
-                        <td>${e.attendance_count}</td>
-                        <td><span class="badge badge-${e.computed_status === 'ongoing' ? 'success' : (e.computed_status === 'completed' ? 'danger' : 'warning')}">${e.computed_status}</span></td>
-                        <td><button class="btn-primary" style="padding:6px 12px; font-size:0.75rem; background:var(--danger);" onclick="G_App.events.delete(${e.id}, ${e.is_recurring_parent ? 'true' : 'false'})"><i data-lucide="trash-2" size="14"></i> Delete</button></td>
+                        <td>
+                            <div class="ev-title">${escapeHtml(e.title)}</div>
+                            <span class="ev-sub">${escapeHtml(e.venue || 'No venue')}</span>
+                        </td>
+                        <td>${ev.scheduleCell(e)}</td>
+                        <td class="ev-coords">${e.center_lat != null
+                            ? `${Number(e.center_lat).toFixed(6)}<br>${Number(e.center_lng).toFixed(6)}`
+                            : '—'}</td>
+                        <td>${e.recurrence_type === 'weekly'
+                            ? `<span class="badge badge-info">Weekly</span>${e.recurrence_end_date ? `<span class="ev-sub">until ${ev.formatDate(new Date(e.recurrence_end_date))}</span>` : ''}`
+                            : '<span class="badge badge-muted">One-time</span>'}</td>
+                        <td class="ev-num">${Number(e.attendance_count).toLocaleString()}</td>
+                        <td><span class="badge badge-${statusBadge[e.computed_status] || 'muted'}">${e.computed_status}</span></td>
+                        <td class="ev-actions"><button class="btn-icon btn-delete" title="Delete event" aria-label="Delete ${escapeHtml(e.title)}" onclick="G_App.events.delete(${e.id}, ${e.is_recurring_parent ? 'true' : 'false'})"><i data-lucide="trash-2"></i></button></td>
                     </tr>
-                `).join('') || '<tr><td colspan="10" style="text-align:center; padding:30px;">No events found.</td></tr>';
+                `).join('') || `<tr><td colspan="7" class="ev-empty">${search || ev.status !== 'all' ? 'No events match the current filter.' : 'No events yet. Create one from Geo-Fences.'}</td></tr>`;
+
+                const from = pagination.total ? (ev.page - 1) * ev.pageSize + 1 : 0;
+                const to = Math.min(ev.page * ev.pageSize, pagination.total);
+                document.getElementById('events-pager-info').textContent = `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${pagination.total.toLocaleString()} events`;
+                document.getElementById('events-page-label').textContent = `Page ${ev.page} of ${pages}`;
+                document.getElementById('events-prev').disabled = ev.page <= 1;
+                document.getElementById('events-next').disabled = ev.page >= pages;
                 lucide.createIcons();
             } catch (err) { toast(err.message, 'error'); }
         },
@@ -2563,6 +2653,193 @@ const G_App = {
         }
     },
 
+    // Ratings > IPCR / OPCR tab (Reporting — Rating module).
+    performance: {
+        data: null,
+        showTab: (tab) => {
+            const perf = tab === 'perf';
+            document.getElementById('ratings-events-pane').classList.toggle('hidden', perf);
+            document.getElementById('ratings-perf-pane').classList.toggle('hidden', !perf);
+            [['ratings-tab-events', !perf], ['ratings-tab-perf', perf]].forEach(([id, on]) => {
+                const b = document.getElementById(id);
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            if (perf) G_App.performance.load();
+        },
+        initSelectors: () => {
+            const yearSel = document.getElementById('perf-year');
+            if (!yearSel.options.length) {
+                const y = new Date().getFullYear();
+                for (let yr = y + 1; yr >= y - 4; yr--) yearSel.add(new Option(String(yr), String(yr), false, yr === y));
+                document.getElementById('perf-period').value = new Date().getMonth() < 6 ? '1' : '2';
+            }
+            const deptSel = document.getElementById('perf-department');
+            const current = deptSel.value || 'all';
+            deptSel.innerHTML = '<option value="all">All Offices</option>' +
+                (G_App.state.departments || []).map(d => `<option value="${escapeHtml(d.name)}">${escapeHtml(d.name)}</option>`).join('');
+            deptSel.value = [...deptSel.options].some(o => o.value === current) ? current : 'all';
+        },
+        adjBadge: (adj) => adj
+            ? `<span class="badge adj-${adj.replace(/\s+/g, '')}">${escapeHtml(adj)}</span>`
+            : '<span class="badge badge-muted">Not rated</span>',
+        fmtScore: (score) => score == null ? '—' : Number(score).toFixed(2),
+        load: async () => {
+            const p = G_App.performance;
+            p.initSelectors();
+            const params = new URLSearchParams({
+                year: document.getElementById('perf-year').value,
+                period: document.getElementById('perf-period').value,
+                department: document.getElementById('perf-department').value
+            });
+            try {
+                const data = await apiFetch(`/ratings/performance?${params.toString()}`);
+                p.data = data;
+                document.getElementById('perf-label').textContent = `Rating period: ${data.label}`;
+                document.getElementById('opcr-table-body').innerHTML = data.opcr.map(o => `
+                    <tr>
+                        <td><b>${escapeHtml(o.department_name)}</b></td>
+                        <td class="perf-num">${o.rated_employees} / ${o.employees} rated</td>
+                        <td class="perf-num">${o.attendance_rate == null ? '—' : o.attendance_rate + '%'}</td>
+                        <td class="perf-score">${p.fmtScore(o.score)}</td>
+                        <td>${p.adjBadge(o.adjectival)}</td>
+                    </tr>
+                `).join('') || '<tr><td colspan="5" class="ev-empty">No offices found.</td></tr>';
+                document.getElementById('ipcr-table-body').innerHTML = data.ipcr.map(e => `
+                    <tr>
+                        <td><b>${escapeHtml(e.full_name)}</b><span class="ev-sub">${escapeHtml([e.employee_code, e.position].filter(Boolean).join(' · '))}</span></td>
+                        <td>${escapeHtml(e.department_name)}</td>
+                        <td class="perf-num">${e.rated_events}</td>
+                        <td class="perf-num">${e.attended}</td>
+                        <td class="perf-num">${e.missed}</td>
+                        <td class="perf-score">${p.fmtScore(e.score)}</td>
+                        <td>${p.adjBadge(e.adjectival)}</td>
+                    </tr>
+                `).join('') || '<tr><td colspan="7" class="ev-empty">No employees found.</td></tr>';
+                lucide.createIcons();
+            } catch (err) { toast(err.message, 'error'); }
+        },
+        exportCsv: (kind) => {
+            const p = G_App.performance;
+            if (!p.data) return;
+            const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+            const rows = kind === 'opcr'
+                ? [['Office', 'Employees', 'Rated Employees', 'Attendance Rate (%)', 'OPCR Score', 'Adjectival Rating'],
+                    ...p.data.opcr.map(o => [o.department_name, o.employees, o.rated_employees, o.attendance_rate ?? '', o.score ?? '', o.adjectival || 'Not rated'])]
+                : [['Employee ID', 'Name', 'Position', 'Office', 'Events Rated', 'Attended', 'Missed', 'IPCR Score', 'Adjectival Rating'],
+                    ...p.data.ipcr.map(e => [e.employee_code, e.full_name, e.position, e.department_name, e.rated_events, e.attended, e.missed, e.score ?? '', e.adjectival || 'Not rated'])];
+            const csv = [`${cell((kind === 'opcr' ? 'OPCR' : 'IPCR') + ' — ' + p.data.label)}`, ...rows.map(r => r.map(cell).join(','))].join('\r\n');
+            const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `${kind.toUpperCase()}_${p.data.label.replace(/[^\w]+/g, '_')}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }
+    },
+
+    // Notification bell (Notification & Alert module): device registrations,
+    // unregistered/blocked device attempts, geo anomalies, rejected
+    // attendance. Polled every 20s; new warnings also pop up as a toast.
+    notifications: {
+        POLL_MS: 20000,
+        timer: null,
+        items: [],
+        lastSeenId: null,   // newest id already shown, so only newer ones toast
+        icons: {
+            device_registration: 'smartphone',
+            unregistered_device_login: 'shield-alert',
+            unregistered_device_attendance: 'shield-alert',
+            blocked_device_login: 'shield-x',
+            blocked_device_attendance: 'shield-x',
+            doublesafe_locked: 'lock',
+            geo_anomaly: 'map-pin',
+            face_verification_expired: 'user-x'
+        },
+        start: () => {
+            const n = G_App.notifications;
+            if (n.timer) return;
+            n.load();
+            n.timer = setInterval(() => n.load(), n.POLL_MS);
+        },
+        timeAgo: (value) => {
+            const then = new Date(String(value).replace(' ', 'T'));
+            const secs = Math.max(0, Math.round((Date.now() - then.getTime()) / 1000));
+            if (isNaN(secs)) return '';
+            if (secs < 60) return 'Just now';
+            if (secs < 3600) return `${Math.floor(secs / 60)} min ago`;
+            if (secs < 86400) return `${Math.floor(secs / 3600)} hr ago`;
+            if (secs < 7 * 86400) return `${Math.floor(secs / 86400)} day${secs < 2 * 86400 ? '' : 's'} ago`;
+            return then.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        },
+        load: async () => {
+            const n = G_App.notifications;
+            try {
+                const { data, unread } = await apiFetch('/admin-notifications?limit=50');
+                const newestId = data.length ? data[0].id : 0;
+                if (n.lastSeenId !== null) {
+                    data.filter(item => item.id > n.lastSeenId && !item.is_read)
+                        .slice(0, 3)
+                        .forEach(item => toast(`${item.title}: ${item.message}`, item.severity === 'danger' || item.severity === 'warning' ? 'error' : 'info'));
+                }
+                n.lastSeenId = Math.max(n.lastSeenId || 0, newestId);
+                n.items = data;
+                n.render(unread);
+            } catch (err) { /* non-fatal — next poll tries again */ }
+        },
+        render: (unread) => {
+            const n = G_App.notifications;
+            const badge = document.getElementById('notif-badge');
+            badge.textContent = unread > 99 ? '99+' : String(unread);
+            badge.classList.toggle('hidden', !unread);
+            document.getElementById('notif-bell').setAttribute('aria-label', unread ? `Notifications (${unread} unread)` : 'Notifications');
+            document.getElementById('notif-summary').textContent = unread ? `${unread} unread` : 'All caught up';
+            document.getElementById('notif-read-all').disabled = !unread;
+            document.getElementById('notif-clear').disabled = !n.items.some(i => i.is_read);
+
+            const list = document.getElementById('notif-list');
+            list.innerHTML = n.items.map(item => `
+                <button type="button" class="notif-item ${item.is_read ? '' : 'unread'}" onclick="G_App.notifications.open(${item.id})">
+                    <span class="notif-icon sev-${escapeHtml(item.severity)}"><i data-lucide="${n.icons[item.type] || 'bell'}"></i></span>
+                    <span>
+                        <span class="notif-title">${item.is_read ? '' : '<span class="notif-dot" aria-label="Unread"></span>'}${escapeHtml(item.title)}</span>
+                        <span class="notif-msg" style="display:block;">${escapeHtml(item.message)}</span>
+                        <span class="notif-time" style="display:block;">${n.timeAgo(item.created_at)}</span>
+                    </span>
+                </button>
+            `).join('') || '<div class="notif-empty"><i data-lucide="bell-off"></i><p style="margin-top:10px;">No notifications yet.<br>Device registrations and security alerts will appear here.</p></div>';
+            lucide.createIcons();
+        },
+        // Marks it read and jumps to the section where the admin can act on it.
+        open: async (id) => {
+            const n = G_App.notifications;
+            const item = n.items.find(i => i.id === id);
+            if (!item) return;
+            if (!item.is_read) {
+                try { await apiFetch(`/admin-notifications/${id}/read`, { method: 'PATCH' }); } catch (e) {}
+            }
+            if (item.target_view) {
+                document.getElementById('notif-drawer').classList.remove('open');
+                G_App.ui.switchView(item.target_view);
+            }
+            n.load();
+        },
+        markAllRead: async () => {
+            try {
+                await apiFetch('/admin-notifications/read-all', { method: 'PATCH' });
+                G_App.notifications.load();
+            } catch (err) { toast(err.message, 'error'); }
+        },
+        clearRead: async () => {
+            try {
+                await apiFetch('/admin-notifications', { method: 'DELETE' });
+                G_App.notifications.load();
+            } catch (err) { toast(err.message, 'error'); }
+        }
+    },
+
     adminAccounts: {
         load: async () => {
             if (G_App.state.role !== 'super_admin') return; // OCR-only admins can't see this
@@ -2590,29 +2867,99 @@ const G_App = {
             `).join('') || '<p style="color:var(--text-muted); font-size:0.85rem;">No admin accounts yet.</p>';
             lucide.createIcons();
         },
+        otpEmail: null,     // address the current code was sent to
+        resendTimer: null,
         openModal: () => {
-            ['aa-name', 'aa-email', 'aa-password'].forEach(id => document.getElementById(id).value = '');
+            ['aa-name', 'aa-email', 'aa-password', 'aa-otp'].forEach(id => document.getElementById(id).value = '');
             document.getElementById('aa-role').value = 'admin';
+            G_App.adminAccounts.resetOtp();
             document.getElementById('admin-account-modal').classList.add('open');
         },
-        closeModal: () => document.getElementById('admin-account-modal').classList.remove('open'),
+        closeModal: () => {
+            G_App.adminAccounts.resetOtp();
+            document.getElementById('admin-account-modal').classList.remove('open');
+        },
+        resetOtp: () => {
+            const aa = G_App.adminAccounts;
+            aa.otpEmail = null;
+            clearInterval(aa.resendTimer);
+            document.getElementById('aa-otp-block').classList.add('hidden');
+            document.getElementById('aa-otp').value = '';
+            const btn = document.getElementById('aa-send-otp');
+            btn.disabled = false;
+            btn.innerHTML = '<i data-lucide="send" size="14"></i> Send Code';
+            lucide.createIcons();
+        },
+        // A code only verifies the address it was sent to.
+        onEmailChange: () => {
+            const aa = G_App.adminAccounts;
+            if (aa.otpEmail && document.getElementById('aa-email').value.trim().toLowerCase() !== aa.otpEmail) aa.resetOtp();
+        },
+        startResendCountdown: (seconds) => {
+            const aa = G_App.adminAccounts;
+            const btn = document.getElementById('aa-send-otp');
+            let left = seconds;
+            clearInterval(aa.resendTimer);
+            btn.disabled = true;
+            btn.textContent = `Resend in ${left}s`;
+            aa.resendTimer = setInterval(() => {
+                left -= 1;
+                if (left > 0) { btn.textContent = `Resend in ${left}s`; return; }
+                clearInterval(aa.resendTimer);
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="rotate-cw" size="14"></i> Resend';
+                lucide.createIcons();
+            }, 1000);
+        },
+        sendOtp: async () => {
+            const aa = G_App.adminAccounts;
+            const email = document.getElementById('aa-email').value.trim().toLowerCase();
+            const fullName = document.getElementById('aa-name').value.trim();
+            if (!email) return toast('Enter the new admin\'s email first.', 'error');
+            const btn = document.getElementById('aa-send-otp');
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            try {
+                const data = await apiFetch('/admin-accounts/send-otp', { method: 'POST', body: JSON.stringify({ email, full_name: fullName }) });
+                aa.otpEmail = email;
+                document.getElementById('aa-otp-block').classList.remove('hidden');
+                document.getElementById('aa-otp-hint').innerHTML =
+                    `We sent a 6-digit code to <b>${escapeHtml(email)}</b>. Ask the new admin for it — it expires in ${data.expiresInMinutes} minutes.`;
+                document.getElementById('aa-otp').focus();
+                toast(data.message, 'success');
+                aa.startResendCountdown(data.resendAfterSeconds || 60);
+            } catch (err) {
+                toast(err.message, 'error');
+                const wait = err.data && err.data.retryAfterSeconds;
+                if (wait) aa.startResendCountdown(wait);
+                else { btn.disabled = false; btn.innerHTML = '<i data-lucide="send" size="14"></i> Send Code'; lucide.createIcons(); }
+            }
+        },
         save: async () => {
+            const aa = G_App.adminAccounts;
             const payload = {
                 full_name: document.getElementById('aa-name').value.trim(),
-                email: document.getElementById('aa-email').value.trim(),
+                email: document.getElementById('aa-email').value.trim().toLowerCase(),
                 password: document.getElementById('aa-password').value,
-                role: document.getElementById('aa-role').value
+                role: document.getElementById('aa-role').value,
+                otp: document.getElementById('aa-otp').value.trim()
             };
             if (!payload.full_name || !payload.email || !payload.password) {
                 return toast('Full name, email, and password are required.', 'error');
             }
+            if (!aa.otpEmail) return toast('Verify the email first: click "Send Code".', 'error');
+            if (!/^\d{6}$/.test(payload.otp)) return toast('Enter the 6-digit code sent to the email.', 'error');
+            const btn = document.getElementById('aa-create-btn');
+            btn.disabled = true;
             try {
                 await apiFetch('/admin-accounts', { method: 'POST', body: JSON.stringify(payload) });
                 toast('Admin account created.', 'success');
-                G_App.adminAccounts.closeModal();
-                G_App.adminAccounts.load();
+                aa.closeModal();
+                aa.load();
             } catch (err) {
                 toast(err.message, 'error');
+            } finally {
+                btn.disabled = false;
             }
         },
         remove: async (id) => {
@@ -2845,6 +3192,7 @@ const G_App = {
         G_App.adminAccounts.load();
         G_App.mobile.render();
         G_App.ui.startAutoRefresh();
+        G_App.notifications.start();
         lucide.createIcons();
 
         // Open the section named in the URL (/employees, /events, ...); on a
@@ -2862,4 +3210,5 @@ const G_App = {
 window.onload = () => {
     lucide.createIcons();
     G_App.auth.checkSession();
+    if (!localStorage.getItem('ga_token')) G_App.auth.initGoogleSignIn();
 };

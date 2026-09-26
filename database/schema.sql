@@ -336,6 +336,38 @@ CREATE TABLE notifications (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
+-- ADMIN NOTIFICATIONS (dashboard bell -- device registrations, unregistered
+-- device attempts, geo anomalies; see services/adminNotificationService.js)
+-- ------------------------------------------------------------
+CREATE TABLE admin_notifications (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  type VARCHAR(60) NOT NULL,
+  severity ENUM('info','success','warning','danger') NOT NULL DEFAULT 'info',
+  title VARCHAR(200) NOT NULL,
+  message TEXT NOT NULL,
+  target_view VARCHAR(40) NULL,
+  employee_id INT NULL,
+  is_read TINYINT(1) NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_admin_notifications_read (is_read, created_at),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- ------------------------------------------------------------
+-- ADMIN EMAIL OTPS (verifies a new admin's email before the account exists)
+-- ------------------------------------------------------------
+CREATE TABLE admin_email_otps (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(150) NOT NULL,
+  code_hash VARCHAR(255) NOT NULL,
+  attempts INT NOT NULL DEFAULT 0,
+  expires_at DATETIME NOT NULL,
+  created_by INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_admin_email_otps_email (email)
+) ENGINE=InnoDB;
+
+-- ------------------------------------------------------------
 -- CERTIFICATES
 -- ------------------------------------------------------------
 CREATE TABLE certificates (

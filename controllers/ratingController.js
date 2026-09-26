@@ -254,4 +254,109 @@ async function upsertRating(req, res, next) {
   }
 }
 
-module.exports = { getRatings, upsertRating, generateRatingsForRange };
+// CSC SPMS adjectival rating for a 1-5 numerical rating.
+function adjectivalRating(score) {
+  if (score == null) return null;
+  if (score >= 4.5) return 'Outstanding';
+  if (score >= 3.5) return 'Very Satisfactory';
+  if (score >= 2.5) return 'Satisfactory';
+  if (score >= 1.5) return 'Unsatisfactory';
+  return 'Poor';
+}
+
+// Rating period: a semester (the usual IPCR/OPCR cycle) or the whole year.
+function performancePeriod(year, period) {
+  if (period === '1') return { start: `${year}-01-01`, end: `${year}-07-01`, label: `January – June ${year}` };
+  if (period === '2') return { start: `${year}-07-01`, end: `${year + 1}-01-01`, label: `July – December ${year}` };
+  return { start: `${year}-01-01`, end: `${year + 1}-01-01`, label: `January – December ${year}` };
+}
+
+// GET /api/ratings/performance?year=&period=1|2|year&department=
+// Reporting (Rating) module: turns the event ratings above into
+//   IPCR -- each employee's score = average of their event ratings in the
+//           period (the same Rating Points as the monthly view), and
+//   OPCR -- each office's score = average of its employees' IPCR scores,
+// both with the CSC adjectival rating (Outstanding ... Poor).
+async function getPerformance(req, res, next) {
+  try {
+    const now = new Date();
+    const year = Number(req.query.year) || now.getFullYear();
+    const period = ['1', '2'].includes(String(req.query.period)) ? String(req.query.period) : 'year';
+    const department = req.query.department && req.query.department !== 'all' ? req.query.department : null;
+    const range = performancePeriod(year, period);
+
+    await generateRatingsForRange(range.start, range.end);
+
+    const params = [range.start, range.end];
+    let deptWhere = '';
+    if (department) {
+      deptWhere = 'AND d.name = ?';
+      params.push(department);
+    }
+    const [rows] = await pool.query(
+      `SELECT e.id, e.employee_code, e.full_name, e.position, e.classification,
+              d.id AS department_id, d.name AS department_name,
+              COUNT(r.id) AS rated_events,
+              SUM(r.rating = 5) AS attended,
+              SUM(r.rating = 1) AS missed,
+              AVG(r.rating) AS score
+       FROM employees e
+       JOIN departments d ON e.department_id = d.id
+       LEFT JOIN employee_ratings r ON r.employee_id = e.id AND r.rating_date >= ? AND r.rating_date < ?
+       WHERE e.is_approved = 1 ${deptWhere}
+       GROUP BY e.id
+       ORDER BY d.name, e.full_name`,
+      params
+    );
+
+    const ipcr = rows.map((r) => {
+      const rated = Number(r.rated_events);
+      const score = rated ? Number(Number(r.score).toFixed(2)) : null;
+      return {
+        employee_id: r.id,
+        employee_code: r.employee_code,
+        full_name: r.full_name,
+        position: r.position,
+        classification: r.classification,
+        department_name: r.department_name,
+        rated_events: rated,
+        attended: Number(r.attended) || 0,
+        missed: Number(r.missed) || 0,
+        score,
+        adjectival: adjectivalRating(score)
+      };
+    });
+
+    const offices = new Map();
+    for (const emp of ipcr) {
+      if (!offices.has(emp.department_name)) {
+        offices.set(emp.department_name, { department_name: emp.department_name, employees: 0, rated_employees: 0, scoreSum: 0, attended: 0, rated_events: 0 });
+      }
+      const o = offices.get(emp.department_name);
+      o.employees += 1;
+      o.attended += emp.attended;
+      o.rated_events += emp.rated_events;
+      if (emp.score != null) {
+        o.rated_employees += 1;
+        o.scoreSum += emp.score;
+      }
+    }
+    const opcr = [...offices.values()].map((o) => {
+      const score = o.rated_employees ? Number((o.scoreSum / o.rated_employees).toFixed(2)) : null;
+      return {
+        department_name: o.department_name,
+        employees: o.employees,
+        rated_employees: o.rated_employees,
+        attendance_rate: o.rated_events ? Math.round((o.attended / o.rated_events) * 100) : null,
+        score,
+        adjectival: adjectivalRating(score)
+      };
+    }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.department_name.localeCompare(b.department_name));
+
+    res.json({ success: true, year, period, label: range.label, ipcr, opcr });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { getRatings, upsertRating, generateRatingsForRange, getPerformance };

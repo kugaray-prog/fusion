@@ -4,6 +4,7 @@ const geofenceService = require('../services/geofenceService');
 const faceService = require('../services/faceService');
 const config = require('../config/config');
 const { logAction } = require('../services/auditService');
+const { notifyAdmins, employeeLabel, deviceLabel } = require('../services/adminNotificationService');
 // NOTE: employee_ratings (the Ratings module) is no longer fed from here.
 // It's now generated on-demand, per actual EVENT, by
 // ratingController.generateRatingsForRange — run automatically every time
@@ -43,6 +44,12 @@ async function flagAttendanceForVerification({ attendanceId, employeeId, eventId
     `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Face Verification Required', ?, 'face_verification_required')`,
     [employeeId, 'Your phone reported the same location as another employee\'s phone. Open the app and complete face verification before the event ends, or your attendance will not be recorded.']
   );
+
+  await notifyAdmins({
+    type: 'geo_anomaly', severity: 'warning', targetView: 'geofence', employeeId,
+    title: 'Possible proxy attendance',
+    message: `${await employeeLabel(employeeId)}'s phone stayed at the same spot as another employee's phone. They were asked to complete face verification.`
+  });
 }
 
 // Looks for OTHER employees' attendance for the same event whose device is
@@ -310,6 +317,11 @@ async function rejectUnverifiedFlaggedAttendance() {
       `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Attendance Not Recorded', ?, 'face_verification_required')`,
       [record.employee_id, 'Your attendance was not recorded because the required face verification was not completed before the event ended.']
     );
+    await notifyAdmins({
+      type: 'face_verification_expired', severity: 'danger', targetView: 'attendance', employeeId: record.employee_id, dedupe: false,
+      title: 'Attendance rejected',
+      message: `${await employeeLabel(record.employee_id)} was marked Absent: the required face verification wasn't completed before the event ended.`
+    });
     await recalculateAllRatings(record.employee_id);
   }
 }
@@ -540,9 +552,19 @@ async function submitAttendance(req, res, next) {
     );
     const device = deviceRows[0];
     if (!device) {
+      await notifyAdmins({
+        type: 'unregistered_device_attendance', severity: 'danger', targetView: 'mobile-app', employeeId: employee_id,
+        title: 'Attendance from an unregistered device',
+        message: `${await employeeLabel(employee_id)} tried to record attendance from a device that isn't registered to them.`
+      });
       return res.status(403).json({ success: false, message: 'This device is not registered to this employee.' });
     }
     if (device.status === 'blacklisted' || device.status === 'rejected') {
+      await notifyAdmins({
+        type: 'blocked_device_attendance', severity: 'danger', targetView: 'mobile-app', employeeId: employee_id,
+        title: 'Attendance from a blocked device',
+        message: `${await employeeLabel(employee_id)} tried to record attendance from a ${device.status} device (${deviceLabel(device)}).`
+      });
       return res.status(403).json({ success: false, message: 'This device is not authorized for attendance.' });
     }
     if (device.status === 'pending') {

@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const { isBlockedStatus, sendDeviceBlocked, getBlockedStatus } = require('../services/deviceAccess');
 const config = require('../config/config');
 const { logAction } = require('../services/auditService');
+const { notifyAdmins, employeeLabel, deviceLabel } = require('../services/adminNotificationService');
 const faceService = require('../services/faceService');
 
 // DoubleSafe-style device re-verification policy (mirrors GCash's DoubleSafe
@@ -141,7 +142,14 @@ async function login(req, res, next) {
     );
 
     const deviceStatus = await getDeviceStatusFor(employee.id, device_uid);
-    if (isBlockedStatus(deviceStatus)) return sendDeviceBlocked(res, deviceStatus);
+    if (isBlockedStatus(deviceStatus)) {
+      await notifyAdmins({
+        type: 'blocked_device_login', severity: 'danger', targetView: 'mobile-app', employeeId: employee.id,
+        title: 'Sign-in from a blocked device',
+        message: `${await employeeLabel(employee.id)} tried to sign in on a ${deviceStatus} device.`
+      });
+      return sendDeviceBlocked(res, deviceStatus);
+    }
 
     // Same rule as googleLogin() below: a token is only issued for a device
     // already on file for THIS employee. A device can only ever belong to
@@ -155,6 +163,13 @@ async function login(req, res, next) {
     if (device_uid && !deviceStatus) {
       const [deviceRows] = await pool.query('SELECT employee_id FROM mobile_devices WHERE device_uid = ?', [device_uid]);
       const belongsToSomeoneElse = deviceRows[0] && String(deviceRows[0].employee_id) !== String(employee.id);
+      await notifyAdmins({
+        type: 'unregistered_device_login', severity: 'warning', targetView: 'mobile-app', employeeId: employee.id,
+        title: 'Sign-in from an unregistered device',
+        message: belongsToSomeoneElse
+          ? `${await employeeLabel(employee.id)} tried to sign in on a device registered to another employee (${await employeeLabel(deviceRows[0].employee_id)}).`
+          : `${await employeeLabel(employee.id)} tried to sign in on a device that isn't registered.`
+      });
       return res.status(403).json({
         success: false,
         message: belongsToSomeoneElse
@@ -218,7 +233,14 @@ async function googleLogin(req, res, next) {
 
       const deviceStatus = await getDeviceStatusFor(employee.id, device_uid);
       // A blacklisted/rejected device gets no token at all.
-      if (isBlockedStatus(deviceStatus)) return sendDeviceBlocked(res, deviceStatus);
+      if (isBlockedStatus(deviceStatus)) {
+        await notifyAdmins({
+          type: 'blocked_device_login', severity: 'danger', targetView: 'mobile-app', employeeId: employee.id,
+          title: 'Sign-in from a blocked device',
+          message: `${await employeeLabel(employee.id)} tried to sign in on a ${deviceStatus} device.`
+        });
+        return sendDeviceBlocked(res, deviceStatus);
+      }
 
       // A device can only ever belong to one employee, but an employee may
       // register and use multiple devices (see linkDevice() below) -- so
@@ -245,6 +267,14 @@ async function googleLogin(req, res, next) {
           token: issueEmployeeToken(employee),
           employee: employeePayload({ ...employee, face_photo_url: facePhotoUrl2 }),
           deviceStatus
+        });
+      }
+
+      if (device_uid) {
+        await notifyAdmins({
+          type: 'unregistered_device_login', severity: 'warning', targetView: 'mobile-app', employeeId: employee.id,
+          title: 'Sign-in from an unregistered device',
+          message: `${await employeeLabel(employee.id)} signed in with Google on a device that isn't registered to them. They must pass face re-verification to register it.`
         });
       }
 
@@ -573,6 +603,11 @@ async function linkDevice(req, res, next) {
             });
 
             if (locked) {
+              await notifyAdmins({
+                type: 'doublesafe_locked', severity: 'danger', targetView: 'employees', employeeId: employee.id,
+                title: 'Account locked after failed face checks',
+                message: `${await employeeLabel(employee.id)} failed face re-verification ${attempts} times while registering a new device and is locked for ${DOUBLESAFE_LOCK_MINUTES} minutes.`
+              });
               return res.status(423).json({
                 success: false,
                 result: 'locked',
@@ -694,6 +729,14 @@ async function linkDevice(req, res, next) {
         `INSERT INTO mobile_devices (employee_id, device_uid, model, brand, os, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
         [employee.id, device_uid, device_model || null, device_brand || null, device_os || null]
       );
+      const device = deviceLabel({ brand: device_brand, model: device_model, device_uid });
+      await notifyAdmins({
+        type: 'device_registration', severity: 'info', targetView: 'mobile-app', employeeId: employee.id, dedupe: false,
+        title: employee.is_approved ? 'New device awaiting approval' : 'New employee registration',
+        message: employee.is_approved
+          ? `${await employeeLabel(employee.id)} registered a new phone (${device}). Approve it in Device Management.`
+          : `${await employeeLabel(employee.id)} registered in the mobile app with ${device}. Approve the device to add them to Employees.`
+      });
     }
 
     // The photo just captured this request became employee_faces' newest

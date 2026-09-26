@@ -111,6 +111,13 @@ async function updateDeviceStatus(req, res, next) {
     // from now on they appear in the Employees list (see schemaUpgrades.js).
     if (status === 'approved') {
       await pool.query('UPDATE employees SET is_approved = 1 WHERE id = ?', [device.employee_id]);
+      // Confirmation alert for the employee: their phone is now registered.
+      if (device.status !== 'approved') {
+        await pool.query(
+          `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Device Registered', ?, 'device_approved')`,
+          [device.employee_id, `Your phone${device.model ? ` (${device.model})` : ''} has been approved. You can now record attendance with it.`]
+        );
+      }
     }
     await logAction({ adminId: req.admin.id, action: 'update_status', module: 'devices', details: { id: req.params.id, status }, ip: req.ip });
 

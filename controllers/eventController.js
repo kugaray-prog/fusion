@@ -52,6 +52,19 @@ async function getAllEvents(req, res, next) {
       params
     );
 
+    // Per-status totals for the current search (ignoring the status filter),
+    // shown on the Events page's status chips.
+    const searchWhere = search ? 'WHERE (e.title LIKE ? OR e.venue LIKE ?)' : '';
+    const [[c]] = await pool.query(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(e.start_datetime > NOW()), 0) AS upcoming,
+              COALESCE(SUM(NOW() BETWEEN e.start_datetime AND e.end_datetime), 0) AS ongoing,
+              COALESCE(SUM(e.end_datetime < NOW()), 0) AS completed
+       FROM events e ${searchWhere}`,
+      search ? [`%${search}%`, `%${search}%`] : []
+    );
+    const counts = { all: Number(c.total), upcoming: Number(c.upcoming), ongoing: Number(c.ongoing), completed: Number(c.completed) };
+
     const now = new Date();
     const data = rows.map((e) => {
       const start = new Date(e.start_datetime);
@@ -62,7 +75,7 @@ async function getAllEvents(req, res, next) {
       return { ...e, computed_status };
     });
 
-    res.json({ success: true, data, pagination: { page: Number(page), limit: noLimit ? total : Number(limit), total } });
+    res.json({ success: true, data, counts, pagination: { page: Number(page), limit: noLimit ? total : Number(limit), total } });
   } catch (err) {
     next(err);
   }

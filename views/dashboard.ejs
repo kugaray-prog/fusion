@@ -190,6 +190,58 @@
         .ins-emp-sub { display: block; font-size: 0.72rem; color: var(--text-muted); font-weight: 600; margin-top: 2px; }
         .ins-empty { padding: 28px; text-align: center; color: var(--text-muted); border: 1px dashed var(--border); border-radius: var(--radius-md); font-size: 0.9rem; line-height: 1.6; }
         .badge-muted { background: var(--bg-body); color: var(--text-muted); border: 1px solid var(--border); }
+        /* Events — View All */
+        .ev-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+        .ev-search { position: relative; flex: 1; min-width: 220px; max-width: 340px; }
+        .ev-search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--text-muted); pointer-events: none; }
+        .ev-search .geo-input { margin: 0; padding-left: 38px; }
+        .ev-chips { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--bg-body); border: 1px solid var(--border); flex-wrap: wrap; }
+        .ev-chips button { display: inline-flex; align-items: center; gap: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 700; font-size: 0.8rem; padding: 7px 12px; border-radius: 9px; cursor: pointer; }
+        .ev-chips button:hover { color: var(--text-main); }
+        .ev-chips button.active { background: var(--bg-card); color: var(--text-main); box-shadow: var(--shadow-sm); }
+        .ev-chips button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+        .ev-chip-count { font-size: 0.7rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+        .ev-chips button.active .ev-chip-count { background: var(--primary-light); color: var(--primary); }
+        .ev-chip-count:empty { display: none; }
+        .ev-table td { padding-top: 12px; padding-bottom: 12px; }
+        .ev-title { font-weight: 700; color: var(--text-main); }
+        .ev-sub { display: block; font-size: 0.78rem; color: var(--text-muted); font-weight: 500; margin-top: 2px; }
+        .ev-when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .ev-coords { font-size: 0.78rem; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.5; }
+        .ev-num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+        .ev-actions { text-align: right; white-space: nowrap; }
+        .ev-actions .btn-icon { margin-right: 0; }
+        .ev-empty { text-align: center; padding: 40px 20px !important; color: var(--text-muted); }
+        .ev-pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; font-size: 0.82rem; color: var(--text-muted); font-weight: 600; }
+        .ev-pager-btns { display: flex; align-items: center; gap: 8px; }
+        .ev-pager button { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-main); font-weight: 700; font-size: 0.8rem; padding: 7px 12px; border-radius: 9px; cursor: pointer; }
+        .ev-pager button:disabled { opacity: 0.45; cursor: not-allowed; }
+        .ev-pager button svg { width: 14px; height: 14px; }
+        body.dark-mode .ev-chips button.active .ev-chip-count { color: var(--text-main); }
+        body.dark-mode th { color: var(--text-main); }
+        /* New Admin modal — email verification */
+        /* Ratings — IPCR / OPCR */
+        .perf-tabs { margin-bottom: 20px; }
+        .perf-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+        .perf-head > div:first-child { flex: 1; min-width: 260px; max-width: 640px; }
+        .perf-controls { display: flex; gap: 10px; flex-wrap: wrap; }
+        .perf-controls .geo-input { margin: 0; width: auto; }
+        .perf-label { font-size: 0.85rem; font-weight: 700; color: var(--text-main); margin-bottom: 18px; }
+        .perf-section-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+        .perf-export { padding: 8px 14px; font-size: 0.8rem; background: var(--success); }
+        .perf-num { text-align: right; font-variant-numeric: tabular-nums; }
+        .perf-score { text-align: right; font-variant-numeric: tabular-nums; font-weight: 800; font-size: 1rem; }
+        .adj-Outstanding { background: #DCFCE7; color: #047857; }
+        .adj-VerySatisfactory { background: #E0E7FF; color: #4338CA; }
+        .adj-Satisfactory { background: #FFF4E5; color: #B45309; }
+        .adj-Unsatisfactory, .adj-Poor { background: #FEE2E2; color: #B91C1C; }
+        .aa-email-row { display: flex; gap: 8px; align-items: flex-start; }
+        .aa-email-row .geo-input { flex: 1; min-width: 0; }
+        .aa-email-row .btn-primary { white-space: nowrap; padding: 11px 14px; font-size: 0.8rem; }
+        .aa-hint { font-size: 0.8rem; color: var(--text-muted); margin: -6px 0 12px; line-height: 1.5; }
+        .aa-hint b { color: var(--text-main); }
+        .aa-otp-input { letter-spacing: 0.4em; font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .aa-otp-input::placeholder { letter-spacing: normal; font-size: 0.92rem; font-weight: 400; }
         .ins-toggle button:focus-visible, button.ins-row-main:focus-visible, .ins-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
         /* --primary is too dark to read on the dark-mode background */
         body.dark-mode .ins-rank { color: var(--text-main); }
@@ -247,6 +299,31 @@
 
         #notif-drawer { position: fixed; top: 0; right: -420px; width: 400px; height: 100vh; background: var(--bg-card); box-shadow: -15px 0 40px rgba(0,0,0,0.1); z-index: 2000; transition: 0.4s; padding: 35px; border-left: 1px solid var(--border); }
         #notif-drawer.open { right: 0; }
+        #notif-drawer { display: flex; flex-direction: column; }
+        .notif-bell { position: relative; }
+        .notif-badge { position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.68rem; font-weight: 800; display: flex; align-items: center; justify-content: center; border: 2px solid var(--bg-card); font-variant-numeric: tabular-nums; }
+        .notif-badge.hidden { display: none; }
+        .notif-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+        .notif-summary { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+        .notif-actions { display: flex; justify-content: space-between; margin-bottom: 12px; }
+        #notif-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin: 0 -8px; padding: 0 8px 20px; }
+        .notif-item { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; width: 100%; text-align: left; padding: 14px; border-radius: var(--radius-md); background: var(--bg-card); border: 1px solid var(--border); cursor: pointer; color: inherit; font: inherit; }
+        .notif-item:hover { background: var(--bg-body); }
+        .notif-item.unread { background: var(--primary-light); border-color: transparent; }
+        .notif-item:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+        .notif-icon { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+        .notif-icon svg { width: 17px; height: 17px; }
+        .notif-icon.sev-info { background: #E0E7FF; color: #4338CA; }
+        .notif-icon.sev-success { background: #DCFCE7; color: #059669; }
+        .notif-icon.sev-warning { background: #FFF4E5; color: #B45309; }
+        .notif-icon.sev-danger { background: #FEE2E2; color: #DC2626; }
+        .notif-title { font-weight: 700; font-size: 0.88rem; color: var(--text-main); display: flex; align-items: center; gap: 6px; }
+        .notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+        .notif-msg { font-size: 0.8rem; color: var(--text-muted); margin-top: 3px; line-height: 1.45; }
+        .notif-time { font-size: 0.7rem; color: var(--text-muted); margin-top: 6px; font-weight: 600; }
+        .notif-actions .ins-link:disabled { opacity: 0.4; cursor: default; }
+        .notif-empty { text-align: center; color: var(--text-muted); padding: 40px 10px; font-size: 0.9rem; }
+        body.dark-mode .notif-item.unread { background: #1A2251; }
 
         /* CRUD Specific Buttons */
         .btn-icon { width: 32px; height: 32px; border-radius: 8px; border: none; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; margin-right: 5px; }
@@ -438,6 +515,10 @@
         .login-input::placeholder { color: var(--text-muted); }
         .login-input:focus { border-color: var(--accent); box-shadow: var(--ring); background: var(--bg-card); }
         .login-btn { padding: 14px; border-radius: var(--radius-sm); background: var(--primary); color: #fff; font-weight: 600; margin-top: 6px; }
+        .login-divider { display: flex; align-items: center; gap: 12px; margin: 20px 0 16px; color: var(--text-muted); font-size: 0.8rem; }
+        .login-divider::before, .login-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+        .google-signin-slot { display: flex; justify-content: center; min-height: 44px; }
+        .login-sso-note { font-size: 0.75rem; margin-top: 10px; line-height: 1.5; }
         .login-btn:hover { background: var(--primary-hover); }
         .login-error { color: var(--danger); font-weight: 600; }
 
@@ -473,15 +554,18 @@
 
     <!-- NOTIFICATION DRAWER -->
     <div id="notif-drawer">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-            <h3 style="font-weight: 800; font-size: 1.4rem;">Notifications</h3>
-            <button class="nav-tool-btn" onclick="G_App.ui.toggleNotifs()"><i data-lucide="x"></i></button>
-        </div>
-        <div id="notif-list">
-            <div class="notif-item" style="padding: 18px; border-radius: 18px; background: var(--bg-body); border-left: 5px solid var(--primary); margin-bottom: 12px;">
-                <h5>You're all caught up</h5><p style="font-size: 0.85rem; color: var(--text-muted);">New activity will appear here.</p>
+        <div class="notif-head">
+            <div>
+                <h3 style="font-weight: 800; font-size: 1.4rem;">Notifications</h3>
+                <p id="notif-summary" class="notif-summary"></p>
             </div>
+            <button class="nav-tool-btn" aria-label="Close notifications" onclick="G_App.ui.toggleNotifs()"><i data-lucide="x"></i></button>
         </div>
+        <div class="notif-actions">
+            <button type="button" class="ins-link" id="notif-read-all" onclick="G_App.notifications.markAllRead()">Mark all as read</button>
+            <button type="button" class="ins-link" id="notif-clear" onclick="G_App.notifications.clearRead()">Clear read</button>
+        </div>
+        <div id="notif-list" aria-live="polite"></div>
     </div>
 
     <!-- MODAL PARA SA CRUD (CREATE/EDIT) -->
@@ -596,8 +680,15 @@
             <input type="email" id="login-email" class="login-input" placeholder="Admin Email" value="<%= typeof defaultAdminEmail !== 'undefined' ? defaultAdminEmail : 'admin@my.cspc.edu.ph' %>">
             <input type="password" id="login-password" class="login-input" placeholder="Password" onkeypress="if(event.key==='Enter') G_App.auth.login()">
             <button class="login-btn" id="login-btn" onclick="G_App.auth.login()">Sign In</button>
+            <% if (googleClientId) { %>
+            <div class="login-divider"><span>or</span></div>
+            <div id="google-signin-btn" class="google-signin-slot"></div>
+            <p class="login-sso-note">Use your institutional Google account. It must already be an admin account.</p>
+            <% } %>
         </div>
     </div>
+    <script>window.__GOOGLE_CLIENT_ID__ = "<%= googleClientId %>";</script>
+    <% if (googleClientId) { %><script src="https://accounts.google.com/gsi/client" async defer></script><% } %>
 
     <!-- SIDEBAR -->
     <aside id="app-sidebar" class="hidden">
@@ -630,7 +721,7 @@
             </div>
             <div style="display: flex; gap: 18px; align-items: center;">
                 <div class="nav-tool-btn" onclick="G_App.ui.toggleDarkMode()"><i data-lucide="sun"></i></div>
-                <div class="nav-tool-btn" onclick="G_App.ui.toggleNotifs()"><i data-lucide="bell"></i></div>
+                <button type="button" class="nav-tool-btn notif-bell" id="notif-bell" aria-label="Notifications" onclick="G_App.ui.toggleNotifs()"><i data-lucide="bell"></i><span id="notif-badge" class="notif-badge hidden"></span></button>
                 <div class="card" id="admin-name-badge" style="padding: 12px 24px; font-weight: 800; color: var(--primary); background: var(--primary-light); border: none;">Super Admin</div>
             </div>
         </header>
@@ -848,26 +939,35 @@
             <!-- EVENTS — VIEW ALL -->
             <div id="events" class="view">
                 <div class="card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
-                        <div>
-                            <h3 style="font-weight: 800; font-size: 1.2rem;">All Events</h3>
-                            <p style="color: var(--text-muted); font-size: 0.85rem;">Every Flag Ceremony / event occurrence, including recurring schedules.</p>
+                    <div style="margin-bottom: 18px;">
+                        <h3 style="font-weight: 800; font-size: 1.2rem;">All Events</h3>
+                        <p style="color: var(--text-muted); font-size: 0.85rem;">Every Flag Ceremony / event occurrence, including recurring schedules.</p>
+                    </div>
+                    <div class="ev-toolbar">
+                        <div class="ev-search">
+                            <i data-lucide="search"></i>
+                            <input type="search" id="events-search" placeholder="Search by title or venue..." class="geo-input" aria-label="Search events" oninput="G_App.events.onSearch()">
                         </div>
-                        <div style="display:flex; gap: 10px; flex-wrap: wrap;">
-                            <input type="text" id="events-search" placeholder="Search events..." class="geo-input" style="margin:0; max-width:240px;" onkeyup="G_App.events.load()">
-                            <select id="events-status-filter" class="geo-input" style="margin:0; width:auto;" onchange="G_App.events.load()">
-                                <option value="all">All Statuses</option>
-                                <option value="upcoming">Upcoming</option>
-                                <option value="ongoing">Ongoing</option>
-                                <option value="completed">Completed</option>
-                            </select>
+                        <div class="ev-chips" id="events-status-chips" role="group" aria-label="Filter by status">
+                            <button type="button" data-status="all" class="active" aria-pressed="true" onclick="G_App.events.setStatus('all')">All <span class="ev-chip-count" data-count="all"></span></button>
+                            <button type="button" data-status="ongoing" aria-pressed="false" onclick="G_App.events.setStatus('ongoing')">Ongoing <span class="ev-chip-count" data-count="ongoing"></span></button>
+                            <button type="button" data-status="upcoming" aria-pressed="false" onclick="G_App.events.setStatus('upcoming')">Upcoming <span class="ev-chip-count" data-count="upcoming"></span></button>
+                            <button type="button" data-status="completed" aria-pressed="false" onclick="G_App.events.setStatus('completed')">Completed <span class="ev-chip-count" data-count="completed"></span></button>
                         </div>
                     </div>
                     <div class="table-container">
-                        <table>
-                            <thead><tr><th>Title</th><th>Venue</th><th>Latitude</th><th>Longitude</th><th>Start</th><th>End</th><th>Recurrence</th><th>Attendance</th><th>Status</th><th>Actions</th></tr></thead>
+                        <table class="ev-table">
+                            <thead><tr><th>Event</th><th>Schedule</th><th>Location</th><th>Recurrence</th><th style="text-align:right;">Attendance</th><th>Status</th><th style="text-align:right;">Actions</th></tr></thead>
                             <tbody id="events-table-body"></tbody>
                         </table>
+                    </div>
+                    <div class="ev-pager">
+                        <span id="events-pager-info"></span>
+                        <div class="ev-pager-btns">
+                            <button type="button" id="events-prev" onclick="G_App.events.goPage(-1)"><i data-lucide="chevron-left"></i> Prev</button>
+                            <span id="events-page-label"></span>
+                            <button type="button" id="events-next" onclick="G_App.events.goPage(1)">Next <i data-lucide="chevron-right"></i></button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1303,7 +1403,15 @@
                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Full Name</label>
                     <input type="text" id="aa-name" class="geo-input" placeholder="Full Name">
                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Email</label>
-                    <input type="email" id="aa-email" class="geo-input" placeholder="admin@my.cspc.edu.ph">
+                    <div class="aa-email-row">
+                        <input type="email" id="aa-email" class="geo-input" placeholder="name@my.cspc.edu.ph" oninput="G_App.adminAccounts.onEmailChange()">
+                        <button type="button" class="btn-primary" id="aa-send-otp" onclick="G_App.adminAccounts.sendOtp()"><i data-lucide="send" size="14"></i> Send Code</button>
+                    </div>
+                    <div id="aa-otp-block" class="hidden">
+                        <p id="aa-otp-hint" class="aa-hint"></p>
+                        <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Verification Code</label>
+                        <input type="text" id="aa-otp" class="geo-input aa-otp-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" oninput="this.value = this.value.replace(/\D/g, '')">
+                    </div>
                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Password</label>
                     <input type="password" id="aa-password" class="geo-input" placeholder="At least 6 characters">
                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Role</label>
@@ -1313,14 +1421,18 @@
                     </select>
                     <div style="display: flex; gap: 15px; margin-top: 10px;">
                         <button class="btn-primary" style="background: var(--border); color: var(--text-main); flex: 1;" onclick="G_App.adminAccounts.closeModal()">Cancel</button>
-                        <button class="btn-primary" style="flex: 2;" onclick="G_App.adminAccounts.save()">Create Account</button>
+                        <button class="btn-primary" style="flex: 2;" id="aa-create-btn" onclick="G_App.adminAccounts.save()">Create Account</button>
                     </div>
                 </div>
             </div>
 
             <!-- RATINGS -->
             <div id="ratings" class="view">
-                <div class="card">
+                <div class="ins-toggle perf-tabs" role="tablist" aria-label="Ratings view">
+                    <button type="button" role="tab" id="ratings-tab-events" class="active" aria-selected="true" onclick="G_App.performance.showTab('events')"><i data-lucide="calendar-check" size="14"></i> Event Ratings</button>
+                    <button type="button" role="tab" id="ratings-tab-perf" aria-selected="false" onclick="G_App.performance.showTab('perf')"><i data-lucide="clipboard-list" size="14"></i> IPCR / OPCR</button>
+                </div>
+                <div class="card" id="ratings-events-pane">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
                         <div>
                             <h3 style="font-weight: 800; font-size: 1.2rem;">Event Ratings</h3>
@@ -1343,6 +1455,50 @@
                     </div>
                     <div class="table-container" style="overflow-x: auto;">
                         <table id="ratings-table"></table>
+                    </div>
+                </div>
+
+                <!-- IPCR / OPCR (Reporting — Rating module) -->
+                <div id="ratings-perf-pane" class="hidden">
+                    <div class="card" style="margin-bottom: 24px;">
+                        <div class="perf-head">
+                            <div>
+                                <h3 style="font-weight: 800; font-size: 1.2rem;">Performance Ratings</h3>
+                                <p style="color: var(--text-muted); font-size: 0.85rem;">IPCR = an employee's average event rating for the period. OPCR = the average IPCR of an office's employees. Adjectival rating per CSC SPMS: 4.50–5.00 Outstanding, 3.50–4.49 Very Satisfactory, 2.50–3.49 Satisfactory, 1.50–2.49 Unsatisfactory, below 1.50 Poor.</p>
+                            </div>
+                            <div class="perf-controls">
+                                <select id="perf-department" class="geo-input" aria-label="Office" onchange="G_App.performance.load()">
+                                    <option value="all">All Offices</option>
+                                </select>
+                                <select id="perf-period" class="geo-input" aria-label="Rating period" onchange="G_App.performance.load()">
+                                    <option value="1">1st Semester (Jan–Jun)</option>
+                                    <option value="2">2nd Semester (Jul–Dec)</option>
+                                    <option value="year">Whole Year</option>
+                                </select>
+                                <select id="perf-year" class="geo-input" aria-label="Year" onchange="G_App.performance.load()"></select>
+                            </div>
+                        </div>
+                        <p id="perf-label" class="perf-label"></p>
+                        <div class="perf-section-head">
+                            <h4 class="rpt-section-title">OPCR — Office Performance</h4>
+                            <button type="button" class="btn-primary perf-export" onclick="G_App.performance.exportCsv('opcr')"><i data-lucide="download"></i> CSV</button>
+                        </div>
+                        <div class="table-container" style="overflow-x: auto; margin-bottom: 28px;">
+                            <table>
+                                <thead><tr><th>Office</th><th style="text-align:right;">Employees</th><th style="text-align:right;">Attendance Rate</th><th style="text-align:right;">OPCR Score</th><th>Adjectival Rating</th></tr></thead>
+                                <tbody id="opcr-table-body"></tbody>
+                            </table>
+                        </div>
+                        <div class="perf-section-head">
+                            <h4 class="rpt-section-title">IPCR — Individual Performance</h4>
+                            <button type="button" class="btn-primary perf-export" onclick="G_App.performance.exportCsv('ipcr')"><i data-lucide="download"></i> CSV</button>
+                        </div>
+                        <div class="table-container" style="overflow-x: auto;">
+                            <table>
+                                <thead><tr><th>Employee</th><th>Office</th><th style="text-align:right;">Events Rated</th><th style="text-align:right;">Attended</th><th style="text-align:right;">Missed</th><th style="text-align:right;">IPCR Score</th><th>Adjectival Rating</th></tr></thead>
+                                <tbody id="ipcr-table-body"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>

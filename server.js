@@ -46,7 +46,9 @@ console.log(`Environment: ${NODE_ENV}`);
 // ------------------------------------------------------------
 app.use(
   helmet({
-    contentSecurityPolicy: false
+    contentSecurityPolicy: false,
+    // Google Sign-In's popup must be able to message the login page back.
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' }
   })
 );
 
@@ -234,6 +236,12 @@ app.use(
   require('./routes/eventRoutes')
 );
 
+// Admin notification bell
+app.use(
+  '/api/admin-notifications',
+  require('./routes/adminNotificationRoutes')
+);
+
 // OCR
 app.use(
   '/api/ocr',
@@ -337,7 +345,10 @@ app.get(DASHBOARD_PATHS, (req, res) => {
       process.env.GOOGLE_MAPS_API_KEY || '',
 
     // Pre-fills the admin login field (admin@my.cspc.edu.ph by default)
-    defaultAdminEmail: config.email.defaultAdmin
+    defaultAdminEmail: config.email.defaultAdmin,
+
+    // "Sign in with Google" on the admin login (hidden when unset)
+    googleClientId: process.env.GOOGLE_CLIENT_ID || ''
   });
 });
 
