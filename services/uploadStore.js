@@ -111,10 +111,13 @@ async function serveStoredUpload(req, res, next) {
     const [rows] = await pool.query('SELECT mime_type, data FROM stored_uploads WHERE path = ?', [publicPath]);
     if (!rows[0]) return next();
     const { mime_type: mimeType, data } = rows[0];
-    const diskPath = path.join(UPLOADS_DIR, ...publicPath.slice('/uploads/'.length).split('/'));
-    fs.promises.mkdir(path.dirname(diskPath), { recursive: true })
-      .then(() => fs.promises.writeFile(diskPath, data))
-      .catch(() => {});
+    if (!wasDeletedLocally(publicPath)) {
+      const diskPath = diskPathFor(publicPath);
+      fs.promises.mkdir(path.dirname(diskPath), { recursive: true })
+        .then(() => fs.promises.writeFile(diskPath, data))
+        .then(() => { loadKnownPaths().add(publicPath); return saveKnownPaths(); })
+        .catch(() => {});
+    }
     res.set('Content-Type', mimeType);
     res.set('Cache-Control', 'public, max-age=86400');
     res.send(data);
@@ -127,12 +130,51 @@ function diskPathFor(publicPath) {
   return path.join(UPLOADS_DIR, ...publicPath.slice('/uploads/'.length).split('/'));
 }
 
+// Every photo path this machine has already had on disk, saved in
+// uploads/.sync-state.json. A known path that's now missing was deleted on
+// purpose, so the sync (and serveStoredUpload) leave it deleted instead of
+// writing it back on every run. A wiped folder (Render restart) loses this
+// file too, so there everything is still restored as before.
+const STATE_FILE = path.join(UPLOADS_DIR, '.sync-state.json');
+let knownPaths = null;
+let hadStateFile = false;
+function loadKnownPaths() {
+  if (!knownPaths) {
+    try {
+      knownPaths = new Set(JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')));
+      hadStateFile = true;
+    } catch (e) {
+      knownPaths = new Set();
+    }
+  }
+  return knownPaths;
+}
+// Any photo in uploads/ at all (not just the .gitkeep placeholders)?
+function hasAnyPhotoOnDisk() {
+  try {
+    return fs.readdirSync(UPLOADS_DIR, { withFileTypes: true }).some((dir) =>
+      dir.isDirectory() &&
+      fs.readdirSync(path.join(UPLOADS_DIR, dir.name)).some((name) => !name.startsWith('.')));
+  } catch (e) {
+    return false;
+  }
+}
+async function saveKnownPaths() {
+  await fs.promises.mkdir(UPLOADS_DIR, { recursive: true });
+  await fs.promises.writeFile(STATE_FILE, JSON.stringify([...loadKnownPaths()]));
+}
+// True when this machine had the file and it has since been deleted.
+function wasDeletedLocally(publicPath) {
+  return loadKnownPaths().has(publicPath) && !fs.existsSync(diskPathFor(publicPath));
+}
+
 // Writes stored photos that aren't on this machine's disk yet into uploads/
 // (same subfolder and filename as their path). Local and deployed servers
 // share one database, so a server running on localhost gets every photo
 // captured anywhere -- mobile face verification (including anomaly checks),
 // OCR scans, kiosk face checks, registrations -- in its own uploads folder,
-// and a freshly restarted host gets its wiped folder back.
+// and a freshly restarted host gets its wiped folder back. Photos deleted
+// from this machine's uploads/ stay deleted (see wasDeletedLocally).
 //
 // The first run checks everything; later runs only look at rows added since
 // the previous run (plus a minute of overlap), which keeps a 5-second
@@ -143,6 +185,12 @@ async function syncToDisk({ full = false } = {}) {
   if (syncing) return 0;
   syncing = true;
   let written = 0;
+  const known = loadKnownPaths();
+  const knownBefore = known.size;
+  // First run without a state file (e.g. just upgraded) in a folder that
+  // still has photos: it wasn't wiped, so anything missing was deleted on
+  // purpose. An empty folder (fresh clone, wiped host) is restored in full.
+  const adoptMissing = full && !hadStateFile && knownBefore === 0 && hasAnyPhotoOnDisk();
   try {
     await ensureTable();
     const since = full ? null : syncedUpTo;
@@ -155,13 +203,20 @@ async function syncToDisk({ full = false } = {}) {
       syncedUpTo = createdAt;
       if (!publicPath.startsWith('/uploads/') || publicPath.includes('..')) continue;
       const diskPath = diskPathFor(publicPath);
-      if (fs.existsSync(diskPath)) continue;
+      if (fs.existsSync(diskPath)) {
+        known.add(publicPath);
+        continue;
+      }
+      if (adoptMissing) known.add(publicPath);
+      if (known.has(publicPath)) continue; // deleted on purpose -- leave it
       const [[row]] = await pool.query('SELECT data FROM stored_uploads WHERE path = ?', [publicPath]);
       if (!row) continue;
       await fs.promises.mkdir(path.dirname(diskPath), { recursive: true });
       await fs.promises.writeFile(diskPath, row.data);
+      known.add(publicPath);
       written++;
     }
+    if (known.size !== knownBefore) await saveKnownPaths();
   } finally {
     syncing = false;
   }

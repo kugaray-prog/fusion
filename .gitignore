@@ -30,6 +30,7 @@ models/w600k_r50.onnx
 # multer's upload paths exist on a fresh clone.
 uploads/*/*
 !uploads/*/.gitkeep
+uploads/.sync-state.json
 
 # --- Logs ---
 *.log
