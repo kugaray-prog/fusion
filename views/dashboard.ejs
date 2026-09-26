@@ -288,9 +288,76 @@
         .face-status-chip.state-found .dot { background: var(--accent); }
         .face-status-chip.state-pass .dot { background: var(--success); }
         .face-status-chip.state-fail .dot { background: var(--danger); }
-        #face-output { border-left: 3px solid var(--border); transition: border-color 0.25s ease; }
-        #face-output.tone-success { border-left-color: var(--success); }
-        #face-output.tone-error { border-left-color: var(--danger); }
+        /* Verification page */
+        .vf-tabs { margin-bottom: 22px; }
+        .vf-tabs button svg { width: 16px; height: 16px; }
+        .vf-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+        @media (max-width: 1180px) { .vf-grid { grid-template-columns: minmax(0, 1fr); } }
+        .vf-capture { display: flex; flex-direction: column; }
+        .vf-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 20px; }
+        .vf-head h3 { font-weight: 800; font-size: 1.15rem; }
+        .vf-head p { color: var(--text-muted); font-size: 0.85rem; margin-top: 2px; line-height: 1.45; }
+        .vf-head-icon { width: 42px; height: 42px; flex-shrink: 0; border-radius: 12px; background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; }
+        .vf-head-icon svg { width: 20px; height: 20px; }
+        .vf-label { display: block; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 6px; }
+        .vf-select { margin-bottom: 6px; }
+        .vf-hint { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 16px; line-height: 1.45; }
+        .vf-camera { position: relative; height: 380px; border-radius: var(--radius-lg); overflow: hidden; }
+        .vf-camera-face { height: 440px; }
+        .vf-action { width: 100%; margin-top: 16px; }
+        .vf-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4; padding: 16px 20px 20px; background: var(--bg-card); border-top-left-radius: 20px; border-top-right-radius: 20px; box-shadow: 0 -10px 30px rgba(11, 15, 26, 0.18); }
+        #face-liveness-banner { background: var(--bg-card); }
+        .vf-result { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 12px; align-items: start; margin-top: 16px; padding: 14px 16px; border-radius: var(--radius-md); background: var(--bg-body); border: 1px solid var(--border); border-left: 4px solid var(--border); transition: border-color 0.2s ease, background 0.2s ease; }
+        .vf-result-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: var(--primary-light); color: var(--primary); }
+        .vf-result-icon svg { width: 18px; height: 18px; }
+        .vf-result-title { font-weight: 800; font-size: 0.95rem; color: var(--text-main); }
+        .vf-result-lines { margin-top: 3px; font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; }
+        .vf-result-lines b { color: var(--text-main); font-weight: 700; }
+        .vf-result.tone-busy { border-left-color: var(--accent); }
+        .vf-result.tone-busy .vf-result-icon svg { animation: vfSpin 1s linear infinite; }
+        .vf-result.tone-success { border-left-color: var(--success); }
+        .vf-result.tone-success .vf-result-icon { background: #DCFCE7; color: #047857; }
+        .vf-result.tone-error { border-left-color: var(--danger); }
+        .vf-result.tone-error .vf-result-icon { background: #FEE2E2; color: #B91C1C; }
+        @keyframes vfSpin { to { transform: rotate(360deg); } }
+        .vf-records-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
+        .vf-records-head h3 { font-weight: 800; font-size: 1.15rem; }
+        .vf-live { display: inline-flex; align-items: center; gap: 6px; font-size: 0.72rem; font-weight: 700; color: var(--text-muted); }
+        .vf-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 0 rgba(5, 205, 153, 0.5); animation: vfPulse 2s ease-out infinite; }
+        @keyframes vfPulse { 0% { box-shadow: 0 0 0 0 rgba(5, 205, 153, 0.5); } 100% { box-shadow: 0 0 0 8px rgba(5, 205, 153, 0); } }
+        .vf-list { display: flex; flex-direction: column; gap: 8px; max-height: 640px; overflow-y: auto; margin: 0 -6px; padding: 0 6px 4px; }
+        .vf-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-card); }
+        .vf-row:hover { background: var(--bg-body); }
+        .vf-row .photo-thumb, .vf-row .photo-missing { width: 48px; height: 48px; }
+        .vf-row-name { font-weight: 700; font-size: 0.9rem; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .vf-row-name.is-unknown { color: var(--text-muted); font-weight: 600; }
+        .vf-row-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; display: flex; flex-wrap: wrap; gap: 2px 8px; }
+        .vf-row-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+        .vf-row-side small { font-size: 0.7rem; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .vf-records { grid-column: 1 / -1; }
+        .vf-result-card .vf-result { margin-top: 0; }
+        .vf-result-card .vf-details { grid-template-columns: minmax(120px, max-content) minmax(0, 1fr); gap: 8px 16px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 0.88rem; }
+        .vf-table-wrap { overflow: auto; max-height: 560px; }
+        .vf-table th { position: sticky; top: 0; z-index: 1; }
+        .vf-table th, .vf-table td { padding: 10px 14px; white-space: nowrap; }
+        .vf-table td { font-size: 0.85rem; }
+        .vf-table .vf-cell-name { font-weight: 700; color: var(--text-main); }
+        .vf-table .vf-cell-sub { display: block; font-size: 0.72rem; color: var(--text-muted); font-weight: 500; }
+        .vf-table .vf-cell-muted { color: var(--text-muted); }
+        .vf-table .vf-cell-num { text-align: right; font-variant-numeric: tabular-nums; }
+        .vf-table .vf-cell-when { font-size: 0.78rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+        .vf-details { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin-top: 8px; font-size: 0.82rem; }
+        .vf-details dt { color: var(--text-muted); font-weight: 600; }
+        .vf-details dd { margin: 0; color: var(--text-main); font-weight: 600; overflow-wrap: anywhere; }
+        .vf-empty { text-align: center; color: var(--text-muted); padding: 36px 10px; font-size: 0.88rem; border: 1px dashed var(--border); border-radius: var(--radius-md); }
+        .photo-thumb { display: block; width: 44px; height: 44px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); }
+        .photo-missing { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 10px; border: 1px dashed var(--border); background: var(--bg-body); color: var(--text-muted); }
+        .photo-missing svg { width: 18px; height: 18px; }
+        @media (prefers-reduced-motion: reduce) { .vf-live-dot, .vf-result.tone-busy .vf-result-icon svg { animation: none; } }
+        /* Hint labels sit above the Start sheet instead of behind it */
+        #face-idle-label { bottom: 158px !important; }
+        #face-idle-sublabel { bottom: 138px !important; }
+        body.dark-mode .vf-head-icon, body.dark-mode .vf-result.tone-idle .vf-result-icon, body.dark-mode .vf-result.tone-busy .vf-result-icon { color: #9CA3FF; }
 
         /* Modal Overlay */
         .modal-overlay { position: fixed; inset: 0; background: rgba(11, 20, 55, 0.4); backdrop-filter: blur(10px); z-index: 5000; display: flex; align-items: center; justify-content: center; opacity: 0; visibility: hidden; transition: 0.4s; }
@@ -499,6 +566,20 @@
         .modal-overlay { background: rgba(11, 20, 55, 0.45); backdrop-filter: blur(6px); transition: 0.2s; }
         .modal-card { padding: 32px; transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
         .modal-overlay.open .modal-card { transform: none; }
+        /* Confirm dialog */
+        #confirm-modal { z-index: 6000; }
+        .confirm-card { max-width: 420px; width: calc(100% - 32px); text-align: center; padding: 30px 28px 24px; }
+        .confirm-icon { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 16px; display: flex; align-items: center; justify-content: center; background: #FEE2E2; color: #DC2626; }
+        .confirm-icon svg { width: 26px; height: 26px; }
+        .confirm-icon.is-info { background: var(--primary-light); color: var(--primary); }
+        .confirm-title { font-weight: 800; font-size: 1.2rem; margin-bottom: 8px; color: var(--text-main); }
+        .confirm-message { color: var(--text-muted); font-size: 0.9rem; line-height: 1.55; margin-bottom: 24px; }
+        .confirm-message b { color: var(--text-main); font-weight: 700; }
+        .confirm-actions { display: flex; gap: 10px; }
+        .confirm-actions .btn-primary { flex: 1; }
+        .confirm-cancel { background: var(--bg-body) !important; color: var(--text-main) !important; border: 1px solid var(--border) !important; box-shadow: none !important; }
+        .btn-danger { background: var(--danger) !important; }
+        body.dark-mode .confirm-icon.is-info { color: #9CA3FF; }
         .modal-card label { letter-spacing: 0.04em; }
         #notif-drawer { padding: 28px; box-shadow: -12px 0 32px rgba(27, 37, 89, 0.12); }
         .toast { padding: 14px 18px; border-radius: var(--radius-md); font-weight: 600; font-size: 0.9rem; box-shadow: var(--shadow-md); animation: toastIn 0.25s ease; }
@@ -547,10 +628,69 @@
             *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
         }
     </style>
+    <style>
+        /* Splash — shown on every load/reload until the page (and, when
+           signed in, the dashboard's data) is ready. See G_App.splash. */
+        #app-splash { position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; background: linear-gradient(135deg, #0D00A5 0%, #2B3674 100%); color: #fff; transition: opacity 0.45s ease, visibility 0.45s ease; }
+        #app-splash.is-leaving { opacity: 0; visibility: hidden; }
+        #app-splash.is-leaving .splash-mark { transform: scale(1.08); }
+        .splash-mark { position: relative; width: 104px; height: 104px; transition: transform 0.45s ease; }
+        .splash-logo { position: relative; z-index: 1; width: 104px; height: 104px; border-radius: 50%; background: #fff; padding: 8px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25); animation: splashBreath 1.8s ease-in-out infinite; }
+        .splash-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .splash-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.55); animation: splashRipple 1.8s cubic-bezier(0.2, 0.6, 0.4, 1) infinite; }
+        .splash-ring:nth-child(2) { animation-delay: 0.6s; }
+        .splash-ring:nth-child(3) { animation-delay: 1.2s; }
+        .splash-name { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; animation: splashRise 0.6s ease both 0.1s; }
+        .splash-sub { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; font-size: 0.85rem; opacity: 0.75; margin-top: -16px; animation: splashRise 0.6s ease both 0.2s; }
+        .splash-bar { width: 160px; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.2); overflow: hidden; animation: splashRise 0.6s ease both 0.3s; }
+        .splash-bar span { display: block; width: 40%; height: 100%; border-radius: inherit; background: #fff; animation: splashSlide 1.1s ease-in-out infinite; }
+        @keyframes splashRipple { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.9); opacity: 0; } }
+        @keyframes splashBreath { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+        @keyframes splashSlide { 0% { transform: translateX(-110%); } 100% { transform: translateX(260%); } }
+        @keyframes splashRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+        /* Login card: its parts rise in one after another once the splash leaves */
+        body.splash-done #login-screen .login-card > * { animation: loginRise 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+        body.splash-done #login-screen .login-card > *:nth-child(2) { animation-delay: 0.05s; }
+        body.splash-done #login-screen .login-card > *:nth-child(3) { animation-delay: 0.1s; }
+        body.splash-done #login-screen .login-card > *:nth-child(n+4) { animation-delay: 0.15s; }
+        body.splash-done #login-screen .login-card { animation: loginCardIn 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+        @keyframes loginRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+        @keyframes loginCardIn { from { opacity: 0; transform: translateY(16px) scale(0.98); } to { opacity: 1; transform: none; } }
+        @media (prefers-reduced-motion: reduce) {
+            .splash-ring { display: none; }
+            .splash-logo, .splash-bar span, .splash-name, .splash-sub, .splash-bar,
+            body.splash-done #login-screen .login-card, body.splash-done #login-screen .login-card > * { animation: none; }
+            .splash-bar span { width: 100%; opacity: 0.6; }
+        }
+    </style>
 </head>
 <body class="light-mode">
+    <!-- SPLASH (first thing painted on load/reload) -->
+    <div id="app-splash" role="status" aria-live="polite">
+        <div class="splash-mark" aria-hidden="true">
+            <span class="splash-ring"></span><span class="splash-ring"></span><span class="splash-ring"></span>
+            <div class="splash-logo"><img src="/img/cspc-logo.png" alt=""></div>
+        </div>
+        <div class="splash-name">GeoAttend</div>
+        <div class="splash-sub" id="splash-text">CSPC Admin Portal</div>
+        <div class="splash-bar" aria-hidden="true"><span></span></div>
+        <span class="sr-only" style="position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0);">Loading</span>
+    </div>
 
     <div id="toast-container"></div>
+
+    <!-- CONFIRM DIALOG (confirmDialog() in app.js) -- replaces the browser's confirm() -->
+    <div id="confirm-modal" class="modal-overlay" aria-hidden="true">
+        <div class="modal-card confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+            <span id="confirm-icon" class="confirm-icon"><i data-lucide="trash-2"></i></span>
+            <h2 id="confirm-title" class="confirm-title"></h2>
+            <p id="confirm-message" class="confirm-message"></p>
+            <div class="confirm-actions">
+                <button type="button" class="btn-primary confirm-cancel" id="confirm-cancel">Cancel</button>
+                <button type="button" class="btn-primary" id="confirm-ok">Delete</button>
+            </div>
+        </div>
+    </div>
 
     <!-- NOTIFICATION DRAWER -->
     <div id="notif-drawer">
@@ -722,7 +862,7 @@
             <div style="display: flex; gap: 18px; align-items: center;">
                 <div class="nav-tool-btn" onclick="G_App.ui.toggleDarkMode()"><i data-lucide="sun"></i></div>
                 <button type="button" class="nav-tool-btn notif-bell" id="notif-bell" aria-label="Notifications" onclick="G_App.ui.toggleNotifs()"><i data-lucide="bell"></i><span id="notif-badge" class="notif-badge hidden"></span></button>
-                <div class="card" id="admin-name-badge" style="padding: 12px 24px; font-weight: 800; color: var(--primary); background: var(--primary-light); border: none;">Super Admin</div>
+                <div class="card" id="admin-name-badge" style="padding: 12px 24px; font-weight: 800; color: var(--primary); background: var(--primary-light); border: none;">Admin</div>
             </div>
         </header>
 
@@ -1184,24 +1324,27 @@
                      Verification below -- see G_App.verification.loadAlerts(). -->
                 <div id="verification-alerts" style="margin-bottom: 20px;"></div>
 
-                <div class="card" style="margin-bottom: 25px; display: flex; gap: 12px; padding: 10px;">
-                    <button type="button" id="verification-tab-ocr" class="btn-primary verification-tab-btn active" onclick="G_App.verification.switchTab('ocr')" style="flex: 1;"><i data-lucide="scan-text"></i> OCR Verification</button>
-                    <button type="button" id="verification-tab-face" class="btn-primary verification-tab-btn" onclick="G_App.verification.switchTab('face')" style="flex: 1; background: var(--border); color: var(--text-main);"><i data-lucide="scan-face"></i> Face Verification</button>
+                <div class="ins-toggle vf-tabs" role="tablist" aria-label="Verification method">
+                    <button type="button" role="tab" id="verification-tab-ocr" class="active" aria-selected="true" aria-controls="ocr-panel" onclick="G_App.verification.switchTab('ocr')"><i data-lucide="scan-text"></i> ID Card Scan (OCR)</button>
+                    <button type="button" role="tab" id="verification-tab-face" aria-selected="false" aria-controls="face-panel" onclick="G_App.verification.switchTab('face')"><i data-lucide="scan-face"></i> Face Verification</button>
                 </div>
 
                 <!-- OCR VERIFICATION PANEL -->
-                <div id="ocr-panel" class="verification-panel">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
-                    <div class="card">
-                        <h3 style="margin-bottom: 25px; font-weight: 800;">Optical Verification</h3>
-                        <div style="margin-bottom:16px;">
-                            <label style="display:block;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:6px;">Record Attendance For</label>
-                            <select id="ocr-event-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);font-size:0.85rem;background:#fff;">
-                                <option value="">Verify identity only (no attendance)</option>
-                            </select>
-                            <p style="font-size:0.72rem;color:var(--text-muted);margin:6px 0 0;">Alternative to the mobile app's GPS check-in — use this when the employee doesn't have their phone with them. Select the event, then scan their ID to record their time-in/time-out.</p>
+                <div id="ocr-panel" class="verification-panel vf-grid" role="tabpanel" aria-labelledby="verification-tab-ocr">
+                    <div class="card vf-capture">
+                        <div class="vf-head">
+                            <span class="vf-head-icon"><i data-lucide="scan-text"></i></span>
+                            <div>
+                                <h3>ID Card Scan</h3>
+                                <p>Reads the employee number from their CSPC ID. Use it when the employee doesn't have their phone.</p>
+                            </div>
                         </div>
-                        <div id="ocr-camera-container" style="height: 380px; background: #000; border-radius: 18px; overflow: hidden; position: relative;">
+                        <label class="vf-label" for="ocr-event-select">Record attendance for</label>
+                        <select id="ocr-event-select" class="geo-input vf-select">
+                            <option value="">Verify identity only (no attendance)</option>
+                        </select>
+                        <p class="vf-hint">Pick an ongoing event to record the employee's attendance, or leave it on "Verify identity only".</p>
+                        <div id="ocr-camera-container" class="vf-camera" style="background: #000;">
                             <video id="ocr-video" autoplay playsinline style="width:100%; height:100%; object-fit:cover;"></video>
                             <canvas id="ocr-canvas" class="hidden"></canvas>
                             <!-- Dark overlays framing the guide area (sized for a portrait/vertical ID card) -->
@@ -1231,35 +1374,42 @@
                                 <i data-lucide="refresh-ccw" size="18"></i>
                             </button>
                         </div>
-                        <div id="ocr-output" style="margin-top:20px; padding:15px; background:var(--bg-body); border-radius:12px; font-family:monospace; min-height:60px; white-space:pre-wrap;">System Ready...</div>
-                        <button class="btn-primary" style="width:100%; margin-top:25px;" onclick="G_App.ocr.process()"><i data-lucide="scan"></i> Capture & Verify ID</button>
+                        <button class="btn-primary vf-action" onclick="G_App.ocr.process()"><i data-lucide="scan"></i> Capture &amp; Verify ID</button>
                     </div>
-                    <div class="card">
-                        <h3 style="margin-bottom: 20px; font-weight: 800;">Recent OCR Records</h3>
-                        <div class="table-container">
-                            <table>
-                                <thead><tr><th>Photo</th><th>Employee</th><th>Employee Number</th><th>Position</th><th>Result</th></tr></thead>
+                    <div class="card vf-result-card">
+                        <div class="vf-records-head"><h3>Verification Result</h3></div>
+                        <div id="ocr-output" class="vf-result" aria-live="polite"></div>
+                    </div>
+                    <div class="card vf-records">
+                        <div class="vf-records-head">
+                            <h3>Recent ID Scans</h3>
+                            <span class="vf-live" title="Updates automatically"><span class="vf-live-dot"></span>Live</span>
+                        </div>
+                        <div class="table-container vf-table-wrap">
+                            <table class="vf-table">
+                                <thead><tr><th>Photo</th><th>Employee</th><th>Employee Number</th><th>Position</th><th>Result</th><th>Date &amp; Time</th></tr></thead>
                                 <tbody id="ocr-records-table"></tbody>
                             </table>
                         </div>
                     </div>
                 </div>
-                </div>
 
                 <!-- FACE VERIFICATION PANEL -->
-                <div id="face-panel" class="verification-panel hidden">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
-                    <div class="card" style="padding: 0; overflow: hidden;">
-                        <div style="padding: 25px 25px 18px;">
-                            <h3 style="margin-bottom: 4px; font-weight: 800;">Live Selfie Verification</h3>
-                            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0 0 16px;">Real-time liveness check, then instant face match against enrolled employees.</p>
-                            <label style="display:block;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:6px;">Record Attendance For</label>
-                            <select id="face-event-select" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);font-size:0.85rem;background:#fff;">
-                                <option value="">Verify identity only (no attendance)</option>
-                            </select>
-                            <p style="font-size:0.72rem;color:var(--text-muted);margin:6px 0 0;">Alternative to the mobile app's GPS check-in — use this when the employee doesn't have an ID on hand. Select the event, then verify their face to record their time-in/time-out.</p>
+                <div id="face-panel" class="verification-panel vf-grid hidden" role="tabpanel" aria-labelledby="verification-tab-face">
+                    <div class="card vf-capture">
+                        <div class="vf-head">
+                            <span class="vf-head-icon"><i data-lucide="scan-face"></i></span>
+                            <div>
+                                <h3>Live Face Verification</h3>
+                                <p>A quick liveness check, then the face is matched against enrolled employees.</p>
+                            </div>
                         </div>
-                        <div id="face-camera-container" style="height: 460px; background: #0B0F1A; border-radius: 18px; margin: 0 0 20px; overflow: hidden; position: relative;">
+                        <label class="vf-label" for="face-event-select">Record attendance for</label>
+                        <select id="face-event-select" class="geo-input vf-select">
+                            <option value="">Verify identity only (no attendance)</option>
+                        </select>
+                        <p class="vf-hint">Pick an ongoing event to record the employee's attendance, or leave it on "Verify identity only".</p>
+                        <div id="face-camera-container" class="vf-camera vf-camera-face" style="background: #0B0F1A;">
                             <video id="face-video" autoplay playsinline muted style="width:100%; height:100%; object-fit:cover;"></video>
                             <canvas id="face-canvas" class="hidden"></canvas>
                             <!-- Soft top scrim behind the status chip / flip-camera button -->
@@ -1282,7 +1432,7 @@
                                 <div id="face-liveness-instruction">Get ready…</div>
                             </div>
                             <!-- Idle action sheet -- houses the Start button; swaps places with the banner above once verification begins -->
-                            <div id="face-idle-sheet" style="position:absolute;left:0;right:0;bottom:0;z-index:4;padding:18px 22px 22px;background:#fff;border-top-left-radius:22px;border-top-right-radius:22px;box-shadow:0 -10px 30px rgba(112,144,176,0.18);">
+                            <div id="face-idle-sheet" class="vf-sheet">
                                 <div style="width:40px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 14px;"></div>
                                 <div style="display:flex;align-items:center;gap:6px;justify-content:center;margin-bottom:12px;">
                                     <i data-lucide="shield-check" size="14" style="color:var(--text-muted);"></i>
@@ -1291,20 +1441,23 @@
                                 <button class="btn-primary" id="face-verify-btn" style="width:100%;" onclick="G_App.face.startVerification()"><i data-lucide="scan-face"></i> Start Face Verification</button>
                             </div>
                         </div>
-                        <div style="padding: 0 25px 25px;">
-                            <div id="face-output" style="padding:15px 18px; background:var(--bg-body); border-radius:12px; font-family:monospace; font-size:0.82rem; min-height:60px; white-space:pre-wrap;">System Ready. Liveness check (hold still, live face) runs automatically before capture.</div>
-                        </div>
                     </div>
-                    <div class="card">
-                        <h3 style="margin-bottom: 20px; font-weight: 800;">Recent Face Verification Records</h3>
-                        <div class="table-container">
-                            <table>
-                                <thead><tr><th>Photo</th><th>Employee</th><th>Source</th><th>Similarity</th><th>Liveness</th><th>Result</th></tr></thead>
+                    <div class="card vf-result-card">
+                        <div class="vf-records-head"><h3>Verification Result</h3></div>
+                        <div id="face-output" class="vf-result" aria-live="polite"></div>
+                    </div>
+                    <div class="card vf-records">
+                        <div class="vf-records-head">
+                            <h3>Recent Face Checks</h3>
+                            <span class="vf-live" title="Updates automatically"><span class="vf-live-dot"></span>Live</span>
+                        </div>
+                        <div class="table-container vf-table-wrap">
+                            <table class="vf-table">
+                                <thead><tr><th>Photo</th><th>Employee</th><th>Source</th><th>Similarity</th><th>Liveness</th><th>Result</th><th>Date &amp; Time</th></tr></thead>
                                 <tbody id="face-records-table"></tbody>
                             </table>
                         </div>
                     </div>
-                </div>
                 </div>
             </div>
 

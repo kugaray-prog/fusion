@@ -46,9 +46,28 @@ async function sendMail({ to, subject, html, text }) {
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     console.error(`[mail] Brevo rejected the email to ${to}: ${res.status} ${body}`);
-    throw Object.assign(new Error('The verification email could not be sent. Please try again later.'), { status: 502 });
+    throw Object.assign(new Error(`The verification email could not be sent. ${explainBrevoError(res.status, body)}`), { status: 502 });
   }
   return { sent: true };
+}
+
+// Turns Brevo's error response into a fix the admin can act on.
+function explainBrevoError(status, body) {
+  let message = '';
+  try { message = JSON.parse(body).message || ''; } catch (e) { message = body; }
+  if (/unrecogni[sz]ed IP/i.test(message)) {
+    return 'Brevo blocked this server\'s IP address. In Brevo, open Security > Authorized IPs and deactivate IP blocking (the host\'s IP changes, so it can\'t be allow-listed).';
+  }
+  if (/not yet activated/i.test(message)) {
+    return 'Brevo has not activated email sending on this account yet. Complete your Brevo profile and ask contact@brevo.com to activate transactional email.';
+  }
+  if (/sender/i.test(message)) {
+    return `Brevo rejected the sender: MAIL_FROM_EMAIL (${process.env.MAIL_FROM_EMAIL}) must exactly match a verified sender in Brevo (Senders, Domains & Dedicated IPs > Senders).`;
+  }
+  if (status === 401) {
+    return 'Brevo rejected the API key. BREVO_API_KEY must be an API key (starts with "xkeysib-"), not an SMTP key.';
+  }
+  return `Brevo said: ${message || `HTTP ${status}`}`;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

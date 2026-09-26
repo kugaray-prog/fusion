@@ -31,10 +31,12 @@ function escapeHtml(value) {
 }
 
 // Clickable thumbnail of a captured photo (opens full size in a new tab).
+const PHOTO_MISSING_HTML = '<span class="photo-missing" title="Photo unavailable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg></span>';
 function photoThumb(src, alt = 'Captured photo') {
-    if (!src) return '<span style="color:var(--text-muted);">—</span>';
+    if (!src) return PHOTO_MISSING_HTML;
     const url = escapeHtml(src);
-    return `<a href="${url}" target="_blank" rel="noopener" title="Open full size"><img src="${url}" alt="${escapeHtml(alt)}" loading="lazy" style="width:44px; height:44px; object-fit:cover; border-radius:10px; border:1px solid var(--border); display:block;"></a>`;
+    // A photo whose file no longer exists shows a placeholder, not a broken image.
+    return `<a href="${url}" target="_blank" rel="noopener" title="Open full size"><img class="photo-thumb" src="${url}" alt="${escapeHtml(alt)}" loading="lazy" onerror="this.parentNode.outerHTML = PHOTO_MISSING_HTML"></a>`;
 }
 
 function toast(message, type = 'info') {
@@ -44,6 +46,52 @@ function toast(message, type = 'info') {
     el.innerText = message;
     container.appendChild(el);
     setTimeout(() => el.remove(), 4000);
+}
+
+// Centered confirmation dialog (#confirm-modal) in place of the browser's
+// confirm(). Resolves true on confirm, false on Cancel / Esc / backdrop click.
+// message is plain text; **bold** spans are rendered bold.
+function confirmDialog({ title = 'Are you sure?', message = '', confirmText = 'Delete', danger = true, icon } = {}) {
+    const modal = document.getElementById('confirm-modal');
+    const okBtn = document.getElementById('confirm-ok');
+    const cancelBtn = document.getElementById('confirm-cancel');
+    const iconEl = document.getElementById('confirm-icon');
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').innerHTML = escapeHtml(message).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    okBtn.textContent = confirmText;
+    okBtn.classList.toggle('btn-danger', danger);
+    iconEl.classList.toggle('is-info', !danger);
+    iconEl.innerHTML = `<i data-lucide="${icon || (danger ? 'trash-2' : 'circle-help')}"></i>`;
+    lucide.createIcons();
+
+    const previousFocus = document.activeElement;
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    // Destructive: start on Cancel so a stray Enter doesn't delete anything.
+    setTimeout(() => (danger ? cancelBtn : okBtn).focus(), 50);
+
+    return new Promise((resolve) => {
+        const close = (result) => {
+            modal.classList.remove('open');
+            modal.setAttribute('aria-hidden', 'true');
+            okBtn.onclick = cancelBtn.onclick = modal.onclick = null;
+            document.removeEventListener('keydown', onKey, true);
+            if (previousFocus && previousFocus.focus) previousFocus.focus();
+            resolve(result);
+        };
+        const onKey = (e) => {
+            if (e.key === 'Escape') { e.preventDefault(); close(false); }
+            else if (e.key === 'Tab') {
+                // Keep focus inside the dialog.
+                e.preventDefault();
+                (document.activeElement === okBtn ? cancelBtn : okBtn).focus();
+            }
+        };
+        okBtn.onclick = () => close(true);
+        cancelBtn.onclick = () => close(false);
+        modal.onclick = (e) => { if (e.target === modal) close(false); };
+        document.addEventListener('keydown', onKey, true);
+    });
 }
 
 const G_App = {
@@ -85,14 +133,14 @@ const G_App = {
         enterDashboard: (data) => {
             localStorage.setItem('ga_token', data.token);
             localStorage.setItem('ga_admin', JSON.stringify(data.admin));
-            document.getElementById('login-screen').style.opacity = '0';
-            setTimeout(() => {
+            G_App.splash.show('Loading your dashboard…');
+            setTimeout(async () => {
                 document.getElementById('login-screen').classList.add('hidden');
                 document.getElementById('app-sidebar').classList.remove('hidden');
                 document.getElementById('main-wrapper').classList.remove('hidden');
                 document.getElementById('main-wrapper').style.display = 'flex';
-                G_App.init();
-            }, 400);
+                try { await G_App.init(); } finally { G_App.splash.hide(); }
+            }, 300);
         },
         // SSO: renders Google's own "Sign in with Google" button on the login screen.
         initGoogleSignIn: () => {
@@ -126,7 +174,8 @@ const G_App = {
             localStorage.removeItem(G_App.ui.ACTIVE_VIEW_KEY);
             location.replace('/');
         },
-        checkSession: () => {
+        // Resolves once the dashboard has loaded (or right away when signed out).
+        checkSession: async () => {
             const token = localStorage.getItem('ga_token');
             const admin = localStorage.getItem('ga_admin');
             if (token && admin) {
@@ -134,8 +183,34 @@ const G_App = {
                 document.getElementById('app-sidebar').classList.remove('hidden');
                 document.getElementById('main-wrapper').classList.remove('hidden');
                 document.getElementById('main-wrapper').style.display = 'flex';
-                G_App.init();
+                await G_App.init();
             }
+        }
+    },
+
+    // Full-screen loading splash (#app-splash in dashboard.ejs): painted
+    // first on every load/reload, hidden once the page is ready. Stays up at
+    // least MIN_MS so it doesn't just flash, and never longer than MAX_MS.
+    splash: {
+        MIN_MS: 700,
+        MAX_MS: 10000,
+        shownAt: performance.now(),
+        show: (text) => {
+            const el = document.getElementById('app-splash');
+            if (!el) return;
+            if (text) document.getElementById('splash-text').textContent = text;
+            G_App.splash.shownAt = performance.now();
+            el.classList.remove('hidden', 'is-leaving');
+        },
+        hide: () => {
+            const el = document.getElementById('app-splash');
+            if (!el || el.classList.contains('is-leaving')) return;
+            const wait = Math.max(0, G_App.splash.MIN_MS - (performance.now() - G_App.splash.shownAt));
+            setTimeout(() => {
+                el.classList.add('is-leaving');
+                document.body.classList.add('splash-done');
+                setTimeout(() => el.classList.add('hidden'), 450);
+            }, wait);
         }
     },
 
@@ -275,7 +350,11 @@ const G_App = {
         applyRoleRestrictions: () => {
             const badge = document.getElementById('admin-name-badge');
             const adminData = JSON.parse(localStorage.getItem('ga_admin') || '{}');
-            if (badge) badge.innerText = `${adminData.name || 'Admin'} (${G_App.state.role === 'super_admin' ? 'Super Admin' : 'Verification Admin'})`;
+            // Role only: "Admin" (full access) or "Verification Admin" (OCR & Face only).
+            if (badge) {
+                badge.innerText = G_App.state.role === 'super_admin' ? 'Admin' : 'Verification Admin';
+                badge.title = adminData.email || adminData.name || '';
+            }
 
             if (G_App.state.role !== 'admin') return; // super_admin sees everything, nothing to restrict
 
@@ -481,7 +560,7 @@ const G_App = {
             }
         },
         remove: async (id, name) => {
-            if (!confirm(`Delete department "${name}"? This cannot be undone.`)) return;
+            if (!(await confirmDialog({ title: 'Delete department?', message: `**${name}** will be permanently deleted. This cannot be undone.` }))) return;
             try {
                 await apiFetch(`/departments/${id}`, { method: 'DELETE' });
                 toast('Department deleted.', 'success');
@@ -631,7 +710,8 @@ const G_App = {
             }
         },
         delete: async (id) => {
-            if (!confirm('Are you sure you want to delete this resource?')) return;
+            const emp = (G_App.state.employees || []).find(e => String(e.id) === String(id));
+            if (!(await confirmDialog({ title: 'Delete employee?', message: `${emp ? `**${emp.full_name}**` : 'This employee'} will be permanently deleted. This cannot be undone.` }))) return;
             try {
                 await apiFetch(`/employees/${id}`, { method: 'DELETE' });
                 toast('Employee deleted.', 'success');
@@ -652,7 +732,7 @@ const G_App = {
             }
         },
         unlockFace: async (id) => {
-            if (!confirm('Clear this employee\'s DoubleSafe lock? They\'ll be able to attempt device re-verification again immediately.')) return;
+            if (!(await confirmDialog({ title: 'Unlock face verification?', message: "This clears the employee's DoubleSafe lock. They can try device re-verification again immediately.", confirmText: 'Unlock', danger: false, icon: 'unlock' }))) return;
             try {
                 await apiFetch(`/employees/${id}/unlock-face`, { method: 'PATCH' });
                 const emp = G_App.state.employees.find(e => e.id == id);
@@ -869,9 +949,9 @@ const G_App = {
         },
         delete: async (id, isRecurringParent) => {
             const msg = isRecurringParent
-                ? 'This is the parent of a recurring series — deleting it also deletes EVERY occurrence of the series. Attendance records are kept. Continue?'
-                : 'Delete this event and its geofence? Attendance records are kept. This cannot be undone.';
-            if (!confirm(msg)) return;
+                ? 'This is the parent of a recurring series. Deleting it also deletes **every occurrence** of the series. Attendance records are kept.'
+                : 'The event and its geofence will be deleted. Attendance records are kept. This cannot be undone.';
+            if (!(await confirmDialog({ title: isRecurringParent ? 'Delete recurring series?' : 'Delete event?', message: msg }))) return;
             try {
                 await apiFetch(`/events/${id}`, { method: 'DELETE' });
                 await G_App.events.load();
@@ -1217,7 +1297,7 @@ const G_App = {
             }
         },
         delete: async (id) => {
-            if (!confirm('Delete this event and its geofence? This cannot be undone.')) return;
+            if (!(await confirmDialog({ title: 'Delete event?', message: 'The event and its geofence will be deleted. This cannot be undone.' }))) return;
             try {
                 await apiFetch(`/geofences/${id}`, { method: 'DELETE' });
                 await G_App.geofence.load();
@@ -1973,7 +2053,7 @@ const G_App = {
             canvas.getContext('2d').drawImage(video, 0, 0);
 
             line.style.display = 'block';
-            output.innerText = 'SCANNING ID CARD...';
+            G_App.verification.showResult('ocr', { tone: 'busy', title: 'Scanning ID card…', lines: ['Reading the employee number.'] });
 
             canvas.toBlob(async (blob) => {
                 const formData = new FormData();
@@ -1982,16 +2062,27 @@ const G_App = {
                 try {
                     const result = await apiFetch('/ocr/verify', { method: 'POST', body: formData });
                     line.style.display = 'none';
-                    if (result.employee) {
-                        output.innerText = `SUCCESS: ${result.employee.full_name} [${result.employee.employee_code}]\n${result.message}`;
-                    } else {
-                        output.innerText = `RESULT: ${result.match.toUpperCase()}\nEMPLOYEE NUMBER READ: ${result.extractedEmployeeCode || '—'}\n${result.message}`;
-                    }
-                    output.innerText += G_App.verification.attendanceSummaryText(result.attendance);
+                    const v = G_App.verification;
+                    const emp = result.employee;
+                    v.showResult('ocr', {
+                        tone: emp ? 'success' : 'error',
+                        title: emp ? 'Identity verified' : (result.extractedEmployeeCode ? 'No matching employee' : 'ID number not readable'),
+                        lines: [result.message],
+                        details: [
+                            ['Result', result.match],
+                            ['Employee', emp ? emp.full_name : '—'],
+                            ['Employee number read', result.extractedEmployeeCode || '—'],
+                            ['Position', emp ? (emp.position || '—') : ''],
+                            ['Department', emp ? (emp.department || '—') : ''],
+                            ['Event', v.selectedEventLabel('ocr')],
+                            ['Attendance', emp ? v.attendanceDetail(eventId ? result.attendance : null) : ''],
+                            ['Time', new Date().toLocaleString()]
+                        ]
+                    });
                     G_App.ocr.loadRecords();
                 } catch (err) {
                     line.style.display = 'none';
-                    output.innerText = `ERROR: ${err.message}`;
+                    G_App.verification.showResult('ocr', { tone: 'error', title: 'Scan failed', lines: [err.message] });
                 }
             }, 'image/jpeg', 0.9);
         },
@@ -1999,19 +2090,20 @@ const G_App = {
             try {
                 const { data } = await apiFetch('/ocr/records');
                 G_App.verification.announce('ocr', data[0]);
-                document.getElementById('ocr-records-table').innerHTML = data.slice(0, 15).map(r => {
+                document.getElementById('ocr-records-table').innerHTML = data.slice(0, 30).map(r => {
                     const isMatch = r.result === 'matched';
-                    const employeeNumber = r.employee_code || r.extracted_employee_code || '—';
+                    const employeeNumber = r.employee_code || r.extracted_employee_code;
                     return `
                     <tr>
                         <td>${photoThumb(r.image_path, 'ID scan')}</td>
-                        <td>${isMatch ? escapeHtml(r.full_name || 'Unknown') : '—'}</td>
-                        <td>${escapeHtml(employeeNumber)}</td>
-                        <td>${isMatch ? escapeHtml(r.position || '—') : '—'}</td>
-                        <td><span class="badge badge-${isMatch ? 'success' : 'danger'}">${isMatch ? 'Match' : 'No Match'}</span></td>
+                        <td>${isMatch ? `<span class="vf-cell-name">${escapeHtml(r.full_name || 'Unknown')}</span>` : '<span class="vf-cell-muted">Unrecognized ID</span>'}</td>
+                        <td>${employeeNumber ? escapeHtml(employeeNumber) : '<span class="vf-cell-muted">Not read</span>'}</td>
+                        <td>${isMatch && r.position ? escapeHtml(r.position) : '<span class="vf-cell-muted">—</span>'}</td>
+                        <td><span class="badge badge-${isMatch ? 'success' : 'danger'}">${isMatch ? 'Match' : 'No match'}</span></td>
+                        <td class="vf-cell-when">${G_App.verification.fullWhen(r.created_at)}</td>
                     </tr>
                 `;
-                }).join('') || '<tr><td colspan="5" style="text-align:center; padding:20px;">No OCR records yet.</td></tr>';
+                }).join('') || '<tr><td colspan="6" class="ev-empty">No ID scans yet.</td></tr>';
             } catch (err) { /* silent */ }
         }
     },
@@ -2063,6 +2155,7 @@ const G_App = {
             toast(`New ${what} photo: ${who}`, 'info');
         },
         init: () => {
+            if (!document.getElementById('ocr-output').innerHTML.trim()) G_App.verification.resetResults();
             G_App.verification.startLive();
             G_App.verification.loadAlerts();
             // Only spin up the camera for whichever tab is currently visible.
@@ -2143,6 +2236,59 @@ const G_App = {
             }
             return `\n\n${actionLabel}${status}`;
         },
+        // Result card under each camera (#ocr-output / #face-output).
+        // tone: idle | busy | success | error. lines are plain text unless html.
+        RESULT_ICONS: { idle: 'info', busy: 'loader-circle', success: 'circle-check', error: 'circle-x' },
+        // details: [[label, value], ...] shown as a labeled list (values are text).
+        showResult: (kind, { tone = 'idle', title, lines = [], html = false, details = [] }) => {
+            const el = document.getElementById(`${kind}-output`);
+            if (!el) return;
+            el.className = `vf-result tone-${tone}`;
+            const body = lines.filter(Boolean).map(l => html ? l : escapeHtml(l)).join('<br>');
+            const rows = details.filter(([, v]) => v !== undefined && v !== null && v !== '');
+            el.innerHTML = `
+                <span class="vf-result-icon"><i data-lucide="${G_App.verification.RESULT_ICONS[tone] || 'info'}"></i></span>
+                <div style="min-width:0;">
+                    <div class="vf-result-title">${escapeHtml(title)}</div>
+                    ${body ? `<div class="vf-result-lines">${body}</div>` : ''}
+                    ${rows.length ? `<dl class="vf-details">${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join('')}</dl>` : ''}
+                </div>`;
+            lucide.createIcons();
+        },
+        // "Recorded (Present)" / "Already recorded today" / reason it wasn't.
+        attendanceDetail: (attendance) => {
+            if (!attendance) return 'Not recorded (identity check only)';
+            if (!attendance.success) return attendance.message || 'Could not be recorded';
+            const status = attendance.status_label ? ` (${attendance.status_label})` : '';
+            if (attendance.action === 'already_recorded') return `Already recorded today${status}`;
+            if (attendance.action === 'anomaly_resolved') return `Flagged attendance verified & resolved${status}`;
+            return `Recorded${status}`;
+        },
+        selectedEventLabel: (kind) => {
+            const sel = document.getElementById(`${kind}-event-select`);
+            return sel && sel.value ? sel.options[sel.selectedIndex].text : 'None (identity check only)';
+        },
+        resetResults: () => {
+            G_App.verification.showResult('ocr', { title: 'Ready to scan', lines: ['Hold the ID card inside the frame, then press Capture & Verify ID.'] });
+            G_App.verification.showResult('face', { title: 'Ready', lines: ['Press Start Face Verification. A short liveness check runs before the photo is taken.'] });
+        },
+        // "Sep 26, 2026, 3:04 PM" for the records tables.
+        fullWhen: (value) => {
+            if (!value) return '—';
+            const d = new Date(String(value).replace(' ', 'T'));
+            return isNaN(d) ? '—' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+        },
+        // "Just now" / "5 min ago" / "Sep 26, 3:04 PM" for record timestamps.
+        when: (value) => {
+            if (!value) return '';
+            const d = new Date(String(value).replace(' ', 'T'));
+            if (isNaN(d)) return '';
+            const secs = (Date.now() - d.getTime()) / 1000;
+            if (secs < 60) return 'Just now';
+            if (secs < 3600) return `${Math.floor(secs / 60)} min ago`;
+            if (secs < 86400 && d.getDate() === new Date().getDate()) return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+            return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        },
         switchTab: (tab) => {
             G_App.verification.activeTab = tab;
             const ocrPanel = document.getElementById('ocr-panel');
@@ -2154,11 +2300,9 @@ const G_App = {
                 panel.classList.remove('hidden');
                 other.classList.add('hidden');
                 btn.classList.add('active');
-                btn.style.background = '';
-                btn.style.color = '';
+                btn.setAttribute('aria-selected', 'true');
                 otherBtn.classList.remove('active');
-                otherBtn.style.background = 'var(--border)';
-                otherBtn.style.color = 'var(--text-main)';
+                otherBtn.setAttribute('aria-selected', 'false');
             };
 
             if (tab === 'face') {
@@ -2371,8 +2515,7 @@ const G_App = {
             if (idleSubLabel) idleSubLabel.classList.add('hidden');
             if (idleSheet) idleSheet.classList.add('hidden');
             banner.classList.remove('hidden');
-            output.innerText = 'RUNNING LIVENESS CHECK...';
-            output.classList.remove('tone-success', 'tone-error');
+            G_App.verification.showResult('face', { tone: 'busy', title: 'Checking liveness…', lines: ['Hold still and look at the camera.'] });
 
             instructionEl.innerText = G_App.face.HOLD_STILL_INSTRUCTION;
             const passed = await G_App.face.detectFaceHold();
@@ -2389,8 +2532,7 @@ const G_App = {
 
             if (!passed) {
                 instructionEl.innerText = "Didn't catch that — please try again.";
-                output.innerText = "LIVENESS CHECK FAILED.\nMake sure your face is centered, unobstructed, and well-lit, then try again.";
-                output.classList.add('tone-error');
+                G_App.verification.showResult('face', { tone: 'error', title: 'Liveness check failed', lines: ['Make sure the face is centered, unobstructed and well-lit, then try again.'] });
                 setTimeout(resetIdle, 1800);
                 return;
             }
@@ -2413,7 +2555,7 @@ const G_App = {
             canvas.getContext('2d').drawImage(video, 0, 0);
 
             line.style.display = 'block';
-            output.innerText = 'RUNNING FACE RECOGNITION...';
+            G_App.verification.showResult('face', { tone: 'busy', title: 'Matching face…', lines: ['Comparing with enrolled employees.'] });
 
             canvas.toBlob(async (blob) => {
                 const formData = new FormData();
@@ -2424,21 +2566,31 @@ const G_App = {
                 try {
                     const result = await apiFetch('/face/verify', { method: 'POST', body: formData });
                     line.style.display = 'none';
-                    const simText = result.similarity != null ? `MATCH SIMILARITY: ${result.similarity.toFixed(1)}%\n` : '';
-                    const livenessText = `LIVENESS: PASSED (${passedActions.join(' \u2192 ')})\n`;
-                    output.classList.toggle('tone-success', !!result.employee);
-                    output.classList.toggle('tone-error', !result.employee);
-                    if (result.employee) {
-                        output.innerText = `SUCCESS: ${result.employee.full_name} [${result.employee.employee_code}]\n${livenessText}${simText}${result.message}`;
-                    } else {
-                        output.innerText = `RESULT: ${result.result.toUpperCase()}\n${livenessText}${simText}${result.message}`;
-                    }
-                    output.innerText += G_App.verification.attendanceSummaryText(result.attendance);
+                    const v = G_App.verification;
+                    const emp = result.employee;
+                    const resultLabel = { matched: 'Match', no_match: 'No match', expired: 'Inactive employee', no_face_detected: 'No face detected' };
+                    v.showResult('face', {
+                        tone: emp && result.result === 'matched' ? 'success' : 'error',
+                        title: result.result === 'matched' ? 'Identity verified'
+                            : result.result === 'expired' ? 'Employee is inactive'
+                            : result.result === 'no_face_detected' ? 'No face detected' : 'No matching employee',
+                        lines: [result.message],
+                        details: [
+                            ['Result', resultLabel[result.result] || result.result],
+                            ['Employee', emp ? emp.full_name : '—'],
+                            ['Employee number', emp ? emp.employee_code : ''],
+                            ['Department', emp ? (emp.department || '—') : ''],
+                            ['Similarity', result.similarity != null ? `${Number(result.similarity).toFixed(1)}%` : '—'],
+                            ['Liveness', `Passed (${passedActions.map(a => a.replace(/_/g, ' ')).join(', ')})`],
+                            ['Event', v.selectedEventLabel('face')],
+                            ['Attendance', result.result === 'matched' ? v.attendanceDetail(eventId ? result.attendance : null) : ''],
+                            ['Time', new Date().toLocaleString()]
+                        ]
+                    });
                     G_App.face.loadRecords();
                 } catch (err) {
                     line.style.display = 'none';
-                    output.classList.add('tone-error');
-                    output.innerText = `ERROR: ${err.message}`;
+                    G_App.verification.showResult('face', { tone: 'error', title: 'Verification failed', lines: [err.message] });
                 }
                 G_App.face.setGuideState('searching');
                 resolve();
@@ -2448,16 +2600,23 @@ const G_App = {
             try {
                 const { data } = await apiFetch('/face/records');
                 G_App.verification.announce('face', data[0]);
-                document.getElementById('face-records-table').innerHTML = data.slice(0, 15).map(r => `
+                const resultLabel = { matched: 'Match', no_match: 'No match', expired: 'Inactive', liveness_failed: 'Not live', no_face_detected: 'No face' };
+                document.getElementById('face-records-table').innerHTML = data.slice(0, 30).map(r => {
+                    const isMatch = r.result === 'matched';
+                    return `
                     <tr>
                         <td>${photoThumb(r.image_path, 'Face photo')}</td>
-                        <td>${escapeHtml(r.full_name || 'Unknown')}</td>
+                        <td>${r.full_name
+                            ? `<span class="vf-cell-name">${escapeHtml(r.full_name)}</span>${r.employee_code ? `<span class="vf-cell-sub">${escapeHtml(r.employee_code)}</span>` : ''}`
+                            : '<span class="vf-cell-muted">Unknown</span>'}</td>
                         <td>${r.source === 'mobile_anomaly' ? '<span class="badge badge-info">Mobile · Anomaly</span>' : '<span class="badge badge-muted">Admin kiosk</span>'}</td>
-                        <td>${r.similarity != null ? Number(r.similarity).toFixed(1) + '%' : '—'}</td>
+                        <td class="vf-cell-num">${r.similarity != null ? Number(r.similarity).toFixed(1) + '%' : '<span class="vf-cell-muted">—</span>'}</td>
                         <td><span class="liveness-badge ${r.liveness_verified ? 'pass' : 'fail'}">${r.liveness_verified ? 'Live' : 'N/A'}</span></td>
-                        <td><span class="badge badge-${r.result === 'matched' ? 'success' : 'danger'}">${r.result}</span></td>
+                        <td><span class="badge badge-${isMatch ? 'success' : 'danger'}">${escapeHtml(resultLabel[r.result] || r.result)}</span></td>
+                        <td class="vf-cell-when">${G_App.verification.fullWhen(r.created_at)}</td>
                     </tr>
-                `).join('') || '<tr><td colspan="6" style="text-align:center; padding:20px;">No face verification records yet.</td></tr>';
+                `;
+                }).join('') || '<tr><td colspan="7" class="ev-empty">No face checks yet.</td></tr>';
             } catch (err) { /* silent */ }
         }
     },
@@ -2507,9 +2666,9 @@ const G_App = {
             if (!d) return;
             const pendingOnly = !d.employee_approved && G_App.mobile.raw.filter(x => x.employee_id === d.employee_id).length === 1;
             const msg = pendingOnly
-                ? `Delete this device and ${d.full_name}'s pending registration? They are not in the Employees list yet and will need to register again in the app.`
-                : `Delete ${d.full_name}'s device (${d.model || d.device_uid})? The phone will be signed out and must register again. Attendance history is kept.`;
-            if (!confirm(msg)) return;
+                ? `This also deletes **${d.full_name}**'s pending registration. They are not in the Employees list yet and will need to register again in the app.`
+                : `**${d.full_name}**'s device (${d.model || d.device_uid}) will be removed. The phone will be signed out and must register again. Attendance history is kept.`;
+            if (!(await confirmDialog({ title: 'Delete device?', message: msg }))) return;
             try {
                 const res = await apiFetch(`/devices/${id}`, { method: 'DELETE' });
                 toast(res.message || 'Device deleted.', 'success');
@@ -2963,7 +3122,7 @@ const G_App = {
             }
         },
         remove: async (id) => {
-            if (!confirm('Delete this admin account? This cannot be undone.')) return;
+            if (!(await confirmDialog({ title: 'Delete admin account?', message: 'This admin will no longer be able to sign in. This cannot be undone.' }))) return;
             try {
                 await apiFetch(`/admin-accounts/${id}`, { method: 'DELETE' });
                 toast('Admin account deleted.', 'success');
@@ -3207,8 +3366,12 @@ const G_App = {
     }
 };
 
-window.onload = () => {
+window.onload = async () => {
+    const failsafe = setTimeout(G_App.splash.hide, G_App.splash.MAX_MS);
     lucide.createIcons();
-    G_App.auth.checkSession();
     if (!localStorage.getItem('ga_token')) G_App.auth.initGoogleSignIn();
+    try { await G_App.auth.checkSession(); } finally {
+        clearTimeout(failsafe);
+        G_App.splash.hide();
+    }
 };
