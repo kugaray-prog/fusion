@@ -407,10 +407,63 @@ async function getAttendance(req, res, next) {
       params
     );
 
+    if (event_id && (status === 'all' || status === 'Absent')) {
+      rows.push(...await absentRowsForEvent(event_id, department));
+    }
+
     res.json({ success: true, data: rows });
   } catch (err) {
     next(err);
   }
+}
+
+// Employees expected at an event who have no attendance record for it, as
+// placeholder "Absent" rows (is_placeholder, no id) so the admin sees who
+// didn't show up. Expected = approved Active employees of the event's
+// department, or everyone if the event isn't department-specific — the same
+// rule the reports use. Only once the event has started.
+async function absentRowsForEvent(eventId, department) {
+  const [[ev]] = await pool.query(
+    'SELECT id, title, department_id, start_datetime FROM events WHERE id = ?',
+    [eventId]
+  );
+  if (!ev || new Date(ev.start_datetime) > new Date()) return [];
+
+  let where = `WHERE e.is_approved = 1 AND e.remark = 'Active'
+    AND NOT EXISTS (SELECT 1 FROM attendance a WHERE a.event_id = ? AND a.employee_id = e.id)`;
+  const params = [ev.id];
+  if (ev.department_id) {
+    where += ' AND e.department_id = ?';
+    params.push(ev.department_id);
+  }
+  if (department !== 'all') {
+    where += ' AND d.name = ?';
+    params.push(department);
+  }
+  const [employees] = await pool.query(
+    `SELECT e.id AS employee_id, e.full_name, e.employee_code, d.name AS department_name
+     FROM employees e
+     JOIN departments d ON e.department_id = d.id
+     ${where}
+     ORDER BY e.full_name`,
+    params
+  );
+  const eventDate = new Date(ev.start_datetime);
+  const attendanceDate = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
+  return employees.map((emp) => ({
+    ...emp,
+    id: null,
+    is_placeholder: true,
+    event_id: ev.id,
+    event_title: ev.title,
+    attendance_date: attendanceDate,
+    attendance_status: 'Absent',
+    time_in: null,
+    time_out: null,
+    latitude: null,
+    longitude: null,
+    session_count: 0
+  }));
 }
 
 // GET /api/attendance/by-department  (folder counts for the admin UI)
@@ -1026,8 +1079,11 @@ async function getAttendanceByEvent(req, res, next) {
       `SELECT e.id, e.title, e.venue, e.start_datetime, e.end_datetime,
               (SELECT COUNT(*) FROM attendance a WHERE a.event_id = e.id) AS log_count
        FROM events e
-       ORDER BY e.start_datetime DESC
-       LIMIT 100`
+       ORDER BY CASE WHEN NOW() BETWEEN e.start_datetime AND e.end_datetime THEN 0
+                     WHEN e.start_datetime > NOW() THEN 1
+                     ELSE 2 END,
+                CASE WHEN e.start_datetime > NOW() THEN e.start_datetime END ASC,
+                e.start_datetime DESC`
     );
     const now = new Date();
     const data = rows.map((e) => {

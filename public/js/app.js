@@ -756,7 +756,7 @@ const G_App = {
             const search = document.getElementById('events-search') ? document.getElementById('events-search').value : '';
             const status = document.getElementById('events-status-filter') ? document.getElementById('events-status-filter').value : 'all';
             try {
-                const params = new URLSearchParams({ search, status, limit: '100' });
+                const params = new URLSearchParams({ search, status, limit: 'all' });
                 const { data } = await apiFetch(`/events?${params.toString()}`);
                 const tbody = document.getElementById('events-table-body');
                 if (!tbody) return;
@@ -771,9 +771,21 @@ const G_App = {
                         <td>${e.recurrence_type === 'weekly' ? `Weekly until ${e.recurrence_end_date || ''}` : 'One-time'}</td>
                         <td>${e.attendance_count}</td>
                         <td><span class="badge badge-${e.computed_status === 'ongoing' ? 'success' : (e.computed_status === 'completed' ? 'danger' : 'warning')}">${e.computed_status}</span></td>
+                        <td><button class="btn-primary" style="padding:6px 12px; font-size:0.75rem; background:var(--danger);" onclick="G_App.events.delete(${e.id}, ${e.is_recurring_parent ? 'true' : 'false'})"><i data-lucide="trash-2" size="14"></i> Delete</button></td>
                     </tr>
-                `).join('') || '<tr><td colspan="9" style="text-align:center; padding:30px;">No events found.</td></tr>';
+                `).join('') || '<tr><td colspan="10" style="text-align:center; padding:30px;">No events found.</td></tr>';
                 lucide.createIcons();
+            } catch (err) { toast(err.message, 'error'); }
+        },
+        delete: async (id, isRecurringParent) => {
+            const msg = isRecurringParent
+                ? 'This is the parent of a recurring series — deleting it also deletes EVERY occurrence of the series. Attendance records are kept. Continue?'
+                : 'Delete this event and its geofence? Attendance records are kept. This cannot be undone.';
+            if (!confirm(msg)) return;
+            try {
+                await apiFetch(`/events/${id}`, { method: 'DELETE' });
+                await G_App.events.load();
+                toast('Event deleted.', 'success');
             } catch (err) { toast(err.message, 'error'); }
         }
     },
@@ -1285,12 +1297,14 @@ const G_App = {
                         <td><b>${log.full_name}</b></td>
                         <td>${log.department_name || 'N/A'}</td>
                         <td>${log.attendance_date}</td>
+                        ${log.is_placeholder ? `
+                        <td colspan="6" style="color:var(--text-muted); font-size:0.8rem;">No time-in recorded</td>` : `
                         <td>${G_App.attendance.timeSessionCell(log)}</td>
                         <td>${G_App.attendance.durationCell(log)}</td>
                         <td>${G_App.attendance.methodCell(log)}</td>
                         <td>${log.longitude ?? '--'}</td>
                         <td>${log.latitude ?? '--'}</td>
-                        <td>${G_App.attendance.faceVerificationCell(log)}</td>
+                        <td>${G_App.attendance.faceVerificationCell(log)}</td>`}
                         <td><span class="badge badge-${log.attendance_status === 'Present' ? 'success' : (log.attendance_status === 'Late' ? 'warning' : 'danger')}">${log.attendance_status}</span></td>
                     </tr>
                 `).join('') || '<tr><td colspan="10" style="text-align:center; padding:30px;">No attendance logs found for this event.</td></tr>';

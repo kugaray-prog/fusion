@@ -1,4 +1,15 @@
 const pool = require('../config/db');
+const { logAction } = require('../services/auditService');
+
+// Ongoing first, then upcoming (soonest first), then completed (most recent
+// first) — otherwise years of future recurring occurrences bury the events
+// that matter now.
+const EVENT_STATUS_ORDER = `
+  CASE WHEN NOW() BETWEEN e.start_datetime AND e.end_datetime THEN 0
+       WHEN e.start_datetime > NOW() THEN 1
+       ELSE 2 END,
+  CASE WHEN e.start_datetime > NOW() THEN e.start_datetime END ASC,
+  e.start_datetime DESC`;
 
 // GET /api/events?search=&status=all|upcoming|ongoing|completed&page=&limit=
 // Powers the Events "View All" page. Distinct from /api/geofences (which is
@@ -7,6 +18,9 @@ const pool = require('../config/db');
 async function getAllEvents(req, res, next) {
   try {
     const { search = '', status = 'all', page = 1, limit = 25 } = req.query;
+    // limit=all returns every event — recurring series generate hundreds of
+    // occurrences, so a fixed cap hides ongoing/completed ones.
+    const noLimit = limit === 'all';
     const offset = (Number(page) - 1) * Number(limit);
 
     let where = 'WHERE 1=1';
@@ -28,9 +42,9 @@ async function getAllEvents(req, res, next) {
        FROM events e
        LEFT JOIN geofences g ON g.event_id = e.id
        ${where}
-       ORDER BY e.start_datetime DESC
-       LIMIT ? OFFSET ?`,
-      [...params, Number(limit), offset]
+       ORDER BY ${EVENT_STATUS_ORDER}
+       ${noLimit ? '' : 'LIMIT ? OFFSET ?'}`,
+      noLimit ? params : [...params, Number(limit), offset]
     );
 
     const [[{ total }]] = await pool.query(
@@ -48,7 +62,7 @@ async function getAllEvents(req, res, next) {
       return { ...e, computed_status };
     });
 
-    res.json({ success: true, data, pagination: { page: Number(page), limit: Number(limit), total } });
+    res.json({ success: true, data, pagination: { page: Number(page), limit: noLimit ? total : Number(limit), total } });
   } catch (err) {
     next(err);
   }
@@ -94,5 +108,22 @@ async function getOngoingEvents(req, res, next) {
   }
 }
 
-module.exports = { getAllEvents, getOccurrences, getOngoingEvents };
+// DELETE /api/events/:id — deletes the event; its geofence and (for a
+// recurring parent) every generated occurrence cascade with it. Attendance
+// records are kept, their event_id set to NULL by the foreign key.
+async function deleteEvent(req, res, next) {
+  try {
+    const [rows] = await pool.query('SELECT id, title FROM events WHERE id = ?', [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ success: false, message: 'Event not found.' });
+
+    await pool.query('DELETE FROM events WHERE id = ?', [rows[0].id]);
+    await logAction({ adminId: req.admin.id, action: 'delete', module: 'event', details: { id: rows[0].id, title: rows[0].title }, ip: req.ip });
+
+    res.json({ success: true, message: 'Event deleted.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { getAllEvents, getOccurrences, getOngoingEvents, deleteEvent };
 

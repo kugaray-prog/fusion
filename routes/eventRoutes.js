@@ -13,5 +13,6 @@ router.get('/ongoing', requireAuth, requireRole('super_admin', 'admin'), eventCo
 router.use(requireAuth, requireRole('super_admin'));
 router.get('/', eventController.getAllEvents);
 router.get('/:id/occurrences', eventController.getOccurrences);
+router.delete('/:id', eventController.deleteEvent);
 
 module.exports = router;
