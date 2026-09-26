@@ -68,5 +68,10 @@ services:
         sync: false
       - key: MAIL_FROM_NAME
         value: GeoAttend CSPC
+      # Google Apps Script email relay (scripts/mail-relay.gs) -- fallback sender
+      - key: MAIL_RELAY_URL
+        sync: false
+      - key: MAIL_RELAY_SECRET
+        sync: false
       - key: ATTENDANCE_MAX_ACCURACY_METERS
         value: '100'
