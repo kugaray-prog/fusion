@@ -786,6 +786,15 @@
             <!-- ATTENDANCE -->
             <div id="attendance" class="view">
                 <div id="attendance-root">
+                    <div style="display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; margin-bottom:20px;">
+                        <input type="text" id="attendance-search" placeholder="Search events..." class="geo-input" style="margin:0; max-width:240px;" onkeyup="G_App.attendance.renderFolders()">
+                        <select id="attendance-status-filter" class="geo-input" style="margin:0; width:auto;" onchange="G_App.attendance.renderFolders()">
+                            <option value="all">All Statuses</option>
+                            <option value="upcoming">Upcoming</option>
+                            <option value="ongoing">Ongoing</option>
+                            <option value="completed">Completed</option>
+                        </select>
+                    </div>
                     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px;" id="attendance-folders"></div>
                 </div>
                 <div id="attendance-detail" class="hidden">

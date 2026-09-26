@@ -1191,11 +1191,28 @@ const G_App = {
         currentEventId: null,
         currentEventTitle: null,
         sessionsCache: {}, // attendance_id -> sessions array, cached per detail view
+        folderEvents: [], // last /attendance/by-event result, filtered client-side
         render: async () => {
             try {
                 const { data } = await apiFetch('/attendance/by-event');
-                const folders = document.getElementById('attendance-folders');
-                folders.innerHTML = data.map(e => `
+                G_App.attendance.folderEvents = data;
+                G_App.attendance.renderFolders();
+            } catch (err) { toast(err.message, 'error'); }
+        },
+        // Applies the Search / Status filters above the event folders.
+        renderFolders: () => {
+            const searchEl = document.getElementById('attendance-search');
+            const statusEl = document.getElementById('attendance-status-filter');
+            const q = (searchEl ? searchEl.value : '').trim().toLowerCase();
+            const status = statusEl ? statusEl.value : 'all';
+            const all = G_App.attendance.folderEvents || [];
+            const data = all.filter(e =>
+                (status === 'all' || e.computed_status === status) &&
+                (!q || `${e.title || ''} ${e.venue || ''}`.toLowerCase().includes(q))
+            );
+            const folders = document.getElementById('attendance-folders');
+            if (!folders) return;
+            folders.innerHTML = data.map(e => `
                     <div class="card" onclick="G_App.attendance.openEvent(${e.id}, '${(e.title || '').replace(/'/g, "\\'")}')" style="cursor:pointer; text-align:center; padding: 40px;">
                         <i data-lucide="calendar-check" size="60" style="color:#FFB547; margin-bottom: 15px;"></i>
                         <h3 style="font-weight:800; color:var(--primary);">${e.title}</h3>
@@ -1207,9 +1224,8 @@ const G_App = {
                             <span class="badge badge-${e.computed_status === 'ongoing' ? 'success' : (e.computed_status === 'completed' ? 'danger' : 'warning')}" style="align-self:center;">${e.computed_status}</span>
                         </div>
                     </div>
-                `).join('') || '<p style="color:var(--text-muted); grid-column: 1/-1; text-align:center; padding: 40px;">No events yet. Create one from Geo-Fences.</p>';
-                lucide.createIcons();
-            } catch (err) { toast(err.message, 'error'); }
+                `).join('') || `<p style="color:var(--text-muted); grid-column: 1/-1; text-align:center; padding: 40px;">${all.length ? 'No events match the current filter.' : 'No events yet. Create one from Geo-Fences.'}</p>`;
+            lucide.createIcons();
         },
         openEvent: async (eventId, eventTitle) => {
             G_App.attendance.currentEventId = eventId;
