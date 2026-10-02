@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const pool = require('../config/db');
+const config = require('../config/config');
 const { logAction } = require('../services/auditService');
 const { sendMail, checkDeliverable } = require('../services/mailService');
 
@@ -37,6 +38,9 @@ async function sendAdminOtp(req, res, next) {
     const email = normalizeEmail(req.body.email);
     const fullName = String(req.body.full_name || '').trim();
 
+    if (!config.email.isInstitutional(email)) {
+      return res.status(400).json({ success: false, message: `Admin accounts must use an institutional email (@${config.email.domain}).` });
+    }
     const deliverable = await checkDeliverable(email);
     if (!deliverable.ok) return res.status(400).json({ success: false, message: deliverable.reason });
 
@@ -109,18 +113,20 @@ async function verifyAdminOtp(email, otp) {
   return null;
 }
 
-// POST /api/admin-accounts — { full_name, email, password, role, otp }
+// POST /api/admin-accounts — { full_name, email, role, otp }
 // role: 'super_admin' (full access) or 'admin' (Verification module only — OCR & Face)
-// otp: the code emailed by sendAdminOtp.
+// otp: the code emailed by sendAdminOtp. No password is set here: the email
+// is verified by the code, and the new admin signs in with their
+// institutional Google account (authController.googleLogin).
 async function createAdminAccount(req, res, next) {
   try {
-    const { full_name, password, role, otp } = req.body;
+    const { full_name, role, otp } = req.body;
     const email = normalizeEmail(req.body.email);
-    if (!full_name || !email || !password) {
-      return res.status(400).json({ success: false, message: 'Full name, email, and password are required.' });
+    if (!full_name || !email) {
+      return res.status(400).json({ success: false, message: 'Full name and email are required.' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+    if (!config.email.isInstitutional(email)) {
+      return res.status(400).json({ success: false, message: `Admin accounts must use an institutional email (@${config.email.domain}).` });
     }
     if (!['super_admin', 'admin'].includes(role)) {
       return res.status(400).json({ success: false, message: 'Role must be super_admin or admin.' });
@@ -132,7 +138,9 @@ async function createAdminAccount(req, res, next) {
     const otpError = await verifyAdminOtp(email, otp);
     if (otpError) return res.status(400).json({ success: false, code: 'OTP_INVALID', message: otpError });
 
-    const hash = await bcrypt.hash(password, 12);
+    // password_hash is NOT NULL; a random secret nobody knows keeps password
+    // sign-in closed for this account.
+    const hash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
     const [result] = await pool.query(
       `INSERT INTO admin_accounts (full_name, email, password_hash, role) VALUES (?, ?, ?, ?)`,
       [full_name, email, hash, role]

@@ -523,6 +523,38 @@ async function linkDevice(req, res, next) {
       });
     }
 
+    // One face, one account: refuse this registration if the selfie matches
+    // a face already enrolled under a different employee, so the same person
+    // can't register (or keep registering) under other Employee IDs. Runs
+    // before any employee/device data is created or changed. Only employees
+    // who still have a device on file hold their face: once an admin deletes
+    // all of someone's devices in Device Management, that face is free to
+    // register again right away.
+    const [otherFaceRows] = await pool.query(
+      `SELECT ef.employee_id, ef.embedding FROM employee_faces ef
+       WHERE ef.employee_id <> ?
+         AND EXISTS (SELECT 1 FROM mobile_devices md WHERE md.employee_id = ef.employee_id)`,
+      [employee ? employee.id : 0]
+    );
+    const faceOwner = faceService.findBestMatch(
+      embedding,
+      otherFaceRows.map((r) => ({ employeeId: r.employee_id, embedding: JSON.parse(r.embedding) }))
+    );
+    if (faceOwner) {
+      await logAction({
+        adminId: null,
+        action: 'duplicate_face_registration',
+        module: 'employee_auth',
+        details: { employeeCode: employee_code, matchedEmployeeId: faceOwner.employeeId, similarity: faceOwner.similarity * 100 },
+        ip: req.ip
+      });
+      return res.status(409).json({
+        success: false,
+        result: 'face_already_registered',
+        message: 'This face is already registered to another account. Each person can only register one account. Contact your administrator if this isn\'t right.'
+      });
+    }
+
     const surnameVal = surname.trim();
     const givenNameVal = given_name.trim();
     const middleNameVal = middle_name ? middle_name.trim() : null;

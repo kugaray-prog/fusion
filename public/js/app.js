@@ -30,6 +30,22 @@ function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Lowercases, strips accents (Peña -> pena) and turns punctuation into
+// spaces, so search text and the thing searched compare word by word.
+function normalizeSearchText(value) {
+    return String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9@]+/g, ' ').trim();
+}
+
+// True when every word of the query appears somewhere in the text, in any
+// order -- "cruz juan", "Dela Cruz, Juan" and "juan dela" all find
+// "Juan Dela Cruz". An empty query matches everything.
+function matchesSearch(text, query) {
+    const words = normalizeSearchText(query).split(' ').filter(Boolean);
+    if (!words.length) return true;
+    const haystack = normalizeSearchText(text);
+    return words.every(w => haystack.includes(w));
+}
+
 // Clickable thumbnail of a captured photo (opens full size in a new tab).
 const PHOTO_MISSING_HTML = '<span class="photo-missing" title="Photo unavailable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg></span>';
 function photoThumb(src, alt = 'Captured photo') {
@@ -153,7 +169,8 @@ const G_App = {
             google.accounts.id.initialize({
                 client_id: window.__GOOGLE_CLIENT_ID__,
                 callback: G_App.auth.googleLogin,
-                ux_mode: 'popup'
+                ux_mode: 'popup',
+                hd: window.__EMAIL_DOMAIN__ || undefined
             });
             google.accounts.id.renderButton(slot, { type: 'standard', theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', width: 300 });
         },
@@ -1143,7 +1160,7 @@ const G_App = {
         },
         filter: (q) => {
             const rows = document.querySelectorAll('#employee-table-body tr');
-            rows.forEach(r => r.style.display = r.innerText.toLowerCase().includes(q.toLowerCase()) ? '' : 'none');
+            rows.forEach(r => r.style.display = matchesSearch(r.innerText, q) ? '' : 'none');
         },
         exportFile: (format) => {
             window.open(`${API}/employees/export/${format === 'excel' ? 'excel' : 'csv'}?token=${localStorage.getItem('ga_token')}`, '_blank');
@@ -1856,7 +1873,7 @@ const G_App = {
         },
         filterDetail: (q) => {
             const rows = document.querySelectorAll('#attendance-dept-table > tr');
-            rows.forEach(r => r.style.display = r.innerText.toLowerCase().includes(q.toLowerCase()) ? '' : 'none');
+            rows.forEach(r => r.style.display = matchesSearch(r.innerText, q) ? '' : 'none');
         },
         // Time Started / Time Ended, with a dropdown when the employee entered
         // and left the geofence more than once — each boundary crossing (its
@@ -3015,12 +3032,18 @@ const G_App = {
         // Cached from the last /devices load so openViewModal() doesn't need
         // a second round trip -- same pattern as G_App.ratings.raw.
         raw: [],
+        // Ids ticked for the bulk Approve / Block / Delete bar. Kept across
+        // re-renders; ids of devices that no longer exist are dropped.
+        selected: new Set(),
         render: async () => {
             try {
                 const { data } = await apiFetch('/devices');
                 G_App.mobile.raw = data;
+                const ids = new Set(data.map(d => d.id));
+                G_App.mobile.selected = new Set([...G_App.mobile.selected].filter(id => ids.has(id)));
                 document.getElementById('mobile-device-table').innerHTML = data.map(d => `
                     <tr>
+                        <td><input type="checkbox" class="device-select" aria-label="Select device" ${G_App.mobile.selected.has(d.id) ? 'checked' : ''} onchange="G_App.mobile.toggleOne(${d.id}, this.checked)"></td>
                         <td><b>${escapeHtml(d.full_name)}</b>${d.employee_approved ? '' : ' <span class="badge badge-warning" title="Registered in the app; not in the Employees list until this device is approved">New registration</span>'}</td>
                         <td>${escapeHtml(d.model || 'N/A')}</td>
                         <td><code>${escapeHtml(d.device_uid || 'N/A')}</code></td>
@@ -3032,9 +3055,49 @@ const G_App = {
                             <button class="btn-icon btn-delete" title="Delete device" onclick="G_App.mobile.deleteDevice(${d.id})"><i data-lucide="trash-2" size="14"></i></button>
                         </td>
                     </tr>
-                `).join('') || '<tr><td colspan="5" style="text-align:center; padding:20px;">No devices registered yet.</td></tr>';
+                `).join('') || '<tr><td colspan="6" style="text-align:center; padding:20px;">No devices registered yet.</td></tr>';
+                G_App.mobile.updateBulkBar();
                 lucide.createIcons();
             } catch (err) { toast(err.message, 'error'); }
+        },
+        toggleOne: (id, checked) => {
+            if (checked) G_App.mobile.selected.add(id);
+            else G_App.mobile.selected.delete(id);
+            G_App.mobile.updateBulkBar();
+        },
+        toggleAll: (checked) => {
+            G_App.mobile.selected = new Set(checked ? G_App.mobile.raw.map(d => d.id) : []);
+            document.querySelectorAll('#mobile-device-table .device-select').forEach(cb => { cb.checked = checked; });
+            G_App.mobile.updateBulkBar();
+        },
+        // Selected count, bulk buttons enabled only with a selection, and the
+        // header checkbox checked / half-checked to match.
+        updateBulkBar: () => {
+            const count = G_App.mobile.selected.size;
+            const total = G_App.mobile.raw.length;
+            document.getElementById('device-selected-count').innerText = `${count} selected`;
+            ['approve', 'blacklist', 'delete'].forEach(a => { document.getElementById(`device-bulk-${a}`).disabled = !count; });
+            const all = document.getElementById('device-select-all');
+            all.checked = total > 0 && count === total;
+            all.indeterminate = count > 0 && count < total;
+        },
+        bulkAction: async (action) => {
+            const ids = [...G_App.mobile.selected];
+            if (!ids.length) return;
+            const n = `${ids.length} device${ids.length === 1 ? '' : 's'}`;
+            const dialogs = {
+                approve: { title: 'Approve selected devices?', message: `**${n}** will be approved. New registrations among them are added to the Employees list.`, confirmText: 'Approve', danger: false, icon: 'check' },
+                blacklist: { title: 'Block selected devices?', message: `**${n}** will be blacklisted. Those phones are signed out and can no longer record attendance.`, confirmText: 'Block', icon: 'ban' },
+                delete: { title: 'Delete selected devices?', message: `**${n}** will be removed and must register again. Pending registrations whose only device is deleted are removed too. Attendance history is kept.`, confirmText: 'Delete' }
+            };
+            if (!(await confirmDialog(dialogs[action]))) return;
+            try {
+                const res = await apiFetch('/devices/bulk', { method: 'POST', body: JSON.stringify({ ids, action }) });
+                toast(res.message, 'success');
+                G_App.mobile.selected.clear();
+                if (action === 'delete' && ids.includes(G_App.mobile.viewingId)) G_App.mobile.closeViewModal();
+            } catch (err) { toast(err.message, 'error'); }
+            await G_App.mobile.render();
         },
         setStatus: async (id, status) => {
             try {
@@ -3465,7 +3528,7 @@ const G_App = {
         otpEmail: null,     // address the current code was sent to
         resendTimer: null,
         openModal: () => {
-            ['aa-name', 'aa-email', 'aa-password', 'aa-otp'].forEach(id => document.getElementById(id).value = '');
+            ['aa-name', 'aa-email', 'aa-otp'].forEach(id => document.getElementById(id).value = '');
             document.getElementById('aa-role').value = 'admin';
             G_App.adminAccounts.resetOtp();
             document.getElementById('admin-account-modal').classList.add('open');
@@ -3535,12 +3598,11 @@ const G_App = {
             const payload = {
                 full_name: document.getElementById('aa-name').value.trim(),
                 email: document.getElementById('aa-email').value.trim().toLowerCase(),
-                password: document.getElementById('aa-password').value,
                 role: document.getElementById('aa-role').value,
                 otp: document.getElementById('aa-otp').value.trim()
             };
-            if (!payload.full_name || !payload.email || !payload.password) {
-                return toast('Full name, email, and password are required.', 'error');
+            if (!payload.full_name || !payload.email) {
+                return toast('Full name and email are required.', 'error');
             }
             if (!aa.otpEmail) return toast('Verify the email first: click "Send Code".', 'error');
             if (!/^\d{6}$/.test(payload.otp)) return toast('Enter the 6-digit code sent to the email.', 'error');
@@ -3648,9 +3710,7 @@ const G_App = {
             const ratingLabel = (r) => (r == null ? '' : Number(r) === 5 ? 'present' : 'absent');
 
             const matchedEmployees = data.filter((e) =>
-                (e.full_name || '').toLowerCase().includes(term) ||
-                (e.employee_code || '').toLowerCase().includes(term) ||
-                (e.department_name || '').toLowerCase().includes(term)
+                matchesSearch(`${e.full_name || ''} ${e.employee_code || ''} ${e.department_name || ''}`, term)
             );
             const employeesToShow = matchedEmployees.length ? matchedEmployees : data;
 

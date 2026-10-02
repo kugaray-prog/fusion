@@ -354,7 +354,10 @@ app.get(DASHBOARD_PATHS, (req, res) => {
     defaultAdminEmail: config.email.defaultAdmin,
 
     // "Sign in with Google" on the admin login (hidden when unset)
-    googleClientId: process.env.GOOGLE_CLIENT_ID || ''
+    googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+
+    // Google's account picker is limited to this domain (the server checks it too)
+    emailDomain: config.email.domain
   });
 });
 

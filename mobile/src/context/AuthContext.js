@@ -8,7 +8,9 @@ import { alertDeviceBlocked } from '../utils/deviceBlockedAlert';
 // How often a signed-in app re-checks whether an admin has blacklisted or
 // rejected this device (also re-checked whenever the app comes back to the
 // foreground, and on any request the server refuses with DEVICE_BLOCKED).
-const DEVICE_CHECK_INTERVAL_MS = 60000;
+// Short so a delete/blacklist/approval in Device Management reaches the
+// phone within seconds.
+const DEVICE_CHECK_INTERVAL_MS = 10000;
 const BLOCKED_STATUSES = ['blacklisted', 'rejected', 'removed'];
 const DEFAULT_BLOCKED_MESSAGE = {
   blacklisted: 'This device has been blacklisted by your administrator, so it can no longer be used to sign in or record attendance. Contact your administrator if you think this is a mistake.',

@@ -1168,7 +1168,7 @@
             <% } %>
         </div>
     </div>
-    <script>window.__GOOGLE_CLIENT_ID__ = "<%= googleClientId %>";</script>
+    <script>window.__GOOGLE_CLIENT_ID__ = "<%= googleClientId %>"; window.__EMAIL_DOMAIN__ = "<%= emailDomain %>";</script>
     <% if (googleClientId) { %><script src="https://accounts.google.com/gsi/client" async defer></script><% } %>
 
     <!-- SIDEBAR -->
@@ -1874,9 +1874,15 @@
                 <div class="card">
                     <h3 style="margin-bottom: 10px; font-weight: 800;">Registered Devices</h3>
                     <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 25px;">Hardware linked to employee accounts.</p>
+                    <div id="device-bulk-bar" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:15px;">
+                        <span id="device-selected-count" style="font-size:0.85rem; font-weight:700; color:var(--text-muted);">0 selected</span>
+                        <button type="button" class="btn-primary" id="device-bulk-approve" onclick="G_App.mobile.bulkAction('approve')" disabled><i data-lucide="check"></i> Approve Selected</button>
+                        <button type="button" class="btn-primary" id="device-bulk-blacklist" style="background:#FEE2E2; color:var(--danger);" onclick="G_App.mobile.bulkAction('blacklist')" disabled><i data-lucide="ban"></i> Block Selected</button>
+                        <button type="button" class="btn-primary" id="device-bulk-delete" style="background:#FEE2E2; color:var(--danger);" onclick="G_App.mobile.bulkAction('delete')" disabled><i data-lucide="trash-2"></i> Delete Selected</button>
+                    </div>
                     <div class="table-container">
                         <table>
-                            <thead><tr><th>Employee Name</th><th>Device Model</th><th>Device ID</th><th>Status</th><th>Actions</th></tr></thead>
+                            <thead><tr><th style="width:36px;"><input type="checkbox" id="device-select-all" title="Select all" aria-label="Select all devices" onchange="G_App.mobile.toggleAll(this.checked)"></th><th>Employee Name</th><th>Device Model</th><th>Device ID</th><th>Status</th><th>Actions</th></tr></thead>
                             <tbody id="mobile-device-table"></tbody>
                         </table>
                     </div>
@@ -2027,8 +2033,7 @@
                         <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Verification Code</label>
                         <input type="text" id="aa-otp" class="geo-input aa-otp-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" oninput="this.value = this.value.replace(/\D/g, '')">
                     </div>
-                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Password</label>
-                    <input type="password" id="aa-password" class="geo-input" placeholder="At least 6 characters">
+                    <p class="aa-hint">No password needed. The new admin signs in with their institutional Google account after the email is verified.</p>
                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Role</label>
                     <select id="aa-role" class="geo-input">
                         <option value="admin">Admin — Verification only</option>

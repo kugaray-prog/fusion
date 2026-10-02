@@ -95,41 +95,87 @@ async function registerDevice(req, res, next) {
   }
 }
 
+const DEVICE_STATUSES = ['pending', 'approved', 'rejected', 'blacklisted'];
+
+// Sets one device's status and sends the side effects that go with it.
+// Returns false when the device doesn't exist. Shared by the single-device
+// PATCH and the bulk action endpoint.
+async function applyDeviceStatus(id, status, req) {
+  const [deviceRows] = await pool.query('SELECT employee_id, status, model FROM mobile_devices WHERE id = ?', [id]);
+  const device = deviceRows[0];
+  if (!device) return false;
+
+  await pool.query('UPDATE mobile_devices SET status = ? WHERE id = ?', [status, id]);
+  // Approving a self-registered employee's device is what accepts them:
+  // from now on they appear in the Employees list (see schemaUpgrades.js).
+  if (status === 'approved') {
+    await pool.query('UPDATE employees SET is_approved = 1 WHERE id = ?', [device.employee_id]);
+    // Confirmation alert for the employee: their phone is now registered.
+    if (device.status !== 'approved') {
+      await pool.query(
+        `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Device Registered', ?, 'device_approved')`,
+        [device.employee_id, `Your phone${device.model ? ` (${device.model})` : ''} has been approved. You can now record attendance with it.`]
+      );
+    }
+  }
+  await logAction({ adminId: req.admin.id, action: 'update_status', module: 'devices', details: { id, status }, ip: req.ip });
+
+  // Tell the employee. A blocked phone is also signed out on its next
+  // request (see middleware/authMiddleware.js requireEmployeeAuth), where
+  // the app shows its own notification with the same explanation.
+  if (isBlockedStatus(status) && device.status !== status) {
+    await pool.query(
+      `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, ?, ?, 'device_blocked')`,
+      [device.employee_id, status === 'blacklisted' ? 'Device Blacklisted' : 'Device Rejected', blockedMessage(status)]
+    );
+  }
+  return true;
+}
+
+// Removes a device registration. If it belonged to someone who registered
+// themselves and was never accepted (employees.is_approved = 0), and it was
+// their only device, their pending employee record goes too (faces etc.
+// cascade), so they can register again from scratch. Attendance history keeps
+// its rows (attendance.device_id is set to NULL). A phone still signed in on
+// this device is signed out on its next request (services/deviceAccess.js).
+// Returns null when the device doesn't exist.
+async function removeDevice(id, req) {
+  const [rows] = await pool.query(
+    `SELECT md.id, md.employee_id, md.device_uid, e.is_approved, e.employee_code
+     FROM mobile_devices md JOIN employees e ON e.id = md.employee_id WHERE md.id = ?`,
+    [id]
+  );
+  const device = rows[0];
+  if (!device) return null;
+
+  await pool.query('DELETE FROM mobile_devices WHERE id = ?', [device.id]);
+
+  let employeeRemoved = false;
+  if (!device.is_approved) {
+    const [[{ remaining }]] = await pool.query('SELECT COUNT(*) AS remaining FROM mobile_devices WHERE employee_id = ?', [device.employee_id]);
+    if (remaining === 0) {
+      await pool.query('DELETE FROM employees WHERE id = ? AND is_approved = 0', [device.employee_id]);
+      employeeRemoved = true;
+    }
+  }
+
+  await logAction({
+    adminId: req.admin.id, action: 'delete', module: 'devices',
+    details: { id: device.id, deviceUid: device.device_uid, employeeCode: device.employee_code, pendingRegistrationRemoved: employeeRemoved },
+    ip: req.ip
+  });
+  return { employeeRemoved };
+}
+
 // PATCH /api/devices/:id/status  { status: 'approved'|'rejected'|'blacklisted' }
 async function updateDeviceStatus(req, res, next) {
   try {
     const { status } = req.body;
-    if (!['pending', 'approved', 'rejected', 'blacklisted'].includes(status)) {
+    if (!DEVICE_STATUSES.includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status value.' });
     }
-    const [deviceRows] = await pool.query('SELECT employee_id, status, model FROM mobile_devices WHERE id = ?', [req.params.id]);
-    const device = deviceRows[0];
-    if (!device) return res.status(404).json({ success: false, message: 'Device not found.' });
-
-    await pool.query('UPDATE mobile_devices SET status = ? WHERE id = ?', [status, req.params.id]);
-    // Approving a self-registered employee's device is what accepts them:
-    // from now on they appear in the Employees list (see schemaUpgrades.js).
-    if (status === 'approved') {
-      await pool.query('UPDATE employees SET is_approved = 1 WHERE id = ?', [device.employee_id]);
-      // Confirmation alert for the employee: their phone is now registered.
-      if (device.status !== 'approved') {
-        await pool.query(
-          `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Device Registered', ?, 'device_approved')`,
-          [device.employee_id, `Your phone${device.model ? ` (${device.model})` : ''} has been approved. You can now record attendance with it.`]
-        );
-      }
-    }
-    await logAction({ adminId: req.admin.id, action: 'update_status', module: 'devices', details: { id: req.params.id, status }, ip: req.ip });
-
-    // Tell the employee. A blocked phone is also signed out on its next
-    // request (see middleware/authMiddleware.js requireEmployeeAuth), where
-    // the app shows its own notification with the same explanation.
-    if (isBlockedStatus(status) && device.status !== status) {
-      await pool.query(
-        `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, ?, ?, 'device_blocked')`,
-        [device.employee_id, status === 'blacklisted' ? 'Device Blacklisted' : 'Device Rejected', blockedMessage(status)]
-      );
-    }
+    const found = await applyDeviceStatus(Number(req.params.id), status, req);
+    if (!found) return res.status(404).json({ success: false, message: 'Device not found.' });
     res.json({ success: true, message: `Device marked as ${status}.` });
   } catch (err) {
     next(err);
@@ -137,46 +183,52 @@ async function updateDeviceStatus(req, res, next) {
 }
 
 // DELETE /api/devices/:id
-// Removes a device registration. If it belonged to someone who registered
-// themselves and was never accepted (employees.is_approved = 0), and it was
-// their only device, their pending employee record goes too (faces etc.
-// cascade), so they can register again from scratch. Attendance history keeps
-// its rows (attendance.device_id is set to NULL). A phone still signed in on
-// this device is signed out on its next request (services/deviceAccess.js).
 async function deleteDevice(req, res, next) {
   try {
-    const [rows] = await pool.query(
-      `SELECT md.id, md.employee_id, md.device_uid, e.is_approved, e.employee_code
-       FROM mobile_devices md JOIN employees e ON e.id = md.employee_id WHERE md.id = ?`,
-      [req.params.id]
-    );
-    const device = rows[0];
-    if (!device) return res.status(404).json({ success: false, message: 'Device not found.' });
-
-    await pool.query('DELETE FROM mobile_devices WHERE id = ?', [device.id]);
-
-    let employeeRemoved = false;
-    if (!device.is_approved) {
-      const [[{ remaining }]] = await pool.query('SELECT COUNT(*) AS remaining FROM mobile_devices WHERE employee_id = ?', [device.employee_id]);
-      if (remaining === 0) {
-        await pool.query('DELETE FROM employees WHERE id = ? AND is_approved = 0', [device.employee_id]);
-        employeeRemoved = true;
-      }
-    }
-
-    await logAction({
-      adminId: req.admin.id, action: 'delete', module: 'devices',
-      details: { id: device.id, deviceUid: device.device_uid, employeeCode: device.employee_code, pendingRegistrationRemoved: employeeRemoved },
-      ip: req.ip
-    });
+    const result = await removeDevice(Number(req.params.id), req);
+    if (!result) return res.status(404).json({ success: false, message: 'Device not found.' });
     res.json({
       success: true,
-      message: employeeRemoved ? 'Device and pending registration deleted.' : 'Device deleted.',
-      data: { employeeRemoved }
+      message: result.employeeRemoved ? 'Device and pending registration deleted.' : 'Device deleted.',
+      data: result
     });
   } catch (err) {
     next(err);
   }
 }
 
-module.exports = { getDevices, registerDevice, updateDeviceStatus, deleteDevice };
+// POST /api/devices/bulk  { ids: [1, 2, ...], action: 'approve'|'blacklist'|'delete' }
+// Device Management's Approve / Block / Delete selected. Each device goes
+// through the same path as its single-device action, so notifications,
+// employee approval and pending-registration cleanup all still happen.
+async function bulkDeviceAction(req, res, next) {
+  try {
+    const { action } = req.body;
+    const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return res.status(400).json({ success: false, message: 'Select at least one device.' });
+    if (ids.length > 500) return res.status(400).json({ success: false, message: 'Too many devices in one request (max 500).' });
+
+    let done = 0;
+    if (action === 'approve' || action === 'blacklist') {
+      const status = action === 'approve' ? 'approved' : 'blacklisted';
+      for (const id of ids) if (await applyDeviceStatus(id, status, req)) done++;
+      return res.json({ success: true, message: `${done} device${done === 1 ? '' : 's'} marked as ${status}.`, data: { count: done } });
+    }
+    if (action === 'delete') {
+      let registrationsRemoved = 0;
+      for (const id of ids) {
+        const result = await removeDevice(id, req);
+        if (!result) continue;
+        done++;
+        if (result.employeeRemoved) registrationsRemoved++;
+      }
+      const extra = registrationsRemoved ? ` (${registrationsRemoved} pending registration${registrationsRemoved === 1 ? '' : 's'} removed)` : '';
+      return res.json({ success: true, message: `${done} device${done === 1 ? '' : 's'} deleted${extra}.`, data: { count: done, registrationsRemoved } });
+    }
+    res.status(400).json({ success: false, message: 'Invalid action.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { getDevices, registerDevice, updateDeviceStatus, deleteDevice, bulkDeviceAction };

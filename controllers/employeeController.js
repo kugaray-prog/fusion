@@ -38,9 +38,12 @@ async function getEmployees(req, res, next) {
     let where = 'WHERE e.is_approved = 1';
     const params = [];
 
-    if (search) {
+    // Each word must appear somewhere, in any order, so "cruz juan" or
+    // "Dela Cruz, Juan" still finds "Juan Dela Cruz".
+    const searchWords = String(search).split(/[\s,]+/).filter(Boolean).slice(0, 10);
+    for (const word of searchWords) {
       where += ' AND (e.full_name LIKE ? OR e.employee_code LIKE ? OR e.email LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      params.push(`%${word}%`, `%${word}%`, `%${word}%`);
     }
     if (department !== 'all') {
       where += ' AND d.name = ?';

@@ -7,6 +7,7 @@ const { requireAuth, requireRole, requireEmployeeAuth } = require('../middleware
 // requireEmployeeAuth instead of being silently re-created here.
 router.post('/register', requireEmployeeAuth, deviceController.registerDevice);
 router.get('/', requireAuth, requireRole('super_admin'), deviceController.getDevices);
+router.post('/bulk', requireAuth, requireRole('super_admin'), deviceController.bulkDeviceAction);
 router.patch('/:id/status', requireAuth, requireRole('super_admin'), deviceController.updateDeviceStatus);
 router.delete('/:id', requireAuth, requireRole('super_admin'), deviceController.deleteDevice);
 

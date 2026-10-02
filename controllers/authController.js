@@ -87,6 +87,10 @@ async function googleLogin(req, res, next) {
     }
 
     const email = String(payload.email).toLowerCase();
+    // Same rule as the mobile app: only the institutional Google account.
+    if (!config.email.isInstitutional(email)) {
+      return res.status(403).json({ success: false, message: `Use your institutional Google account (@${config.email.domain}). ${email} is not allowed.` });
+    }
     const [rows] = await pool.query('SELECT * FROM admin_accounts WHERE email = ? AND is_active = 1', [email]);
     if (!rows[0]) {
       return res.status(403).json({ success: false, message: `${email} is not an admin account. Ask a Super Admin to add it in Settings.` });

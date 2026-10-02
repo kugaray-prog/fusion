@@ -8,13 +8,19 @@ const EMAIL_DOMAIN = 'my.cspc.edu.ph';
 // rewritten below so it can't come back.
 const LEGACY_EMAIL_DOMAIN = 'geoattend.pro';
 
+// True for an address on the institutional domain (name@my.cspc.edu.ph).
+function isInstitutionalEmail(email) {
+  return String(email || '').trim().toLowerCase().endsWith(`@${EMAIL_DOMAIN}`);
+}
+
 module.exports = {
   email: {
     domain: EMAIL_DOMAIN,
     legacyDomain: LEGACY_EMAIL_DOMAIN,
     defaultAdmin: (process.env.DEFAULT_ADMIN_EMAIL || `admin@${EMAIL_DOMAIN}`)
       .trim()
-      .replace(/@geoattend\.pro$/i, `@${EMAIL_DOMAIN}`)
+      .replace(/@geoattend\.pro$/i, `@${EMAIL_DOMAIN}`),
+    isInstitutional: isInstitutionalEmail
   },
   jwt: {
     secret: process.env.JWT_SECRET || 'dev_secret_change_me',
@@ -54,7 +60,8 @@ module.exports = {
     matchThreshold: Number(process.env.FACE_MATCH_THRESHOLD) || 0.5
   },
   attendance: {
-    lateGraceMinutes: 10,
+    // Time-ins up to this many minutes after the event starts still count as Present.
+    lateGraceMinutes: 15,
     // If an employee's accumulated time inside the geofence, once the event
     // has ended, comes out to less than this fraction of the event's total
     // scheduled duration, they're marked Absent regardless of how their

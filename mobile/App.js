@@ -43,8 +43,17 @@ function RootNavigator() {
   // approval, this component re-renders into the Dashboard stack below.
   const awaitingApproval = !!employee && deviceStatus === 'pending';
 
+  // Each auth stage gets its own navigator instance (via `key`) instead of
+  // one navigator swapping its whole screen list in place. On Android with
+  // the New Architecture, swapping [Login, Registration] for
+  // [WaitingApproval] mid-transition could leave the new screen blank (the
+  // white screen right after face registration); a fresh mount always
+  // renders its first screen normally.
+  const stage = !employee ? 'auth' : awaitingApproval ? 'pending' : !wifiVerified ? 'wifi' : 'app';
+
   return (
     <Stack.Navigator
+      key={stage}
       screenOptions={{
         headerStyle: { backgroundColor: colors.cspcBlue },
         headerTintColor: '#fff',

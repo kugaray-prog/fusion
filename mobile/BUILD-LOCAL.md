@@ -14,6 +14,12 @@ Hanapin ang Wireless LAN adapter Wi-Fi, tapos ang IPv4 Address. Halimbawa: 192.1
 Remove-Item -Force -ErrorAction SilentlyContinue C:\geoattend-pro\mobile\node_modules\expo-constants\android\build\generated\assets\expo-constants\app.config, C:\geoattend-pro\mobile\node_modules\expo-constants\android\build\intermediates\library_assets\release\out\app.config, C:\geoattend-pro\mobile\android\app\build\intermediates\assets\release\app.config
 
 
+Burahin din ang build folder ng Expo Gradle plugin. Nawawala ang mga compiled class nito sa pagitan ng mga build pero akala ng Gradle ay up to date pa, kaya walang laman ang jar at pumapalya ang build sa "Could not find implementation class 'expo.modules.plugin.ExpoModulesGradlePlugin'":
+
+
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue C:\geoattend-pro\mobile\node_modules\expo-modules-core\expo-module-gradle-plugin\build
+
+
 3. I-build ulit gamit ang bagong IP. Palitan ang IP sa ikatlong linya:
 
 
