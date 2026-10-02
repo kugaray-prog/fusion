@@ -10,6 +10,7 @@ import { colors, radius, shadow, CSPC_LOGO } from '../theme';
 import { API_BASE_URL, ASSET_BASE_URL, GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, isGoogleConfigured } from '../config';
 import { notify } from '../utils/notify';
 import FadeIn from '../components/FadeIn';
+import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -28,6 +29,7 @@ const USE_WEB_BRIDGE = IS_EXPO_GO || !NATIVE_CLIENT_ID;
 export default function LoginScreen({ navigation }) {
   const { loginWithGoogle, staleSession, deviceBlockedNotice } = useAuth();
   const [authenticating, setAuthenticating] = useState(false);
+  const { insets, isCompactHeight, contentStyle } = useResponsive();
   const [errorMsg, setErrorMsg] = useState('');
   const btnScale = useRef(new Animated.Value(1)).current;
 
@@ -126,10 +128,10 @@ export default function LoginScreen({ navigation }) {
   const btnPressOut = () => Animated.spring(btnScale, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 6 }).start();
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1 }}>
+    <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1, paddingBottom: 20 + insets.bottom }}>
       {/* Brand section — mirrors .brand-section in the CSPC GeoAttend web prototype */}
       <FadeIn delay={0}>
-        <View style={styles.brandSection}>
+        <View style={[styles.brandSection, isCompactHeight && styles.brandSectionCompact]}>
           <View style={styles.logoContainer}>
             <Image source={CSPC_LOGO} style={styles.logoImage} resizeMode="contain" />
           </View>
@@ -139,7 +141,7 @@ export default function LoginScreen({ navigation }) {
       </FadeIn>
 
       <FadeIn delay={120}>
-        <View style={styles.body}>
+        <View style={[styles.body, contentStyle(MAX_WIDTH.form)]}>
           <View style={styles.card}>
             {!!deviceBlockedNotice && (
               <View style={styles.blockedBanner}>
@@ -219,7 +221,9 @@ const styles = StyleSheet.create({
   logoImage: { width: '100%', height: '100%' },
   brandTitle: { color: '#fff', fontSize: 24, fontWeight: '700', letterSpacing: -0.3 },
   brandSubtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 4 },
-  body: { paddingHorizontal: 20, marginTop: -30 },
+  // Phone held in landscape: a shorter hero so the sign-in card stays in view.
+  brandSectionCompact: { paddingTop: 24, paddingBottom: 40 },
+  body: { marginTop: -30 },
   card: {
     backgroundColor: colors.white,
     padding: 24,

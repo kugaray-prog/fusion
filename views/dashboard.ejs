@@ -1158,13 +1158,11 @@
             <h1 style="font-size: 1.8rem; font-weight: 800;">GeoAttend</h1>
             <p style="margin-bottom: 30px; opacity: 0.7;">CSPC Admin Portal</p>
             <div class="login-error" id="login-error"></div>
-            <input type="email" id="login-email" class="login-input" placeholder="Admin Email" value="<%= typeof defaultAdminEmail !== 'undefined' ? defaultAdminEmail : 'admin@my.cspc.edu.ph' %>">
-            <input type="password" id="login-password" class="login-input" placeholder="Password" onkeypress="if(event.key==='Enter') G_App.auth.login()">
-            <button class="login-btn" id="login-btn" onclick="G_App.auth.login()">Sign In</button>
             <% if (googleClientId) { %>
-            <div class="login-divider"><span>or</span></div>
             <div id="google-signin-btn" class="google-signin-slot"></div>
             <p class="login-sso-note">Use your institutional Google account. It must already be an admin account.</p>
+            <% } else { %>
+            <p class="login-sso-note">Google Sign-In is not configured. Set GOOGLE_CLIENT_ID in the server's .env.</p>
             <% } %>
         </div>
     </div>
@@ -1634,7 +1632,6 @@
 
             <!-- GEO FENCES -->
             <div id="geofence" class="view">
-                <div id="geofence-alerts" style="margin-bottom: 20px;"></div>
                 <div style="display: grid; grid-template-columns: 1fr 400px; gap: 25px; height: 720px;">
                     <div id="geo-map" style="border-radius: 24px; border: 1px solid var(--border); background: var(--bg-card);"></div>
                     <div class="card" style="overflow-y: auto;">
@@ -1669,6 +1666,7 @@
                                 <button type="button" class="btn-primary" style="flex:1; padding: 10px; font-size: 0.8rem; background: var(--text-muted);" onclick="G_App.geofence.useMyLocation()"><i data-lucide="locate-fixed" size="14"></i> Use My Location</button>
                             </div>
                             <button type="button" class="btn-primary" style="width:100%; margin-bottom: 15px; padding: 10px; font-size: 0.8rem; background: var(--warning);" onclick="G_App.geofence.useCspcDefault()"><i data-lucide="school" size="14"></i> Use CSPC Default Location</button>
+                            <button type="button" class="btn-primary" style="width:100%; margin-bottom: 15px; padding: 10px; font-size: 0.8rem; background: var(--bg-body); color: var(--text-main, #1B2559); border: 1px solid var(--border);" onclick="G_App.geofence.saveDefaultView()" title="Pan and zoom the map to what this page should open at, then click"><i data-lucide="bookmark" size="14"></i> Save Current Map View as Default</button>
                             <p style="font-size: 0.7rem; color: var(--text-muted); margin: -10px 0 15px;">Type exact coordinates, or click the map to auto-fill this field while drawing the boundary below.</p>
 
                             <div style="background: var(--bg-body); border-radius: 16px; padding: 16px; margin-bottom: 15px;">
@@ -1723,6 +1721,7 @@
                         </div>
                     </div>
                 </div>
+                <div id="geofence-alerts" style="margin-top: 20px;"></div>
             </div>
 
             <!-- VERIFICATION (OCR Verification + Face Verification) -->

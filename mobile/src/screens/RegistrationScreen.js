@@ -10,6 +10,7 @@ import { getDeviceInfo } from '../utils/device';
 import { getDepartments, getEmployeeOptions } from '../api/client';
 import FadeIn from '../components/FadeIn';
 import PrimaryButton from '../components/PrimaryButton';
+import { useResponsive, MAX_WIDTH, MODAL_ORIENTATIONS } from '../utils/responsive';
 
 // Mirrors the backend's VALID_SUFFIXES list (controllers/employeeAuthController.js).
 // '' (displayed as "None") is the default -- the field is optional.
@@ -77,7 +78,7 @@ function DropdownFieldWithOthers({
           autoFocus
         />
       )}
-      <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
+      <Modal visible={pickerOpen} transparent animationType="fade" supportedOrientations={MODAL_ORIENTATIONS} onRequestClose={() => setPickerOpen(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setPickerOpen(false)}>
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>{label}</Text>
@@ -196,6 +197,7 @@ export default function RegistrationScreen({ navigation }) {
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
   const [step, setStep] = useState('details'); // 'details' | 'capture'
+  const { width, height, insets, isLandscape, isCompactHeight, topPad, contentStyle } = useResponsive();
 
   // -- Step 1: employee details --
   const [employeeCode, setEmployeeCode] = useState('');
@@ -684,25 +686,47 @@ export default function RegistrationScreen({ navigation }) {
       // different facts, and only the badge/caption text conveys the former.
     }
 
+    // Portrait: the action sheet sits under the camera, its contents capped
+    // to a readable width on tablets. Landscape: it becomes a scrollable
+    // panel on the right so the camera keeps the full height, and the face
+    // guide shrinks to fit a phone's short landscape height.
+    const sidePanel = isLandscape;
+    const SheetContainer = sidePanel ? ScrollView : View;
+    const sheetProps = sidePanel
+      ? {
+          style: [styles.sideSheet, { width: isCompactHeight ? 340 : 400 }],
+          contentContainerStyle: [styles.sideSheetContent, { paddingRight: 24 + insets.right, paddingBottom: 20 + insets.bottom }],
+        }
+      : {
+          style: [
+            styles.bottomSheet,
+            { paddingHorizontal: Math.max(24, (width - MAX_WIDTH.form) / 2), paddingBottom: Math.max(28, insets.bottom + 12) },
+          ],
+        };
+    const guideScale = isCompactHeight ? Math.min(1, (height - 110) / 312) : 1;
+    const overlayInsets = { left: insets.left };
+
     return (
-      <View style={styles.cameraContainer}>
+      <View style={[styles.cameraContainer, sidePanel && styles.cameraContainerRow]}>
         {captureStage === 'reviewing' ? (
           <>
-            <Image source={{ uri: capturedPhoto.uri }} style={styles.preview} />
-            <View style={styles.topScrim} pointerEvents="none" />
-            <View style={styles.videoBadge}>
-              <View style={styles.videoBadgeIconWrap}>
-                <Ionicons name="checkmark-circle" size={22} color={colors.success} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.videoBadgeTitle}>Liveness verified in real time</Text>
-                <Text style={styles.videoBadgeSubtitle}>
-                  Live face and blink detected on-device
-                </Text>
+            <View style={styles.previewWrap}>
+              <Image source={{ uri: capturedPhoto.uri }} style={styles.preview} />
+              <View style={styles.topScrim} pointerEvents="none" />
+              <View style={[styles.videoBadge, isCompactHeight && { top: 16 }, { left: 20 + insets.left }]}>
+                <View style={styles.videoBadgeIconWrap}>
+                  <Ionicons name="checkmark-circle" size={22} color={colors.success} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.videoBadgeTitle}>Liveness verified in real time</Text>
+                  <Text style={styles.videoBadgeSubtitle}>
+                    Live face and blink detected on-device
+                  </Text>
+                </View>
               </View>
             </View>
-            <View style={styles.bottomSheet}>
-              <View style={styles.sheetHandle} />
+            <SheetContainer {...sheetProps}>
+              {!sidePanel && <View style={styles.sheetHandle} />}
               {lockInfo ? (
                 <>
                   <View style={styles.lockPanel}>
@@ -723,29 +747,29 @@ export default function RegistrationScreen({ navigation }) {
                   </TouchableOpacity>
                 </>
               )}
-            </View>
+            </SheetContainer>
           </>
         ) : (
           <>
             {/* CameraView doesn't support children, so the overlays sit beside it in this wrapper, which takes the old camera style. */}
             <View style={styles.camera}>
               <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="front" mute />
-              <View style={styles.topScrim} pointerEvents="none" />
-              <View style={styles.topBar} pointerEvents="none">
+              <View style={[styles.topScrim, { height: (isCompactHeight ? 90 : 130) + insets.top }]} pointerEvents="none" />
+              <View style={[styles.topBar, { top: (isCompactHeight ? 8 : 14) + insets.top, paddingLeft: 20 + insets.left }]} pointerEvents="none">
                 <StepProgress current={1} labels={['Details', 'Face Scan']} dark />
               </View>
 
-              <View style={styles.guideFrameWrap}>
+              <View style={[styles.guideFrameWrap, guideScale < 1 && { transform: [{ scale: guideScale }] }]}>
                 <View style={[styles.guideFrame, ringVariant]} />
                 {stepStatus === 'confirmed' && <View style={styles.guideFrameGlow} pointerEvents="none" />}
               </View>
 
               {captureStage === 'ready' ? (
-                <View style={styles.readyCaptionWrap} pointerEvents="none">
+                <View style={[styles.readyCaptionWrap, isCompactHeight && { bottom: 12 }, overlayInsets]} pointerEvents="none">
                   <Text style={styles.guideText}>Center your face within the frame</Text>
                 </View>
               ) : (
-                <View style={styles.challengeOverlay} pointerEvents="none">
+                <View style={[styles.challengeOverlay, isCompactHeight && styles.challengeOverlayCompact, overlayInsets, { top: insets.top }]} pointerEvents="none">
                   <View style={styles.challengeTopGroup}>
                     {stepStatus === 'finishing' ? (
                       <View style={styles.recBadge}>
@@ -793,8 +817,8 @@ export default function RegistrationScreen({ navigation }) {
                 </View>
               )}
             </View>
-            <View style={styles.bottomSheet}>
-              <View style={styles.sheetHandle} />
+            <SheetContainer {...sheetProps}>
+              {!sidePanel && <View style={styles.sheetHandle} />}
               {!!errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
               {captureStage === 'ready' ? (
                 <>
@@ -815,7 +839,7 @@ export default function RegistrationScreen({ navigation }) {
                   <Text style={styles.backLink}>Cancel</Text>
                 </TouchableOpacity>
               )}
-            </View>
+            </SheetContainer>
           </>
         )}
       </View>
@@ -823,7 +847,10 @@ export default function RegistrationScreen({ navigation }) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 20, paddingTop: 40 }}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[contentStyle(MAX_WIDTH.form), { paddingTop: Math.max(40, topPad), paddingBottom: 20 + insets.bottom }]}
+    >
       <FadeIn>
         <StepProgress current={0} labels={['Details', 'Face Scan']} />
         <Text style={styles.header}>{pendingGoogle?.existingEmployee ? 'Verify This Device' : 'Device Registration'}</Text>
@@ -943,7 +970,7 @@ export default function RegistrationScreen({ navigation }) {
 
       {/* Simple modal-based dropdown for Suffix Name -- avoids pulling in a native
           picker dependency that would require a new dev-client build. */}
-      <Modal visible={suffixPickerOpen} transparent animationType="fade" onRequestClose={() => setSuffixPickerOpen(false)}>
+      <Modal visible={suffixPickerOpen} transparent animationType="fade" supportedOrientations={MODAL_ORIENTATIONS} onRequestClose={() => setSuffixPickerOpen(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSuffixPickerOpen(false)}>
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>Suffix Name</Text>
@@ -967,7 +994,7 @@ export default function RegistrationScreen({ navigation }) {
       </Modal>
 
       {/* Department picker -- options come from GET /api/employee-auth/departments. */}
-      <Modal visible={departmentPickerOpen} transparent animationType="fade" onRequestClose={() => setDepartmentPickerOpen(false)}>
+      <Modal visible={departmentPickerOpen} transparent animationType="fade" supportedOrientations={MODAL_ORIENTATIONS} onRequestClose={() => setDepartmentPickerOpen(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDepartmentPickerOpen(false)}>
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>Department</Text>
@@ -1032,7 +1059,7 @@ const styles = StyleSheet.create({
   cancelBtn: { padding: 14, alignItems: 'center', marginTop: 4, marginBottom: 20 },
   cancelBtnText: { color: colors.textSub, fontWeight: '700', fontSize: 13 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'flex-end' },
-  modalSheet: { backgroundColor: colors.white, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingTop: 12, paddingBottom: 24, maxHeight: '55%' },
+  modalSheet: { width: '100%', maxWidth: 560, alignSelf: 'center', backgroundColor: colors.white, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingTop: 12, paddingBottom: 24, maxHeight: '55%' },
   modalTitle: { fontSize: 13, fontWeight: '800', color: colors.cspcBlue, textTransform: 'uppercase', textAlign: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
   modalOption: { paddingVertical: 16, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   modalOptionText: { fontSize: 15, color: colors.textMain, textAlign: 'center' },
@@ -1041,7 +1068,9 @@ const styles = StyleSheet.create({
 
   // Step 2: guided, real-time-verified face capture
   cameraContainer: { flex: 1, backgroundColor: '#0B0F1A' },
+  cameraContainerRow: { flexDirection: 'row' },
   camera: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  previewWrap: { flex: 1 },
   preview: { flex: 1, resizeMode: 'cover' },
   // Soft dark gradient-like scrim behind the top status chrome (step
   // progress, REC/scanning badge) so it reads clearly over any background,
@@ -1081,6 +1110,7 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     alignItems: 'center', justifyContent: 'space-between', paddingVertical: 56, paddingHorizontal: 24,
   },
+  challengeOverlayCompact: { paddingVertical: 14 },
   challengeTopGroup: { alignItems: 'center' },
   challengeBottomGroup: { alignItems: 'center', width: '100%' },
   recBadge: {
@@ -1129,6 +1159,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     paddingTop: 10, paddingBottom: 28, paddingHorizontal: 24, alignItems: 'center', ...shadow,
   },
+  // Landscape: the same sheet as a full-height panel on the right.
+  sideSheet: {
+    backgroundColor: colors.white, borderTopLeftRadius: radius.xl, borderBottomLeftRadius: radius.xl, ...shadow,
+  },
+  sideSheetContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 20, paddingLeft: 24 },
   sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 16 },
   secureBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   secureBadgeText: { color: colors.textSub, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },

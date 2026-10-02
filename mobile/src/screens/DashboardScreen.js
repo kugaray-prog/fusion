@@ -12,6 +12,7 @@ import FadeIn from '../components/FadeIn';
 import Skeleton from '../components/Skeleton';
 import AppHeader from '../components/AppHeader';
 import { scheduleTodayEventReminders } from '../utils/eventReminders';
+import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 function isToday(dateStr) {
   const d = new Date(dateStr);
@@ -33,6 +34,7 @@ export default function DashboardScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState(null);
+  const { isWide, topPad, contentStyle } = useResponsive();
 
   const load = useCallback(async () => {
     try {
@@ -76,7 +78,7 @@ export default function DashboardScreen({ navigation }) {
     <View style={styles.flex}>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={{ padding: 20, paddingBottom: 10 }}
+        contentContainerStyle={[contentStyle(isWide ? MAX_WIDTH.wide : MAX_WIDTH.content), { paddingTop: topPad, paddingBottom: 10 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
       >
         <FadeIn>
@@ -126,66 +128,74 @@ export default function DashboardScreen({ navigation }) {
           </View>
         </FadeIn>
 
-        <Text style={styles.sectionTitle}>Today's Schedule</Text>
-        {loading ? (
-          <Skeleton rows={2} />
-        ) : (
-          <FadeIn delay={100}>
-            <View style={styles.listCard}>
-              {todaySchedule.length === 0 && <Text style={styles.emptyText}>No events scheduled today.</Text>}
-              {todaySchedule.map((g, i) => (
-                <TouchableOpacity
-                  key={g.id}
-                  style={[styles.eventItem, i === todaySchedule.length - 1 && styles.eventItemLast]}
-                  onPress={() => navigation.navigate('Attendance', { geofenceId: g.id }, { pop: true })}
-                  activeOpacity={0.6}
-                >
-                  <View style={styles.eventIconWrap}>
-                    <Ionicons name="calendar-outline" size={18} color={colors.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.eventTitle}>{g.title}</Text>
-                    <Text style={styles.eventMeta}>{fmtTime(g.start_datetime)} • {g.venue || 'TBA'}</Text>
-                  </View>
-                  <StatusPill
-                    label={g.computed_status === 'active' ? 'Ongoing' : 'Soon'}
-                    variant={g.computed_status === 'active' ? 'success' : 'soon'}
-                  />
-                  <Ionicons name="chevron-forward" size={18} color={colors.textSub} />
-                </TouchableOpacity>
-              ))}
-            </View>
-          </FadeIn>
-        )}
+        {/* Today / Upcoming stack on phones and sit side by side on a wide
+            (tablet landscape) screen. */}
+        <View style={isWide && styles.columns}>
+          <View style={isWide && styles.column}>
+            <Text style={styles.sectionTitle}>Today's Schedule</Text>
+            {loading ? (
+              <Skeleton rows={2} />
+            ) : (
+              <FadeIn delay={100}>
+                <View style={styles.listCard}>
+                  {todaySchedule.length === 0 && <Text style={styles.emptyText}>No events scheduled today.</Text>}
+                  {todaySchedule.map((g, i) => (
+                    <TouchableOpacity
+                      key={g.id}
+                      style={[styles.eventItem, i === todaySchedule.length - 1 && styles.eventItemLast]}
+                      onPress={() => navigation.navigate('Attendance', { geofenceId: g.id }, { pop: true })}
+                      activeOpacity={0.6}
+                    >
+                      <View style={styles.eventIconWrap}>
+                        <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.eventTitle}>{g.title}</Text>
+                        <Text style={styles.eventMeta}>{fmtTime(g.start_datetime)} • {g.venue || 'TBA'}</Text>
+                      </View>
+                      <StatusPill
+                        label={g.computed_status === 'active' ? 'Ongoing' : 'Soon'}
+                        variant={g.computed_status === 'active' ? 'success' : 'soon'}
+                      />
+                      <Ionicons name="chevron-forward" size={18} color={colors.textSub} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </FadeIn>
+            )}
+          </View>
 
-        <Text style={styles.sectionTitle}>Upcoming Schedule</Text>
-        {loading ? (
-          <Skeleton rows={2} style={{ marginBottom: 20 }} />
-        ) : (
-          <FadeIn delay={150}>
-            <View style={[styles.listCard, { marginBottom: 20 }]}>
-              {upcoming.length === 0 && <Text style={styles.emptyText}>No upcoming events.</Text>}
-              {upcoming.map((g, i) => (
-                <TouchableOpacity
-                  key={g.id}
-                  style={[styles.eventItem, i === upcoming.length - 1 && styles.eventItemLast]}
-                  onPress={() => setSelectedSchedule(g)}
-                  activeOpacity={0.6}
-                >
-                  <View style={styles.eventIconWrap}>
-                    <Ionicons name="calendar-clear-outline" size={18} color={colors.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.eventTitle}>{g.title}</Text>
-                    <Text style={styles.eventMeta}>{fmtShortDate(g.start_datetime)} • {g.venue || 'TBA'}</Text>
-                  </View>
-                  <StatusPill label="Next" />
-                  <Ionicons name="chevron-forward" size={18} color={colors.textSub} />
-                </TouchableOpacity>
-              ))}
-            </View>
-          </FadeIn>
-        )}
+          <View style={isWide && styles.column}>
+            <Text style={styles.sectionTitle}>Upcoming Schedule</Text>
+            {loading ? (
+              <Skeleton rows={2} style={{ marginBottom: 20 }} />
+            ) : (
+              <FadeIn delay={150}>
+                <View style={[styles.listCard, { marginBottom: 20 }]}>
+                  {upcoming.length === 0 && <Text style={styles.emptyText}>No upcoming events.</Text>}
+                  {upcoming.map((g, i) => (
+                    <TouchableOpacity
+                      key={g.id}
+                      style={[styles.eventItem, i === upcoming.length - 1 && styles.eventItemLast]}
+                      onPress={() => setSelectedSchedule(g)}
+                      activeOpacity={0.6}
+                    >
+                      <View style={styles.eventIconWrap}>
+                        <Ionicons name="calendar-clear-outline" size={18} color={colors.primary} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.eventTitle}>{g.title}</Text>
+                        <Text style={styles.eventMeta}>{fmtShortDate(g.start_datetime)} • {g.venue || 'TBA'}</Text>
+                      </View>
+                      <StatusPill label="Next" />
+                      <Ionicons name="chevron-forward" size={18} color={colors.textSub} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </FadeIn>
+            )}
+          </View>
+        </View>
       </ScrollView>
 
       <ScheduleMapModal
@@ -235,6 +245,8 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { opacity: 0.55 },
   btnPrimaryOnCardText: { color: colors.primary, fontWeight: '700', fontSize: 15 },
+  columns: { flexDirection: 'row', alignItems: 'flex-start', gap: 20 },
+  column: { flex: 1, minWidth: 0 },
   sectionTitle: { ...type.overline, marginTop: 24, marginBottom: 10, marginLeft: 2 },
   listCard: {
     backgroundColor: colors.white, borderRadius: radius.lg, paddingHorizontal: 14,

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing, ScrollView } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -9,6 +9,7 @@ import { colors, radius, shadow } from '../theme';
 import { verifyAttendanceFace } from '../api/client';
 import { useAttendanceTracking } from '../context/AttendanceTrackingContext';
 import AppHeader from '../components/AppHeader';
+import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 // Automatic, on-device re-verification: AttendanceTrackingContext navigates
 // here the instant a geo-anomaly flags an attendance record (unusual
@@ -44,6 +45,7 @@ export default function FaceVerificationScreen({ route, navigation }) {
   const startedRef = useRef(false);
 
   // 'idle' | 'scanning' | 'blink' | 'uploading' | 'success' | 'failed'
+  const { isTablet, isCompactHeight, topPad, insets, contentStyle } = useResponsive();
   const [stage, setStage] = useState('idle');
   const [liveFaceDetected, setLiveFaceDetected] = useState(false);
   const [blinkEyesClosed, setBlinkEyesClosed] = useState(false);
@@ -246,11 +248,15 @@ export default function FaceVerificationScreen({ route, navigation }) {
   else if (stage === 'success') caption = 'Verified! Your attendance is confirmed.';
   else if (stage === 'failed') caption = errorMsg || 'Verification failed.';
 
+  // Camera frame (and the face guide inside it) sized to the screen: shorter
+  // on a phone held in landscape, taller on a tablet.
+  const cameraHeight = isCompactHeight ? 260 : isTablet ? 440 : 340;
+  const ovalScale = cameraHeight / 340;
+  const ovalSize = { width: 190 * ovalScale, height: 250 * ovalScale, borderRadius: 125 * ovalScale };
+
   return (
-    <View style={styles.flex}>
-      <View style={{ paddingHorizontal: 20, paddingTop: 20 }}>
-        <AppHeader title="Face Verification" />
-      </View>
+    <ScrollView style={styles.flex} contentContainerStyle={[contentStyle(MAX_WIDTH.form), { paddingTop: topPad, paddingBottom: insets.bottom }]}>
+      <AppHeader title="Face Verification" />
 
       <View style={styles.alertCard}>
         <Ionicons name="alert-circle" size={20} color={colors.warning} />
@@ -259,7 +265,7 @@ export default function FaceVerificationScreen({ route, navigation }) {
         </Text>
       </View>
 
-      <View style={styles.cameraWrap}>
+      <View style={[styles.cameraWrap, { height: cameraHeight }]}>
         {permission?.granted ? (
           <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="front" />
         ) : (
@@ -273,9 +279,9 @@ export default function FaceVerificationScreen({ route, navigation }) {
         )}
 
         {(stage === 'scanning' || stage === 'blink') && (
-          <Animated.View style={[styles.pulseRing, { transform: [{ scale: ringScale }], opacity: ringOpacity }]} />
+          <Animated.View style={[styles.pulseRing, ovalSize, { transform: [{ scale: ringScale }], opacity: ringOpacity }]} />
         )}
-        <View style={styles.guideOval} pointerEvents="none" />
+        <View style={[styles.guideOval, ovalSize]} pointerEvents="none" />
 
         {stage === 'success' && (
           <View style={[StyleSheet.absoluteFill, styles.resultOverlay, { backgroundColor: 'rgba(5,205,153,0.85)' }]}>
@@ -307,19 +313,19 @@ export default function FaceVerificationScreen({ route, navigation }) {
           <Text style={styles.cancelBtnText}>Cancel — I'll verify later</Text>
         </TouchableOpacity>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
   alertCard: {
-    flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginHorizontal: 20, marginBottom: 14,
+    flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginBottom: 14,
     backgroundColor: colors.warningBg, borderRadius: radius.md, padding: 14,
   },
   alertText: { flex: 1, color: colors.warningText, fontSize: 12.5, fontWeight: '600', lineHeight: 18 },
   cameraWrap: {
-    marginHorizontal: 20, height: 340, borderRadius: radius.lg, overflow: 'hidden',
+    height: 340, borderRadius: radius.lg, overflow: 'hidden',
     backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', ...shadow,
   },
   permissionFallback: { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12, backgroundColor: '#0B1220' },
@@ -335,7 +341,7 @@ const styles = StyleSheet.create({
     borderWidth: 2, borderColor: '#fff',
   },
   resultOverlay: { alignItems: 'center', justifyContent: 'center' },
-  captionWrap: { paddingHorizontal: 24, marginTop: 18, alignItems: 'center' },
+  captionWrap: { paddingHorizontal: 4, marginTop: 18, alignItems: 'center' },
   caption: { fontSize: 15, fontWeight: '800', color: colors.textMain, textAlign: 'center' },
   actionsRow: { alignItems: 'center', marginTop: 18 },
   retryBtn: {

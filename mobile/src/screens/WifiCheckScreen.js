@@ -7,6 +7,7 @@ import { checkOfficeNetwork } from '../api/client';
 import { colors, radius, shadow } from '../theme';
 import { notify } from '../utils/notify';
 import { useAuth } from '../context/AuthContext';
+import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 // Runs right after Google login / device registration, before the Dashboard is
 // reached (see App.js — this is the only screen in the authenticated stack
@@ -24,6 +25,7 @@ import { useAuth } from '../context/AuthContext';
 // whatever its SSID. Mobile data has a different IP and won't pass.
 export default function WifiCheckScreen() {
   const { markWifiVerified } = useAuth();
+  const { topPad, insets, contentStyle } = useResponsive();
   const [phase, setPhase] = useState('checking'); // checking | matched | mismatch | error
   const [currentIp, setCurrentIp] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
@@ -69,7 +71,10 @@ export default function WifiCheckScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 20, flexGrow: 1, justifyContent: 'center' }}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[contentStyle(MAX_WIDTH.form), { paddingTop: topPad, paddingBottom: 20 + insets.bottom, flexGrow: 1, justifyContent: 'center' }]}
+    >
       <View style={styles.card}>
         <View style={styles.heroIcon}>
           <Ionicons name="wifi" size={28} color={colors.primary} />

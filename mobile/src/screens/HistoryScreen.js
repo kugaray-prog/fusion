@@ -9,6 +9,7 @@ import FadeIn from '../components/FadeIn';
 import AppHeader from '../components/AppHeader';
 import Skeleton from '../components/Skeleton';
 import { formatDuration, liveDurationSeconds } from '../utils/duration';
+import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -24,6 +25,10 @@ export default function HistoryScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState('all');
+  // Log cards go two-up on a wide (tablet landscape) screen.
+  const { isWide, topPad, contentStyle } = useResponsive();
+  const columns = isWide ? 2 : 1;
+  const column = contentStyle(isWide ? MAX_WIDTH.wide : MAX_WIDTH.content);
   const [, forceTick] = useState(0);
 
   const load = useCallback(async () => {
@@ -63,14 +68,14 @@ export default function HistoryScreen({ navigation }) {
 
   return (
     <View style={styles.flex}>
-      <View style={{ paddingHorizontal: 20, paddingTop: 20 }}>
+      <View style={[column, { paddingTop: topPad }]}>
         <AppHeader title="Attendance Logs" />
       </View>
       <FlatList
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={styles.filterRow}
-        contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}
+        style={[styles.filterRow, column, { paddingLeft: 0, paddingRight: 0 }]}
+        contentContainerStyle={{ paddingLeft: column.paddingLeft, paddingRight: column.paddingRight, gap: 8 }}
         data={FILTERS}
         keyExtractor={(f) => f.key}
         renderItem={({ item }) => (
@@ -84,11 +89,14 @@ export default function HistoryScreen({ navigation }) {
         )}
       />
       {loading ? (
-        <Skeleton rows={4} style={{ padding: 20, paddingTop: 12 }} />
+        <Skeleton rows={4} style={[column, { paddingTop: 12 }]} />
       ) : (
         <FlatList
+          key={columns}
           style={styles.list}
-          contentContainerStyle={{ padding: 20, paddingTop: 12 }}
+          contentContainerStyle={[column, { paddingTop: 12, paddingBottom: 20 }]}
+          numColumns={columns}
+          columnWrapperStyle={columns > 1 ? styles.columnRow : undefined}
           data={filteredRecords}
           keyExtractor={(item) => String(item.id)}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
@@ -105,7 +113,7 @@ export default function HistoryScreen({ navigation }) {
             const completed = !!item.time_out;
             const durationSeconds = liveDurationSeconds(item);
             return (
-              <FadeIn delay={Math.min(index, 6) * 40}>
+              <FadeIn delay={Math.min(index, 6) * 40} style={columns > 1 && styles.columnCell}>
                 <View style={styles.card}>
                   <View style={styles.cardTopRow}>
                     <Text style={styles.eventTitle}>{item.event_title || 'N/A'}</Text>
@@ -164,6 +172,8 @@ const styles = StyleSheet.create({
   filterChipText: { fontSize: 13, fontWeight: '600', color: colors.textSub },
   filterChipTextActive: { color: '#fff' },
   list: { flex: 1 },
+  columnRow: { gap: 12 },
+  columnCell: { flex: 1 / 2, minWidth: 0 },
   emptyWrap: { alignItems: 'center', marginTop: 48, paddingHorizontal: 24 },
   emptyIcon: {
     width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primaryLight,

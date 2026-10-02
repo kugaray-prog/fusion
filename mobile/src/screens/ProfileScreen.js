@@ -8,6 +8,7 @@ import { getDeviceInfo } from '../utils/device';
 import { assetUrl } from '../config';
 import FadeIn from '../components/FadeIn';
 import AppHeader from '../components/AppHeader';
+import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 function InfoRow({ icon, label, value, mono }) {
   return (
@@ -40,10 +41,11 @@ export default function ProfileScreen({ navigation }) {
   }, [photoUrl]);
 
   const handleLogout = () => logout();
+  const { topPad, contentStyle } = useResponsive();
 
   return (
     <View style={styles.flex}>
-      <ScrollView contentContainerStyle={{ padding: 20 }}>
+      <ScrollView contentContainerStyle={[contentStyle(MAX_WIDTH.form), { paddingTop: topPad, paddingBottom: 20 }]}>
         <AppHeader title="My Profile" />
 
         <FadeIn>

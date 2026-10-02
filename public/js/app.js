@@ -121,30 +121,6 @@ const G_App = {
     },
 
     auth: {
-        login: async () => {
-            const email = document.getElementById('login-email').value.trim();
-            const password = document.getElementById('login-password').value;
-            const errorEl = document.getElementById('login-error');
-            const btn = document.getElementById('login-btn');
-            errorEl.innerText = '';
-
-            if (!email || !password) {
-                errorEl.innerText = 'Please enter both email and password.';
-                return;
-            }
-
-            btn.innerText = 'Verifying...';
-            try {
-                const data = await apiFetch('/auth/login', {
-                    method: 'POST',
-                    body: JSON.stringify({ email, password })
-                });
-                G_App.auth.enterDashboard(data);
-            } catch (err) {
-                errorEl.innerText = err.message;
-                btn.innerText = 'Sign In';
-            }
-        },
         // Stores the session and swaps the login screen for the dashboard.
         enterDashboard: (data) => {
             localStorage.setItem('ga_token', data.token);
@@ -1388,15 +1364,22 @@ const G_App = {
         // or verification_status), so it could leave a record silently
         // marked "resolved" while still showing "Awaiting Verification"
         // everywhere else -- exactly the kind of mismatch to avoid.
-        init: () => {
+        init: async () => {
+            if (G_App.geofence.initializing) return;
             if (!window.google || !window.google.maps) {
                 document.getElementById('geo-map').innerHTML =
                     '<div style="display:flex; align-items:center; justify-content:center; height:100%; padding: 30px; text-align:center; color: var(--text-muted); font-weight: 700;">Google Maps failed to load. Check that GOOGLE_MAPS_API_KEY is set in .env and valid.</div>';
                 return;
             }
+            // Wait for the saved CSPC view (usually already prefetched by
+            // G_App.init) so the map opens right there instead of jumping to it.
+            G_App.geofence.initializing = true;
+            await G_App.geofence.fetchDefaultLocation();
+            G_App.geofence.initializing = false;
+            const loc = G_App.geofence.defaultLocation || { lat: 13.4059, lng: 123.3758, zoom: 18 };
             G_App.geofence.map = new google.maps.Map(document.getElementById('geo-map'), {
-                center: { lat: 13.4059, lng: 123.3758 }, // CSPC — overridden below once /default-location resolves
-                zoom: 18,
+                center: { lat: Number(loc.lat), lng: Number(loc.lng) },
+                zoom: Number(loc.zoom) || 18,
                 mapTypeControl: true,
                 streetViewControl: false,
                 fullscreenControl: false
@@ -1406,15 +1389,16 @@ const G_App = {
                 G_App.geofence.addPoint(e.latLng.lat(), e.latLng.lng());
             });
             G_App.geofence.applyMinDate();
-            G_App.geofence.fetchDefaultLocation();
             G_App.geofence.load();
         },
-        fetchDefaultLocation: async () => {
-            try {
-                const { data } = await apiFetch('/geofences/default-location');
-                G_App.geofence.defaultLocation = data;
-                G_App.geofence.showDefaultView();
-            } catch (err) { /* non-fatal — falls back to the hardcoded CSPC coordinates already set as the map center */ }
+        // Loads the saved CSPC view once; later calls reuse the same request.
+        fetchDefaultLocation: () => {
+            if (!G_App.geofence.defaultLocationRequest) {
+                G_App.geofence.defaultLocationRequest = apiFetch('/geofences/default-location')
+                    .then(({ data }) => { G_App.geofence.defaultLocation = data; })
+                    .catch(() => { /* non-fatal — falls back to the hardcoded CSPC coordinates */ });
+            }
+            return G_App.geofence.defaultLocationRequest;
         },
         // Moves the map to the CSPC default view (center + zoom). Used when the
         // Geo-Fences page opens and by "Use CSPC Default Location".
@@ -1446,6 +1430,22 @@ const G_App = {
             G_App.geofence.showDefaultView();
             if (!document.getElementById('gf-venue').value) document.getElementById('gf-venue').value = loc.label || 'CSPC';
             toast('CSPC default location applied.', 'success');
+        },
+        // "Save Current Map View as Default" button — the map's current center
+        // and zoom become what this page opens at and what "Use CSPC Default
+        // Location" jumps to.
+        saveDefaultView: async () => {
+            const map = G_App.geofence.map;
+            if (!map) return;
+            const center = map.getCenter();
+            try {
+                const { data, message } = await apiFetch('/geofences/default-location', {
+                    method: 'PUT',
+                    body: JSON.stringify({ lat: center.lat(), lng: center.lng(), zoom: map.getZoom() })
+                });
+                G_App.geofence.defaultLocation = { ...(G_App.geofence.defaultLocation || {}), ...data };
+                toast(message || 'Default map view saved.', 'success');
+            } catch (err) { toast(err.message, 'error'); }
         },
         onRecurrenceTypeChange: () => {
             const type = document.getElementById('gf-recurrence-type').value;
@@ -3829,6 +3829,9 @@ const G_App = {
     init: async () => {
         const adminData = JSON.parse(localStorage.getItem('ga_admin') || '{}');
         G_App.state.role = adminData.role || 'super_admin';
+        // Start loading the Geo-Fences map's CSPC view now, so it's ready the
+        // moment that page is opened.
+        if (G_App.state.role !== 'admin') G_App.geofence.fetchDefaultLocation();
         G_App.ui.initNav();
         G_App.ui.applyRoleRestrictions();
 

@@ -6,6 +6,7 @@ import { colors, radius, shadow } from '../theme';
 import { formatDuration } from '../utils/duration';
 import FadeIn from '../components/FadeIn';
 import AppHeader from '../components/AppHeader';
+import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 // Attendance is fully automatic: AttendanceTrackingContext runs a background
 // location watch for the whole app and times the employee in the moment
@@ -20,6 +21,7 @@ export default function AttendanceScreen({ route }) {
   const tracking = useAttendanceTracking();
   const geofenceId = route?.params?.geofenceId ?? null;
   const [, forceTick] = useState(0);
+  const { insets, contentStyle } = useResponsive();
 
   // Re-render once a second so the "on-going" duration visibly counts up
   // instead of only updating whenever a new location/heartbeat happens to land.
@@ -78,7 +80,7 @@ export default function AttendanceScreen({ route }) {
   const dotOpacity = livePulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
+    <ScrollView style={styles.container} contentContainerStyle={[contentStyle(MAX_WIDTH.form), { paddingTop: 20, paddingBottom: 20 + insets.bottom }]}>
       <AppHeader title="Mark Attendance" />
       <FadeIn>
         <View style={[styles.statusCard, { backgroundColor: statusIsGood ? colors.successBg : statusIsNeutral ? colors.infoBg : '#FEE2E2' }]}>

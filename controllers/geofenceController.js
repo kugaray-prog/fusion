@@ -104,7 +104,7 @@ async function getDefaultLocation(req, res, next) {
         lat: byKey.cspc_latitude ? Number(byKey.cspc_latitude) : config.defaultGeofence.lat,
         lng: byKey.cspc_longitude ? Number(byKey.cspc_longitude) : config.defaultGeofence.lng,
         label: byKey.cspc_label || config.defaultGeofence.label,
-        // Map zoom the Geo-Fences page opens at (18 = individual campus buildings).
+        // Map zoom the Geo-Fences page opens at (18 = close-up of the CSPC campus).
         zoom: byKey.cspc_zoom ? Number(byKey.cspc_zoom) : 18
       }
     });

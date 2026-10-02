@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, Platform } from 'react-native';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
+import * as Network from 'expo-network';
 
 // react-native-wifi-reborn is a custom native module that Expo Go doesn't
 // include, and only the Android branch below uses it -- so it's only loaded
-// there. Without it, checkNow() treats Wi-Fi as on (same as iOS).
+// there. Everywhere else (iOS, Expo Go) checkNow() falls back to expo-network.
 const IS_EXPO_GO = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 // eslint-disable-next-line global-require
 const WifiManager = Platform.OS === 'android' && !IS_EXPO_GO ? require('react-native-wifi-reborn').default : null;
@@ -49,12 +50,12 @@ export function WifiStatusProvider({ children }) {
         ]);
         setWifiOn(!!enabled && !!connected);
       } else {
-        // iOS has no public API to read the Wi-Fi radio state, and the
-        // network name is no longer used (the office-network check is now
-        // done server-side by public IP -- see WifiCheckScreen), so don't
-        // gate on it here; WifiCheckScreen still blocks anyone who isn't
-        // on the office connection.
-        setWifiOn(true);
+        // iOS has no public API for the Wi-Fi radio itself, but expo-network
+        // reports which connection the phone is using: anything but Wi-Fi
+        // (Wi-Fi switched off or disconnected, so it's on mobile data or
+        // nothing) counts as off.
+        const state = await Network.getNetworkStateAsync();
+        setWifiOn(state.type === Network.NetworkStateType.WIFI && state.isConnected !== false);
       }
     } catch (e) {
       // If the check itself can't run (e.g. unsupported in this preview

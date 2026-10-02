@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Animated, Easing } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Animated, Easing, ScrollView } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { colors, radius, shadow } from '../theme';
 import FadeIn from '../components/FadeIn';
@@ -42,8 +42,9 @@ export default function WaitingApprovalScreen() {
   const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] });
   const ringOpacity = pulse.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0.35, 0.12, 0] });
 
+  // Scrolls so the card still fits on a phone held in landscape.
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <FadeIn>
         <View style={styles.card}>
           <View style={styles.iconCircle}>
@@ -63,12 +64,13 @@ export default function WaitingApprovalScreen() {
           <Text style={styles.logoutBtnText}>Sign out</Text>
         </TouchableOpacity>
       </FadeIn>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  container: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   card: {
     backgroundColor: colors.white, borderRadius: radius.lg, padding: 28,
     borderWidth: 1, borderColor: colors.border, ...shadow, alignItems: 'center', maxWidth: 420, width: '100%',

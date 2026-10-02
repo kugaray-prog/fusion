@@ -3,7 +3,7 @@
     "name": "GeoAttend",
     "slug": "geoattend-pro-mobile",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "userInterfaceStyle": "light",
     "scheme": ["geoattendpro", "com.geoattend.pro"],
     "icon": "./assets/icon.png",

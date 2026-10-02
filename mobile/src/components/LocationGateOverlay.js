@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, Platform, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useAuth } from '../context/AuthContext';
 import { useLocationStatus } from '../context/LocationStatusContext';
 import { colors, radius, shadow } from '../theme';
+import { MODAL_ORIENTATIONS } from '../utils/responsive';
+import { alertServiceOff, clearServiceOffAlert } from '../utils/serviceOffAlert';
 
 // Rendered app-wide (see App.js), above the whole navigation stack, for as
 // long as the employee is signed in AND Location/GPS is off -- this is what
@@ -16,10 +18,18 @@ import { colors, radius, shadow } from '../theme';
 // LocationStatusContext detects GPS is enabled again -- no manual "continue"
 // step needed once it's actually on.
 export default function LocationGateOverlay() {
-  const { employee } = useAuth();
+  const { employee, deviceStatus } = useAuth();
   const { locationEnabled, checked, recheck } = useLocationStatus();
+  // Not while the device is still awaiting approval (see WifiGateOverlay).
+  const visible = !!employee && deviceStatus !== 'pending' && checked && !locationEnabled;
 
-  if (!employee || !checked || locationEnabled) return null;
+  // Also post a phone notification while this is showing (see serviceOffAlert).
+  useEffect(() => {
+    if (visible) alertServiceOff('location');
+    else clearServiceOffAlert('location');
+  }, [visible]);
+
+  if (!visible) return null;
 
   const openLocationSettings = async () => {
     try {
@@ -48,7 +58,7 @@ export default function LocationGateOverlay() {
   };
 
   return (
-    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
+    <Modal visible transparent animationType="fade" statusBarTranslucent supportedOrientations={MODAL_ORIENTATIONS} onRequestClose={() => {}}>
       <View style={styles.overlay}>
         <View style={styles.card}>
           <View style={styles.iconWrap}>

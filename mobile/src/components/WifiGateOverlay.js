@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, Platform, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { useWifiStatus } from '../context/WifiStatusContext';
 import { useLocationStatus } from '../context/LocationStatusContext';
 import { colors, radius, shadow } from '../theme';
+import { MODAL_ORIENTATIONS } from '../utils/responsive';
+import { alertServiceOff, clearServiceOffAlert } from '../utils/serviceOffAlert';
 
 // Rendered app-wide (see App.js), above the whole navigation stack, for as
 // long as the employee is signed in AND Wi-Fi is off/disconnected -- mirrors
@@ -20,11 +22,22 @@ import { colors, radius, shadow } from '../theme';
 // once -- fix one thing at a time, GPS first since AttendanceTrackingContext
 // already treats it as the more fundamental signal.
 export default function WifiGateOverlay() {
-  const { employee } = useAuth();
+  const { employee, deviceStatus } = useAuth();
   const { wifiOn, checked, recheck } = useWifiStatus();
   const { locationEnabled } = useLocationStatus();
+  // Not while the device is still awaiting approval: WaitingApproval needs
+  // neither Wi-Fi nor GPS, and a full-screen Modal popping up in the same
+  // moment the navigator swaps stacks after face registration could leave
+  // Android on a blank screen (see RootNavigator in App.js).
+  const visible = !!employee && deviceStatus !== 'pending' && checked && !wifiOn && locationEnabled;
 
-  if (!employee || !checked || wifiOn || !locationEnabled) return null;
+  // Also post a phone notification while this is showing (see serviceOffAlert).
+  useEffect(() => {
+    if (visible) alertServiceOff('wifi');
+    else clearServiceOffAlert('wifi');
+  }, [visible]);
+
+  if (!visible) return null;
 
   const openWifiSettings = async () => {
     try {
@@ -57,7 +70,7 @@ export default function WifiGateOverlay() {
   };
 
   return (
-    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
+    <Modal visible transparent animationType="fade" statusBarTranslucent supportedOrientations={MODAL_ORIENTATIONS} onRequestClose={() => {}}>
       <View style={styles.overlay}>
         <View style={styles.card}>
           <View style={styles.iconWrap}>
