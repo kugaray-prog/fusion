@@ -26,10 +26,12 @@ function looksLikeRealKey(key) {
 
 const expoConfig = Constants.expoConfig || Constants.manifest || {};
 const androidMapsKey = expoConfig?.android?.config?.googleMaps?.apiKey;
-const iosMapsKey = expoConfig?.ios?.config?.googleMapsApiKey;
+// iOS: no `provider` is passed to MapView below, so it renders Apple Maps,
+// which needs no key (and works in Expo Go). The Google key only matters if
+// a Google provider is ever switched on there.
 const hasValidMapsKey =
   Platform.OS === 'android' ? looksLikeRealKey(androidMapsKey) :
-  Platform.OS === 'ios' ? looksLikeRealKey(iosMapsKey) :
+  Platform.OS === 'ios' ? true :
   false;
 
 let MapView = null;

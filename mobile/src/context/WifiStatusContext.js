@@ -1,6 +1,13 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, Platform } from 'react-native';
-import WifiManager from 'react-native-wifi-reborn';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
+
+// react-native-wifi-reborn is a custom native module that Expo Go doesn't
+// include, and only the Android branch below uses it -- so it's only loaded
+// there. Without it, checkNow() treats Wi-Fi as on (same as iOS).
+const IS_EXPO_GO = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+// eslint-disable-next-line global-require
+const WifiManager = Platform.OS === 'android' && !IS_EXPO_GO ? require('react-native-wifi-reborn').default : null;
 
 // Mirrors LocationStatusContext, but for Wi-Fi. Tracks whether the device's
 // Wi-Fi is actually turned on AND joined to a network, at the OS level --
@@ -32,7 +39,7 @@ export function WifiStatusProvider({ children }) {
 
   const checkNow = useCallback(async () => {
     try {
-      if (Platform.OS === 'android') {
+      if (WifiManager) {
         // Android exposes both the radio state ("naka-off") and whether
         // it's actually joined to a network ("na-disconnect") -- either
         // being false means Wi-Fi isn't usable right now.

@@ -4,7 +4,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
-import FaceDetection from '@react-native-ml-kit/face-detection';
+import FaceDetection from '../utils/faceDetection';
 import { colors, radius, shadow } from '../theme';
 import { verifyAttendanceFace } from '../api/client';
 import { useAttendanceTracking } from '../context/AttendanceTrackingContext';

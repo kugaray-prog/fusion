@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Modal,
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
-import FaceDetection from '@react-native-ml-kit/face-detection';
+import FaceDetection from '../utils/faceDetection';
 import { useAuth } from '../context/AuthContext';
 import { colors, radius, shadow } from '../theme';
 import { getDeviceInfo } from '../utils/device';
@@ -727,7 +727,9 @@ export default function RegistrationScreen({ navigation }) {
           </>
         ) : (
           <>
-            <CameraView ref={cameraRef} style={styles.camera} facing="front" mute>
+            {/* CameraView doesn't support children, so the overlays sit beside it in this wrapper, which takes the old camera style. */}
+            <View style={styles.camera}>
+              <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="front" mute />
               <View style={styles.topScrim} pointerEvents="none" />
               <View style={styles.topBar} pointerEvents="none">
                 <StepProgress current={1} labels={['Details', 'Face Scan']} dark />
@@ -790,7 +792,7 @@ export default function RegistrationScreen({ navigation }) {
                   </View>
                 </View>
               )}
-            </CameraView>
+            </View>
             <View style={styles.bottomSheet}>
               <View style={styles.sheetHandle} />
               {!!errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
