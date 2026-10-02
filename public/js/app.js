@@ -1863,13 +1863,19 @@ const G_App = {
                         <td>${log.longitude ?? '--'}</td>
                         <td>${log.latitude ?? '--'}</td>
                         <td>${G_App.attendance.faceVerificationCell(log)}</td>`}
-                        <td><span class="badge badge-${log.attendance_status === 'Present' ? 'success' : (log.attendance_status === 'Late' ? 'warning' : 'danger')}">${log.attendance_status}</span></td>
+                        <td>${G_App.attendance.statusBadge(log.attendance_status)}</td>
                     </tr>
                 `).join('') || '<tr><td colspan="10" style="text-align:center; padding:30px;">No attendance logs found for this event.</td></tr>';
                 lucide.createIcons();
                 const searchInput = document.getElementById('attendance-detail-search');
                 if (searchInput && searchInput.value) G_App.attendance.filterDetail(searchInput.value);
             } catch (err) { toast(err.message, 'error'); }
+        },
+        // Ongoing = the event hasn't ended yet, so Present/Late/Absent isn't
+        // decided (needs 80% presence over the whole event).
+        statusBadge: (status) => {
+            const variant = { Present: 'success', Late: 'warning', Ongoing: 'info' }[status] || 'danger';
+            return `<span class="badge badge-${variant}">${status}</span>`;
         },
         filterDetail: (q) => {
             const rows = document.querySelectorAll('#attendance-dept-table > tr');
@@ -2091,7 +2097,7 @@ const G_App = {
                         <td>${log.attendance_date}</td>
                         <td>${log.full_name}</td>
                         <td>${log.department_name}</td>
-                        <td><span class="badge badge-${log.attendance_status === 'Present' ? 'success' : (log.attendance_status === 'Late' ? 'warning' : 'danger')}">${log.attendance_status}</span></td>
+                        <td>${G_App.attendance.statusBadge(log.attendance_status)}</td>
                         <td>${log.late_minutes || 0}</td>
                     </tr>
                 `).join('') : '<tr><td colspan="5" style="text-align:center; padding:40px;">No records found for this criteria.</td></tr>';

@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 const { localDate } = require('../services/dateService');
 const { logAction } = require('../services/auditService');
-const { closeSessionsForEndedEvents } = require('./attendanceController');
+const { settleEndedEvents } = require('./attendanceController');
 
 // The employees "expected" at a given event: everyone in the event's
 // department, or the entire roster when the event isn't department-scoped
@@ -31,14 +31,14 @@ async function expectedEmployeeIdsForEvent(event) {
 // event: Present or Late = 5, Absent/Excused = 1, and an employee who never
 // checked in at all (no attendance row exists) also = 1 (a genuine no-show
 // is the same as an absence). Runs before every /api/ratings read — the
-// same self-healing-on-read pattern attendanceController.closeSessionsForEndedEvents
+// same self-healing-on-read pattern attendanceController.settleEndedEvents
 // already uses — so the table is always caught up with real attendance
 // without needing a cron job. An admin's manual edit (is_manual = 1) is
 // never overwritten by this.
 async function generateRatingsForRange(rangeStart, rangeEnd) {
   // Settle ended events first (open sessions, unverified flagged attendance)
   // so ratings are computed from final statuses.
-  await closeSessionsForEndedEvents();
+  await settleEndedEvents();
   const [events] = await pool.query(
     `SELECT id, title, department_id, start_datetime, end_datetime
      FROM events

@@ -260,6 +260,9 @@ CREATE TABLE attendance (
   last_ping_at DATETIME NULL,
   outside_streak INT DEFAULT 0,
   auto_ended TINYINT(1) DEFAULT 0,
+  -- 1 once the event has ended and the final status (80% presence rule)
+  -- has been settled, or an admin set the status by hand.
+  status_finalized TINYINT(1) NOT NULL DEFAULT 0,
   selfie_path VARCHAR(255) NULL,
   selfie_lat DECIMAL(10,7) NULL,
   selfie_lng DECIMAL(10,7) NULL,

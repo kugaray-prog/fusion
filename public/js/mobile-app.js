@@ -756,6 +756,14 @@ async function loadLogs() {
   }
 }
 
+// On-going until the event ends; Present/Late/Absent is only decided then
+// (80% presence over the whole event).
+function logStatusPill(status) {
+  if (!status || status === 'Ongoing') return '<span class="status-pill waiting">On-going</span>';
+  const variant = { Present: 'success', Late: 'waiting' }[status] || 'danger';
+  return `<span class="status-pill ${variant}">${status}</span>`;
+}
+
 function renderLogs(logs) {
   const container = document.getElementById('logs-container');
   if (logs.length === 0) {
@@ -767,7 +775,7 @@ function renderLogs(logs) {
       <div class="log-item" style="flex-direction: column; align-items: flex-start; gap: 8px;">
         <div style="width: 100%; display: flex; justify-content: space-between;">
           <strong>${log.event_title || 'Event'}</strong>
-          <span class="status-pill ${log.time_out ? 'success' : 'waiting'}">${log.time_out ? 'Completed' : 'On-going'}</span>
+          ${logStatusPill(log.attendance_status)}
         </div>
         <div style="font-size: 12px; color: var(--text-sub);">
           <span style="display:inline-flex; align-items:center; gap:4px;"><svg class="ico" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>${log.attendance_date}</span><br>

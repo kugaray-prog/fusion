@@ -57,8 +57,8 @@ export default function HistoryScreen({ navigation }) {
 
   const filteredRecords = useMemo(() => {
     switch (filter) {
-      case 'ongoing': return records.filter((r) => !r.time_out);
-      case 'completed': return records.filter((r) => !!r.time_out);
+      case 'ongoing': return records.filter((r) => r.attendance_status === 'Ongoing');
+      case 'completed': return records.filter((r) => r.attendance_status !== 'Ongoing');
       case 'present': return records.filter((r) => r.attendance_status === 'Present');
       case 'late': return records.filter((r) => r.attendance_status === 'Late');
       case 'absent': return records.filter((r) => r.attendance_status === 'Absent');
@@ -110,7 +110,9 @@ export default function HistoryScreen({ navigation }) {
             </View>
           }
           renderItem={({ item, index }) => {
-            const completed = !!item.time_out;
+            // Ongoing until the event ends; Present/Late/Absent is only
+            // decided then (80% presence over the whole event).
+            const ongoing = item.attendance_status === 'Ongoing';
             const durationSeconds = liveDurationSeconds(item);
             return (
               <FadeIn delay={Math.min(index, 6) * 40} style={columns > 1 && styles.columnCell}>
@@ -118,13 +120,14 @@ export default function HistoryScreen({ navigation }) {
                   <View style={styles.cardTopRow}>
                     <Text style={styles.eventTitle}>{item.event_title || 'N/A'}</Text>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
-                      {item.attendance_status && (
+                      {ongoing ? (
+                        <StatusPill label="On-going" variant="waiting" />
+                      ) : item.attendance_status && (
                         <StatusPill
                           label={item.attendance_status}
                           variant={item.attendance_status === 'Present' ? 'success' : (item.attendance_status === 'Late' ? 'waiting' : 'danger')}
                         />
                       )}
-                      <StatusPill label={completed ? 'Completed' : 'On-going'} variant={completed ? 'success' : 'waiting'} />
                     </View>
                   </View>
                   <View style={styles.metaRow}>
@@ -143,7 +146,7 @@ export default function HistoryScreen({ navigation }) {
                   </View>
                   <View style={styles.durationRow}>
                     <Text style={styles.durationLabel}>Duration</Text>
-                    <Text style={[styles.durationValue, !completed && { color: colors.warningText }]}>
+                    <Text style={[styles.durationValue, !item.time_out && { color: colors.warningText }]}>
                       {formatDuration(durationSeconds)}
                     </Text>
                     {item.session_count > 1 && (

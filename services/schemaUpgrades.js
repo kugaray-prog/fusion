@@ -79,6 +79,21 @@ async function addAdminNotifications() {
   );
 }
 
+// attendance.status_finalized: set once an ended event's attendance has had
+// its final status settled (attendanceController.finalizeEndedEventStatuses).
+// Records of events that already ended keep the status they have, so the
+// presence rule only applies to events still running or yet to come.
+async function addAttendanceStatusFinalized() {
+  if (await columnExists('attendance', 'status_finalized')) return;
+  await pool.query('ALTER TABLE attendance ADD COLUMN status_finalized TINYINT(1) NOT NULL DEFAULT 0');
+  const [result] = await pool.query(
+    `UPDATE attendance a LEFT JOIN events e ON a.event_id = e.id
+     SET a.status_finalized = 1
+     WHERE e.id IS NULL OR (e.end_datetime < NOW() AND a.time_out IS NOT NULL)`
+  );
+  console.log(`[schema] Added attendance.status_finalized (${result.affectedRows} existing record(s) kept as-is).`);
+}
+
 async function indexExists(table, index) {
   const [rows] = await pool.query(
     `SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
@@ -122,6 +137,7 @@ async function run() {
   await addFaceRecordSource();
   await addAdminEmailOtps();
   await addAdminNotifications();
+  await addAttendanceStatusFinalized();
   await dropUnusedSchema();
 }
 

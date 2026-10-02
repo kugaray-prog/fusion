@@ -66,8 +66,9 @@ module.exports = {
     // has ended, comes out to less than this fraction of the event's total
     // scheduled duration, they're marked Absent regardless of how their
     // check-in was originally classified (Present/Late) — showing up for a
-    // few minutes and leaving doesn't count as having attended.
-    minAttendanceRatioForPresence: Number(process.env.ATTENDANCE_MIN_RATIO) || 0.6,
+    // few minutes and leaving doesn't count as having attended. Until the
+    // event ends their status is shown as Ongoing.
+    minAttendanceRatioForPresence: Number(process.env.ATTENDANCE_MIN_RATIO) || 0.8,
     // GPS readings less accurate (higher, in meters) than this are rejected.
     // Desktop/laptop browsers have no real GPS chip and estimate location via
     // WiFi/IP (~100-1000m accuracy), so the strict default will almost always

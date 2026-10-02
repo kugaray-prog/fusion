@@ -1,5 +1,5 @@
 const pool = require('../config/db');
-const { closeSessionsForEndedEvents } = require('./attendanceController');
+const { settleEndedEvents, DISPLAY_STATUS_SQL } = require('./attendanceController');
 
 async function buildFilteredQuery({ department, year, month, employee_id, event_id, status }) {
   let where = 'WHERE 1=1';
@@ -26,7 +26,7 @@ async function buildFilteredQuery({ department, year, month, employee_id, event_
     params.push(event_id);
   }
   if (status && status !== 'all') {
-    where += ' AND a.attendance_status = ?';
+    where += ` AND ${DISPLAY_STATUS_SQL} = ?`;
     params.push(status);
   }
 
@@ -36,9 +36,10 @@ async function buildFilteredQuery({ department, year, month, employee_id, event_
 // GET /api/reports?department=&year=&month=&employee_id=&event_id=&status=
 async function generateReport(req, res, next) {
   try {
+    await settleEndedEvents();
     const { where, params } = await buildFilteredQuery(req.query);
     const [rows] = await pool.query(
-      `SELECT a.attendance_date, a.time_in, a.time_out, a.attendance_status, a.verification_status,
+      `SELECT a.attendance_date, a.time_in, a.time_out, ${DISPLAY_STATUS_SQL} AS attendance_status, a.verification_status,
               a.late_minutes, a.work_hours, e.full_name, e.employee_code, d.name AS department_name,
               ev.title AS event_title
        FROM attendance a
@@ -75,13 +76,15 @@ const REPORT_EXPORT_FIELDS = ['Date', 'Employee', 'Employee ID', 'Department', '
 
 async function exportReport(req, res, next) {
   try {
+    await settleEndedEvents();
     const { where, params } = await buildFilteredQuery(req.query);
     const [rows] = await pool.query(
       `SELECT a.attendance_date AS Date, e.full_name AS Employee, e.employee_code AS 'Employee ID',
-              d.name AS Department, a.attendance_status AS Status, a.late_minutes AS 'Late Minutes'
+              d.name AS Department, ${DISPLAY_STATUS_SQL} AS Status, a.late_minutes AS 'Late Minutes'
        FROM attendance a
        JOIN employees e ON a.employee_id = e.id
        JOIN departments d ON e.department_id = d.id
+       LEFT JOIN events ev ON a.event_id = ev.id
        ${where}
        ORDER BY a.attendance_date DESC`,
       params
@@ -181,7 +184,7 @@ async function getInsights(req, res, next) {
     // Close attendance still open past its event's end first (the same
     // self-heal the Attendance tab runs), so someone who timed in and left
     // early is counted by their final status instead of as Present.
-    await closeSessionsForEndedEvents();
+    await settleEndedEvents();
 
     let where = 'WHERE 1=1';
     const params = [];

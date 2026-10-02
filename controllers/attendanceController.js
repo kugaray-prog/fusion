@@ -9,7 +9,7 @@ const { notifyAdmins, employeeLabel, deviceLabel } = require('../services/adminN
 // It's now generated on-demand, per actual EVENT, by
 // ratingController.generateRatingsForRange — run automatically every time
 // the admin dashboard's Ratings tab is loaded (self-healing on read, same
-// pattern as closeSessionsForEndedEvents below) once an event's schedule has
+// pattern as settleEndedEvents below) once an event's schedule has
 // ended, from whatever attendance_status ended up on each employee's row for
 // that event. That covers every weekday an event is scheduled on (not just
 // Mondays) and also correctly rates a true no-show (nobody ever timed in for
@@ -158,6 +158,11 @@ async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, 
   return true;
 }
 
+// The end-of-event presence rule as a whole percentage, e.g. 80.
+function presenceRulePercent() {
+  return Math.round(config.attendance.minAttendanceRatioForPresence * 100);
+}
+
 // Recomputes an employee's attendance_score from their real attendance history —
 // Present counts full credit, Late counts half credit, out of all recorded days.
 // Keeps the Ratings leaderboard on the admin dashboard reflecting actual behavior
@@ -226,20 +231,18 @@ const ATTENDANCE_DURATION_SUBQUERIES = `,
 // event simply ends while the employee is still standing inside the
 // boundary, or the app gets closed/backgrounded before the outside-streak
 // trips, nothing ever closes the session and its duration keeps climbing
-// forever every time it's viewed. This runs before any attendance read (both
-// the mobile "my history" and the admin attendance table) so a stale session
+// forever every time it's viewed. This runs (via settleEndedEvents) before
+// any attendance read (both the mobile "my history" and the admin attendance
+// table) so a stale session
 // gets closed and its total finalized before anyone sees it, capped at the
 // event's own end_datetime rather than "now" so no extra time leaks in.
 async function closeSessionsForEndedEvents() {
   const [staleRows] = await pool.query(
-    `SELECT a.id, a.employee_id, a.attendance_status, a.total_duration_seconds,
-            e.start_datetime, e.end_datetime
+    `SELECT a.id, a.employee_id, a.total_duration_seconds, e.end_datetime
      FROM attendance a
      JOIN events e ON a.event_id = e.id
      WHERE a.time_out IS NULL AND e.end_datetime < NOW()`
   );
-  if (!staleRows.length) return;
-
   for (const record of staleRows) {
     const [openSessionRows] = await pool.query(
       'SELECT * FROM attendance_sessions WHERE attendance_id = ? AND time_out IS NULL ORDER BY time_in ASC LIMIT 1',
@@ -263,39 +266,80 @@ async function closeSessionsForEndedEvents() {
     const totalDurationSeconds = (record.total_duration_seconds || 0) + sessionDurationSeconds;
     const workHours = (totalDurationSeconds / 3600).toFixed(2);
 
-    // Once the event is fully over, we know the final total — if the employee
-    // was present for less than minAttendanceRatioForPresence of the event's
-    // scheduled duration, they're marked Absent regardless of how their
-    // check-in was originally classified.
-    const eventDurationSeconds = Math.max(1, (new Date(record.end_datetime) - new Date(record.start_datetime)) / 1000);
-    const attendedRatio = totalDurationSeconds / eventDurationSeconds;
-    const finalStatus = attendedRatio < config.attendance.minAttendanceRatioForPresence ? 'Absent' : record.attendance_status;
-
     await pool.query(
-      `UPDATE attendance SET time_out = ?, total_duration_seconds = ?, work_hours = ?, attendance_status = ?, auto_ended = 1 WHERE id = ?`,
-      [record.end_datetime, totalDurationSeconds, workHours, finalStatus, record.id]
+      `UPDATE attendance SET time_out = ?, total_duration_seconds = ?, work_hours = ?, auto_ended = 1 WHERE id = ?`,
+      [record.end_datetime, totalDurationSeconds, workHours, record.id]
     );
     await pool.query(
       `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'auto_time_out', ?)`,
+      [record.id, record.employee_id, JSON.stringify({ reason: 'event_ended', sessionDurationSeconds, totalDurationSeconds })]
+    );
+  }
+}
+
+// Settles the final status of every attendance row whose event has ended
+// (its sessions already closed by closeSessionsForEndedEvents above). Until
+// then the status is shown as Ongoing (see DISPLAY_STATUS_SQL). A GPS-tracked
+// employee who was inside the geofence for less than
+// minAttendanceRatioForPresence (80%) of the event's scheduled duration is
+// marked Absent, whether they stayed until the end or left early; otherwise
+// they keep the Present/Late decided at their first time-in. Kiosk (OCR/face)
+// roll-call rows have no duration to measure and keep their status, as does
+// anything an admin already set by hand (status_finalized = 1).
+async function finalizeEndedEventStatuses() {
+  const [rows] = await pool.query(
+    `SELECT a.id, a.employee_id, a.attendance_status, a.total_duration_seconds, a.verification_method,
+            e.start_datetime, e.end_datetime
+     FROM attendance a
+     JOIN events e ON a.event_id = e.id
+     WHERE a.status_finalized = 0 AND a.time_out IS NOT NULL AND e.end_datetime < NOW()`
+  );
+
+  for (const record of rows) {
+    let finalStatus = record.attendance_status;
+    let attendedRatio = null;
+    if (record.verification_method === 'mobile_gps' && ['Present', 'Late'].includes(record.attendance_status)) {
+      const eventDurationSeconds = Math.max(1, (new Date(record.end_datetime) - new Date(record.start_datetime)) / 1000);
+      attendedRatio = (record.total_duration_seconds || 0) / eventDurationSeconds;
+      if (attendedRatio < config.attendance.minAttendanceRatioForPresence) finalStatus = 'Absent';
+    }
+
+    await pool.query(
+      'UPDATE attendance SET attendance_status = ?, status_finalized = 1 WHERE id = ?',
+      [finalStatus, record.id]
+    );
+    await pool.query(
+      `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'status_finalized', ?)`,
       [record.id, record.employee_id, JSON.stringify({
-        reason: 'event_ended', sessionDurationSeconds, totalDurationSeconds,
-        attendedRatio: Number(attendedRatio.toFixed(3)), finalStatus
+        attendedRatio: attendedRatio === null ? null : Number(attendedRatio.toFixed(3)),
+        requiredRatio: config.attendance.minAttendanceRatioForPresence,
+        previousStatus: record.attendance_status, finalStatus
       })]
     );
-
     if (finalStatus !== record.attendance_status) {
       await recalculateAllRatings(record.employee_id);
     }
   }
+}
 
+// Closes sessions left open past their event's end, then settles every
+// ended event's final statuses. Runs before any attendance/report/rating read.
+async function settleEndedEvents() {
+  await closeSessionsForEndedEvents();
+  await finalizeEndedEventStatuses();
   await rejectUnverifiedFlaggedAttendance();
 }
+
+// The status to show for an attendance row (needs `events ev` joined):
+// Ongoing while its event is still running, since Present/Late/Absent is only
+// decided once the event ends.
+const DISPLAY_STATUS_SQL = "CASE WHEN ev.end_datetime >= NOW() THEN 'Ongoing' ELSE a.attendance_status END";
 
 // A geo-anomaly-flagged attendance (see detectGeoAnomaly) only counts once
 // the employee passes face verification. If the event ends with the flag
 // still unresolved, the attendance is not recorded: status becomes Absent
 // and verification_status Rejected. Runs as part of
-// closeSessionsForEndedEvents, so it self-heals on every attendance/report/
+// settleEndedEvents, so it self-heals on every attendance/report/
 // rating read like the rest of the end-of-event settling.
 async function rejectUnverifiedFlaggedAttendance() {
   const [rows] = await pool.query(
@@ -329,9 +373,9 @@ async function rejectUnverifiedFlaggedAttendance() {
 // GET /api/attendance/my-history  (employee JWT required — used by the mobile app)
 async function getMyHistory(req, res, next) {
   try {
-    await closeSessionsForEndedEvents();
+    await settleEndedEvents();
     const [rows] = await pool.query(
-      `SELECT a.*, ev.title AS event_title${ATTENDANCE_DURATION_SUBQUERIES} FROM attendance a
+      `SELECT a.*, ${DISPLAY_STATUS_SQL} AS attendance_status, ev.title AS event_title${ATTENDANCE_DURATION_SUBQUERIES} FROM attendance a
        LEFT JOIN events ev ON a.event_id = ev.id
        WHERE a.employee_id = ?
        ORDER BY a.attendance_date DESC, a.time_in DESC
@@ -385,7 +429,7 @@ async function getSessionsAdmin(req, res, next) {
 // GET /api/attendance?department=&date=&status=
 async function getAttendance(req, res, next) {
   try {
-    await closeSessionsForEndedEvents();
+    await settleEndedEvents();
     const { department = 'all', date, status = 'all', event_id } = req.query;
     let where = 'WHERE 1=1';
     const params = [];
@@ -399,7 +443,7 @@ async function getAttendance(req, res, next) {
       params.push(date);
     }
     if (status !== 'all') {
-      where += ' AND a.attendance_status = ?';
+      where += ` AND ${DISPLAY_STATUS_SQL} = ?`;
       params.push(status);
     }
     if (event_id) {
@@ -408,7 +452,7 @@ async function getAttendance(req, res, next) {
     }
 
     const [rows] = await pool.query(
-      `SELECT a.*, e.full_name, e.employee_code, d.name AS department_name, ev.title AS event_title${ATTENDANCE_DURATION_SUBQUERIES}
+      `SELECT a.*, ${DISPLAY_STATUS_SQL} AS attendance_status, e.full_name, e.employee_code, d.name AS department_name, ev.title AS event_title${ATTENDANCE_DURATION_SUBQUERIES}
        FROM attendance a
        JOIN employees e ON a.employee_id = e.id
        JOIN departments d ON e.department_id = d.id
@@ -419,8 +463,9 @@ async function getAttendance(req, res, next) {
       params
     );
 
-    if (event_id && (status === 'all' || status === 'Absent')) {
-      rows.push(...await absentRowsForEvent(event_id, department));
+    if (event_id && ['all', 'Absent', 'Ongoing'].includes(status)) {
+      const absentRows = await absentRowsForEvent(event_id, department);
+      rows.push(...absentRows.filter((r) => status === 'all' || r.attendance_status === status));
     }
 
     res.json({ success: true, data: rows });
@@ -433,10 +478,11 @@ async function getAttendance(req, res, next) {
 // placeholder "Absent" rows (is_placeholder, no id) so the admin sees who
 // didn't show up. Expected = approved Active employees of the event's
 // department, or everyone if the event isn't department-specific — the same
-// rule the reports use. Only once the event has started.
+// rule the reports use. Only once the event has started, and shown as
+// Ongoing (not yet Absent) until it ends.
 async function absentRowsForEvent(eventId, department) {
   const [[ev]] = await pool.query(
-    'SELECT id, title, department_id, start_datetime FROM events WHERE id = ?',
+    'SELECT id, title, department_id, start_datetime, end_datetime FROM events WHERE id = ?',
     [eventId]
   );
   if (!ev || new Date(ev.start_datetime) > new Date()) return [];
@@ -469,7 +515,7 @@ async function absentRowsForEvent(eventId, department) {
     event_id: ev.id,
     event_title: ev.title,
     attendance_date: attendanceDate,
-    attendance_status: 'Absent',
+    attendance_status: new Date(ev.end_datetime) >= new Date() ? 'Ongoing' : 'Absent',
     time_in: null,
     time_out: null,
     latitude: null,
@@ -751,7 +797,7 @@ async function submitAttendance(req, res, next) {
     if (!anomalyDetected) {
       await pool.query(
         `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Attendance Recorded', ?, 'attendance_success')`,
-        [employee_id, `Your attendance for "${event.title}" was recorded as ${isLate ? 'Late' : 'Present'}.`]
+        [employee_id, `You were timed in for "${event.title}"${isLate ? ' (late)' : ''}. Stay inside the event area for at least ${presenceRulePercent()}% of the event to be counted; your status shows as Ongoing until it ends.`]
       );
     }
 
@@ -761,7 +807,7 @@ async function submitAttendance(req, res, next) {
       success: true,
       message: anomalyDetected
         ? 'Attendance recorded, but unusual location activity was detected. Please complete face verification in the app.'
-        : `Attendance recorded as ${isLate ? 'Late' : 'Present'}.`,
+        : `Time-in recorded${isLate ? ' (late)' : ''}. Your status shows as Ongoing until the event ends.`,
       data: { id: insertResult.insertId, action: 'time_in', status: isLate ? 'Late' : 'Present', lateMinutes, requiresFaceVerification: anomalyDetected }
     });
   } catch (err) {
@@ -795,10 +841,9 @@ async function submitAttendance(req, res, next) {
 // (the admin's scan is a single instant, not a geofence someone can stay
 // inside or step out of), so no attendance_sessions rows or duration/work_hours
 // tracking are recorded — `time_in` and `time_out` are both set to the
-// verification instant (duration 0) purely so this row is naturally excluded
-// from closeSessionsForEndedEvents' "flip to Absent if attended-ratio is too
-// low" self-heal, which only ever looks at rows with an open (`time_out IS
-// NULL`) session. attendance_status is decided immediately, once, by
+// verification instant (duration 0); finalizeEndedEventStatuses skips
+// non-GPS rows when applying its "Absent if attended-ratio is too low" rule.
+// attendance_status is decided immediately, once, by
 // comparing the verification instant against the event's scheduled
 // start_datetime (+ the configured late-grace window): on time = Present,
 // past the grace window = Late. If this employee already has an attendance
@@ -956,7 +1001,7 @@ async function faceVerify(req, res, next) {
       const [eventRows] = await pool.query('SELECT end_datetime FROM events WHERE id = ?', [record.event_id]);
       if (eventRows[0] && new Date(eventRows[0].end_datetime) <= new Date()) {
         await recordAttempt('expired');
-        await closeSessionsForEndedEvents();
+        await settleEndedEvents();
         return res.status(410).json({
           success: false,
           result: 'expired',
@@ -1137,7 +1182,9 @@ async function updateAttendance(req, res, next) {
     const [rows] = await pool.query('SELECT * FROM attendance WHERE id = ?', [id]);
     if (!rows[0]) return res.status(404).json({ success: false, message: 'Attendance record not found.' });
 
-    await pool.query('UPDATE attendance SET attendance_status = ? WHERE id = ?', [attendance_status, id]);
+    // status_finalized: the admin's choice stands — the end-of-event presence
+    // rule (finalizeEndedEventStatuses) won't override it.
+    await pool.query('UPDATE attendance SET attendance_status = ?, status_finalized = 1 WHERE id = ?', [attendance_status, id]);
     await pool.query(
       `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'admin_status_change', ?)`,
       [id, rows[0].employee_id, JSON.stringify({ from: rows[0].attendance_status, to: attendance_status, by: req.admin.id })]
@@ -1242,7 +1289,7 @@ async function heartbeat(req, res, next) {
     // capped at the event's own end time.
     const [eventRows] = await pool.query('SELECT end_datetime FROM events WHERE id = ?', [record.event_id]);
     if (eventRows[0] && new Date(eventRows[0].end_datetime) <= new Date()) {
-      await closeSessionsForEndedEvents();
+      await settleEndedEvents();
       return res.json({ success: true, message: 'Event has ended.', data: { ended: true } });
     }
 
@@ -1368,7 +1415,8 @@ module.exports = {
   deleteAttendance,
   heartbeat,
   recordVerificationAttendance,
-  // Used by reportController.getInsights to settle attendance left open past
-  // an event's end before counting it.
-  closeSessionsForEndedEvents
+  // Used by reportController/ratingController to settle ended events'
+  // attendance before counting it, and to show Ongoing for running events.
+  settleEndedEvents,
+  DISPLAY_STATUS_SQL
 };
