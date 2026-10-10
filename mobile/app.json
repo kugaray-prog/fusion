@@ -5,7 +5,10 @@
     "version": "1.0.0",
     "orientation": "default",
     "userInterfaceStyle": "light",
-    "scheme": ["geoattendpro", "com.geoattend.pro"],
+    "scheme": [
+      "geoattendpro",
+      "com.geoattend.pro"
+    ],
     "icon": "./assets/icon.png",
     "android": {
       "package": "com.geoattend.pro",
@@ -16,6 +19,9 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
+        "FOREGROUND_SERVICE_LOCATION",
+        "FOREGROUND_SERVICE",
+        "ACCESS_BACKGROUND_LOCATION",
         "ACCESS_WIFI_STATE",
         "ACCESS_NETWORK_STATE",
         "POST_NOTIFICATIONS",
@@ -34,7 +40,11 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "GeoAttend needs your location to verify you are inside the event geofence when marking attendance, and to detect/join the location's Wi-Fi network.",
         "NSCameraUsageDescription": "GeoAttend needs camera access to capture your face for Face Verification registration.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "GeoAttend keeps your event attendance running while the app is closed, and times you out as soon as you leave the event area.",
+        "UIBackgroundModes": [
+          "location"
+        ]
       },
       "config": {
         "googleMapsApiKey": "YOUR_IOS_GOOGLE_MAPS_API_KEY"
@@ -42,6 +52,15 @@
     },
     "plugins": [
       "expo-notifications",
+      [
+        "expo-location",
+        {
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "isIosBackgroundLocationEnabled": true,
+          "locationAlwaysAndWhenInUsePermission": "GeoAttend keeps your event attendance running while the app is closed, and times you out as soon as you leave the event area."
+        }
+      ],
       [
         "expo-camera",
         {

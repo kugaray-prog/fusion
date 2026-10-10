@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api, { googleLogin, linkDevice, getDeviceStatus, setStaleSessionHandler, setDeviceBlockedHandler } from '../api/client';
 import { getDeviceUid } from '../utils/device';
+import { startLive, stopLive, useLiveUpdates } from '../api/realtime';
 import { alertDeviceBlocked } from '../utils/deviceBlockedAlert';
 
 // How often a signed-in app re-checks whether an admin has blacklisted or
@@ -69,6 +70,18 @@ export function AuthProvider({ children }) {
       if (stored) refreshDeviceStatus();
     })();
   }, []);
+
+  // Live updates (api/realtime.js) run while an employee is signed in.
+  useEffect(() => {
+    if (employee) startLive();
+    else stopLive();
+  }, [employee]);
+
+  // An admin approved, blocked or removed this phone: re-check right away
+  // (approval leaves WaitingApproval, a block signs the app out).
+  useLiveUpdates(['device'], () => {
+    if (employee) refreshDeviceStatus();
+  });
 
   const persistDeviceStatus = async (status) => {
     setDeviceStatus(status);

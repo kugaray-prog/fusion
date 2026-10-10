@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const { logAction } = require('../services/auditService');
-const { isBlockedStatus, blockedMessage } = require('../services/deviceAccess');
+const { isBlockedStatus, blockedMessage, cleanDeviceInfo } = require('../services/deviceAccess');
+const realtime = require('../services/realtime');
 
 // GET /api/devices
 // Each device row is paired with the employee_faces row whose created_at is
@@ -83,10 +84,11 @@ async function registerDevice(req, res, next) {
     // One employee may register and use multiple devices, so no check against
     // the employee already having an approved device here.
 
+    const info = cleanDeviceInfo({ model, brand, os });
     const [result] = await pool.query(
       `INSERT INTO mobile_devices (employee_id, device_uid, model, brand, os, status)
        VALUES (?, ?, ?, ?, ?, 'pending')`,
-      [employee_id, device_uid, model || null, brand || null, os || null]
+      [employee_id, device_uid, info.model, info.brand, info.os]
     );
 
     res.status(201).json({ success: true, message: 'Device registered and pending admin approval.', data: { id: result.insertId } });
@@ -129,6 +131,9 @@ async function applyDeviceStatus(id, status, req) {
       [device.employee_id, status === 'blacklisted' ? 'Device Blacklisted' : 'Device Rejected', blockedMessage(status)]
     );
   }
+  // Open apps re-check their device status right away: approval lets a
+  // waiting employee in, a block signs the phone out.
+  realtime.notifyEmployee(device.employee_id, 'device');
   return true;
 }
 
@@ -164,6 +169,7 @@ async function removeDevice(id, req) {
     details: { id: device.id, deviceUid: device.device_uid, employeeCode: device.employee_code, pendingRegistrationRemoved: employeeRemoved },
     ip: req.ip
   });
+  realtime.notifyEmployee(device.employee_id, 'device');
   return { employeeRemoved };
 }
 

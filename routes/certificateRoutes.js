@@ -5,6 +5,7 @@ const { requireAuth, requireRole } = require('../middleware/authMiddleware');
 
 router.use(requireAuth, requireRole('super_admin'));
 router.post('/generate', certificateController.generateCertificate);
+router.post('/generate-bulk', certificateController.generateBulkCertificates);
 router.get('/', certificateController.getCertificates);
 router.get('/template', certificateController.getTemplate);
 router.put('/template', certificateController.saveTemplate);

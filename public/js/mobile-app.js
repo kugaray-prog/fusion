@@ -84,6 +84,7 @@ function switchScreen(id) {
 
   const navs = document.querySelectorAll('.nav-item');
   navs.forEach(n => n.classList.remove('active'));
+  if (mainScreens.includes(id)) connectLive();
   if (id === 'home') { navs[0].classList.add('active'); loadHomeData(); }
   if (id === 'logs') { navs[1].classList.add('active'); loadLogs(); }
   if (id === 'profile') { navs[2].classList.add('active'); renderProfile(); }
@@ -665,6 +666,9 @@ function isInsidePolygon(lat, lng, points) {
 
 let lastKnownPosition = null;
 
+// One GPS watch at a time: the home screen reloads on every live update.
+let geofenceWatchId = null;
+
 function checkGeofenceStatus(geofence) {
   const statusEl = document.getElementById('geofence-status-text');
   if (!navigator.geolocation) {
@@ -672,7 +676,8 @@ function checkGeofenceStatus(geofence) {
     statusEl.style.color = 'var(--error)';
     return;
   }
-  navigator.geolocation.watchPosition(
+  if (geofenceWatchId !== null) navigator.geolocation.clearWatch(geofenceWatchId);
+  geofenceWatchId = navigator.geolocation.watchPosition(
     (pos) => {
       lastKnownPosition = pos.coords;
       if (geofence.points && geofence.points.length >= 3) {
@@ -745,9 +750,10 @@ async function handleAttendance() {
 }
 
 // ---- Logs ---------------------------------------------------------------
-async function loadLogs() {
+// quiet: a live refresh keeps the current list on screen until the new one arrives.
+async function loadLogs({ quiet = false } = {}) {
   const container = document.getElementById('logs-container');
-  container.innerHTML = '<div style="text-align:center; padding:40px; color:gray;">Loading…</div>';
+  if (!quiet) container.innerHTML = '<div style="text-align:center; padding:40px; color:gray;">Loading…</div>';
   try {
     const data = await apiFetch('/attendance/my-history');
     renderLogs(data.data || []);
@@ -809,6 +815,54 @@ function handleLogout() {
   clearSession();
   location.reload();
 }
+
+// ---- Live updates -----------------------------------------------------------
+// WebSocket to /ws (services/realtime.js): the server says "something changed"
+// when an admin edits the schedule/geofences, edits or records this
+// employee's attendance, or approves/blocks this phone, and the open screen
+// re-fetches. A blocked phone is then signed out by apiFetch's DEVICE_BLOCKED
+// handling. Reconnects with backoff.
+let liveSocket = null;
+let liveRetryMs = 1000;
+let liveRefreshTimer = null;
+
+function connectLive() {
+  const token = getToken();
+  if (!token || liveSocket) return;
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket = new WebSocket(`${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}&device=${encodeURIComponent(getDeviceUid())}`);
+  liveSocket = socket;
+  socket.onopen = () => {
+    if (liveRetryMs > 1000) refreshActiveScreen(); // catch up after a reconnect
+    liveRetryMs = 1000;
+  };
+  socket.onmessage = (event) => {
+    let msg;
+    try { msg = JSON.parse(event.data); } catch (e) { return; }
+    if (msg.type !== 'change') return;
+    clearTimeout(liveRefreshTimer);
+    liveRefreshTimer = setTimeout(refreshActiveScreen, 300);
+  };
+  socket.onclose = () => {
+    liveSocket = null;
+    if (!getToken()) return; // signed out
+    setTimeout(connectLive, liveRetryMs);
+    liveRetryMs = Math.min(liveRetryMs * 2, 30000);
+  };
+}
+
+function refreshActiveScreen() {
+  if (document.hidden) return;
+  const active = document.querySelector('.screen.active');
+  if (!active) return;
+  if (active.id === 'screen-home') loadHomeData();
+  else if (active.id === 'screen-logs') loadLogs({ quiet: true });
+  else if (active.id === 'screen-profile') apiFetch('/attendance/my-history').catch(() => {}); // only to surface a device block
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && liveSocket) refreshActiveScreen();
+});
 
 // ---- Boot -------------------------------------------------------------------
 window.addEventListener('DOMContentLoaded', () => {

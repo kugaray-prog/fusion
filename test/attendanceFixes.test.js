@@ -133,6 +133,30 @@ const metersNorth = (m) => m / 111320;
     check(r.status === 200 && r.data.data.inside === false && r.data.data.outsideStreak === 1, 'mocked heartbeat from inside counts as outside', r.data);
   }
 
+  // ---- heartbeat: first reading outside the polygon times out right away ---
+  {
+    log.length = 0;
+    const observedAt = new Date(Date.now() - 2000).toISOString();
+    handler = (sql) => {
+      if (/FROM attendance WHERE id = \? AND employee_id/.test(sql)) {
+        // pinged 2 s ago -- inside the debounce window
+        return [[{ id: 5, employee_id: 7, event_id: 3, geofence_id: 9, time_in: new Date(Date.now() - 3600000), time_out: null, outside_streak: 0, last_ping_at: new Date(Date.now() - 2000) }]];
+      }
+      if (/SELECT end_datetime FROM events/.test(sql)) return [[{ end_datetime: '2099-01-01 00:00:00' }]];
+      if (/FROM geofences WHERE id/.test(sql)) return [[{ id: 9, shape_type: 'polygon' }]];
+      if (/FROM geofence_points/.test(sql)) return [SQUARE];
+      if (/FROM attendance_sessions WHERE attendance_id/.test(sql)) return [[{ id: 11, time_in: new Date(Date.now() - 3600000) }]];
+      if (/UPDATE attendance_sessions/.test(sql)) return [{ affectedRows: 1 }];
+      return [[]];
+    };
+    const r = await call(attendanceController.heartbeat, {
+      params: { id: 5 }, body: { latitude: 13.4064 + metersNorth(2), longitude: 123.3758, accuracy: 10, observed_at: observedAt }, employee: { id: 7 }
+    });
+    const closed = log.find((q) => /UPDATE attendance_sessions/.test(q.sql));
+    check(r.data.data.ended === true && closed && new Date(closed.params[0]).toISOString() === observedAt,
+      '2 m outside the polygon, 2 s after the last ping: timed out at the reading\'s own time', { data: r.data, closed });
+  }
+
   // ---- duplicate / overlapping events (#6) ---------------------------------
   const future = (h) => {
     const d = new Date(Date.now() + h * 3600000);
@@ -307,7 +331,7 @@ const metersNorth = (m) => m / 111320;
     };
     // call() doesn't pass req.file; add it through a wrapper.
     const withFile = attendanceController.faceVerify;
-    attendanceController.faceVerify = (req, res, next) => withFile({ ...req, file: { filename: 'selfie-1.jpg', path: '/tmp/selfie-1.jpg' } }, res, next);
+    attendanceController.faceVerify = (req, res, next) => withFile({ ...req, files: { selfie: [{ filename: 'selfie-1.jpg', path: '/tmp/selfie-1.jpg' }] } }, res, next);
     const noMatch = await run('no_match');
     check(noMatch.r.status === 401 && noMatch.rec && noMatch.rec.params[1] === '/uploads/selfies/selfie-1.jpg' && noMatch.rec.params[3] === 'no_match' && /mobile_anomaly/.test(noMatch.rec.sql),
       'failed mobile face verification keeps its photo on record', noMatch.rec);
@@ -319,6 +343,61 @@ const metersNorth = (m) => m / 111320;
     attendanceController.faceVerify = withFile;
     faceService.getEmbedding = origEmb;
     faceService.findBestMatch = origMatch;
+  }
+
+  // ---- geo-anomaly: phones within 0.5 m, flagged at once, again every 30 s --
+  {
+    const HERE = { lat: 13.4059, lng: 123.3758 };
+    // other: { meters north of HERE, verified_ago_s, ping_fresh }
+    const anomalyPing = async ({ selfVerifiedAgo = null, selfFlagged = 0, other, lostRace = false }) => {
+      log.length = 0;
+      handler = (sql) => {
+        if (/SET requires_face_verification = 1/.test(sql)) return [{ affectedRows: lostRace ? 0 : 1 }];
+        if (/FROM attendance WHERE id = \? AND employee_id/.test(sql)) {
+          return [[{ id: 5, employee_id: 7, event_id: 3, geofence_id: 9, device_id: 1, time_out: null, outside_streak: 0, last_ping_at: null, requires_face_verification: selfFlagged }]];
+        }
+        if (/SELECT end_datetime FROM events/.test(sql)) return [[{ end_datetime: '2099-01-01 00:00:00' }]];
+        if (/FROM geofences WHERE id/.test(sql)) return [[{ id: 9, shape_type: 'polygon' }]];
+        if (/FROM geofence_points/.test(sql)) return [SQUARE];
+        if (/SELECT device_uid FROM mobile_devices/.test(sql)) return [[{ device_uid: 'dev-A' }]];
+        if (/verified_ago_s FROM attendance WHERE id/.test(sql)) {
+          return [[{ requires_face_verification: selfFlagged, verified_ago_s: selfVerifiedAgo }]];
+        }
+        if (/LEFT JOIN mobile_devices md/.test(sql)) {
+          return [[{
+            id: 6, employee_id: 8, requires_face_verification: 0, verified_ago_s: other.verifiedAgo ?? null,
+            last_lat: HERE.lat + metersNorth(other.meters), last_lng: HERE.lng, latitude: HERE.lat, longitude: HERE.lng,
+            ping_fresh: other.fresh === false ? 0 : 1, time_in_fresh: 0, ping_is_newest: 1, device_uid: 'dev-B'
+          }]];
+        }
+        if (/SELECT title FROM events/.test(sql)) return [[{ title: 'Flag Ceremony' }]];
+        return [[]];
+      };
+      const r = await call(attendanceController.heartbeat, {
+        params: { id: 5 }, body: { latitude: HERE.lat, longitude: HERE.lng }, employee: { id: 7 }
+      });
+      const flagged = log.filter((q) => /INSERT INTO geo_anomalies/.test(q.sql)).map((q) => q.params[0]);
+      return { r, flagged };
+    };
+
+    let a = await anomalyPing({ other: { meters: 0.3 } });
+    check(a.r.data.data.requiresFaceVerification === true && a.flagged.includes(5) && a.flagged.includes(6),
+      'phones 0.3 m apart: both flagged on the first ping', a);
+    a = await anomalyPing({ other: { meters: 0.8 } });
+    check(a.r.data.data.requiresFaceVerification === false && a.flagged.length === 0, 'phones 0.8 m apart: not flagged', a);
+    a = await anomalyPing({ other: { meters: 0.3, fresh: false } });
+    check(a.r.data.data.requiresFaceVerification === false && a.flagged.length === 0, "other phone's position older than 30 s: not flagged", a);
+    a = await anomalyPing({ selfVerifiedAgo: 10, other: { meters: 0.3 } });
+    check(a.r.data.data.requiresFaceVerification === false && a.flagged.length === 0, 'verified 10 s ago, still together: not asked again yet', a);
+    a = await anomalyPing({ selfVerifiedAgo: 31, other: { meters: 0.3 } });
+    check(a.r.data.data.requiresFaceVerification === true && a.flagged.includes(5), 'verified 31 s ago, still together: asked again', a);
+    a = await anomalyPing({ other: { meters: 0.3, verifiedAgo: 5 } });
+    check(a.flagged.includes(5) && !a.flagged.includes(6), 'the other phone verified 5 s ago keeps its own 30 s', a);
+    a = await anomalyPing({ other: { meters: 0.3 }, lostRace: true });
+    check(a.r.data.data.requiresFaceVerification === true && a.flagged.length === 0,
+      'both phones pinging at once: the second flag is not logged or notified twice', a);
+    a = await anomalyPing({ selfFlagged: 1, other: { meters: 0.3 } });
+    check(a.r.data.data.requiresFaceVerification === true && a.flagged.length === 0, 'already flagged: reported again, not re-logged', a);
   }
 
   console.log(failures ? `\n${failures} failure(s)` : '\nAll checks passed.');

@@ -96,123 +96,142 @@ function drawBlankLine(doc, segments, y, { maxWidth, size = 11.5, minSize = 7 })
  * admin-editable wording in `template` (see DEFAULT_TEMPLATE).
  * Returns { pdfPath }.
  */
-async function generateCertificatePdf({ certificateNumber, employeeName, eventTitle, issuedDate, awardDate, venue, template }) {
+async function generateCertificatePdf({ certificateNumber, employeeName, ...rest }) {
+  return generateCertificatesPdf({ fileName: certificateNumber, employeeNames: [employeeName], ...rest });
+}
+
+/**
+ * Bulk version: one landscape page per name in `employeeNames`, all in a
+ * single PDF (so a whole department prints in one go). Returns { pdfPath }.
+ */
+async function generateCertificatesPdf({ fileName, employeeNames, eventTitle, issuedDate, awardDate, venue, template }) {
   const t = resolveTemplate(template);
   const dir = path.join(__dirname, '..', 'uploads', 'certificates');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-  const pdfPath = path.join(dir, `${certificateNumber}.pdf`);
+  const pdfPath = path.join(dir, `${fileName}.pdf`);
 
-  await new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0 });
-    const stream = fs.createWriteStream(pdfPath);
-    doc.pipe(stream);
-
-    const W = doc.page.width;
-    const H = doc.page.height;
-
-    // Navy background with lighter diagonal panels.
-    doc.rect(0, 0, W, H).fill(NAVY);
-    doc.polygon([W * 0.55, 0], [W * 0.8, 0], [W * 0.35, H], [W * 0.1, H]).fillOpacity(0.35).fill(NAVY_LIGHT);
-    doc.polygon([W * 0.9, 0], [W, 0], [W, H * 0.3], [W * 0.75, H]).fillOpacity(0.25).fill(NAVY_LIGHT);
-    doc.fillOpacity(1);
-
-    // Gold ribbons: top-right and bottom-left corners.
-    doc.polygon([W * 0.82, 0], [W * 0.875, 0], [W, H * 0.2], [W, H * 0.285])
-      .fill(goldGradient(doc, W * 0.82, 0, W, H * 0.28));
-    doc.polygon([W * 0.9, 0], [W * 0.925, 0], [W, H * 0.12], [W, H * 0.16])
-      .fill(goldGradient(doc, W * 0.9, 0, W, H * 0.16));
-    doc.polygon([0, H * 0.72], [0, H * 0.8], [W * 0.13, H], [W * 0.075, H])
-      .fill(goldGradient(doc, 0, H * 0.72, W * 0.13, H));
-    doc.polygon([0, H * 0.84], [0, H * 0.88], [W * 0.075, H], [W * 0.05, H])
-      .fill(goldGradient(doc, 0, H * 0.84, W * 0.075, H));
-
-    // White card with a thin gold inner border.
-    const cx = 38, cy = 32, cw = W - 76, ch = H - 60;
-    doc.rect(cx, cy, cw, ch).fill('#FFFFFF');
-    doc.rect(cx + 7, cy + 7, cw - 14, ch - 14).lineWidth(1.2).strokeColor('#D4A94A').stroke();
-
-    // Greek-key corners (top-left and bottom-right).
-    drawCornerKey(doc, 14, 12, 1, 1);
-    drawCornerKey(doc, W - 14, H - 12, -1, -1);
-
-    // Header: logo + school name.
-    const headerName = t.schoolName;
-    let headerSize = 19;
-    doc.font('Times-Bold');
-    while (headerSize > 10 && doc.fontSize(headerSize).widthOfString(headerName) > 560) headerSize -= 0.5;
-    const nameW = doc.widthOfString(headerName);
-    const logoSize = 50;
-    const gap = 10;
-    const headerX = (W - (logoSize + gap + nameW)) / 2;
-    if (fs.existsSync(LOGO_PATH)) doc.image(LOGO_PATH, headerX, 52, { width: logoSize, height: logoSize });
-    const textX = headerX + logoSize + gap;
-    doc.fillColor(NAVY).text(headerName, textX, 62, { lineBreak: false });
-    doc.font('Times-Roman').fontSize(10).fillColor(NAVY)
-      .text(t.accreditation, textX, 85, { width: nameW, align: 'center', lineBreak: false });
-
-    // Title.
-    let titleSize = 66;
-    doc.font('Times-Bold');
-    while (titleSize > 30 && doc.fontSize(titleSize).widthOfString(t.title) > 680) titleSize -= 1;
-    doc.fontSize(titleSize).fillColor(TITLE_BLUE)
-      .text(t.title, 0, 118 + (66 - titleSize) / 2, { width: W, align: 'center', characterSpacing: 2, lineBreak: false });
-    doc.font('Times-Roman').fontSize(22).fillColor(TITLE_BLUE)
-      .text(t.subtitle, 0, 192, { width: W, align: 'center', characterSpacing: 1, lineBreak: false });
-
-    doc.font('Helvetica').fontSize(15).fillColor(TEXT)
-      .text(t.awardText, 0, 252, { width: W, align: 'center', lineBreak: false });
-
-    // Recipient name over the blue line.
-    let nameSize = 30;
-    doc.font('Times-Bold');
-    while (nameSize > 16 && doc.fontSize(nameSize).widthOfString(employeeName) > 460) nameSize -= 1;
-    doc.fontSize(nameSize).fillColor(NAVY)
-      .text(employeeName, 0, 356 - nameSize, { width: W, align: 'center', lineBreak: false });
-    doc.moveTo(W / 2 - 230, 362).lineTo(W / 2 + 230, 362).lineWidth(1.2).strokeColor(TITLE_BLUE).stroke();
-
-    // "for attending the ___. Given this award on ___ at ___."
-    drawBlankLine(doc, [
-      { text: 'for attending the ' },
-      { text: eventTitle, fill: true },
-      { text: '. Given this' }
-    ], 378, { maxWidth: 560 });
-    drawBlankLine(doc, [
-      { text: 'award on ' },
-      { text: formatLongDate(awardDate || issuedDate), fill: true },
-      { text: ' at ' },
-      { text: venue || t.defaultVenue, fill: true },
-      { text: '.' }
-    ], 400, { maxWidth: 560 });
-
-    // Signatories.
-    const sigY = 486;
-    const signatories = [
-      { name: t.signatory1Name, title: t.signatory1Title.split(/\r?\n/) },
-      { name: t.signatory2Name, title: t.signatory2Title.split(/\r?\n/) }
-    ];
-    [W * 0.29, W * 0.71].forEach((centerX, i) => {
-      const sig = signatories[i];
-      const boxW = 250;
-      let sigSize = 13;
-      doc.font('Helvetica-Bold');
-      while (sigSize > 8 && doc.fontSize(sigSize).widthOfString(sig.name) > boxW) sigSize -= 0.5;
-      doc.fillColor(TEXT);
-      const w = doc.widthOfString(sig.name);
-      doc.text(sig.name, centerX - boxW / 2, sigY, { width: boxW, align: 'center', lineBreak: false });
-      doc.moveTo(centerX - w / 2 - 4, sigY + 16).lineTo(centerX + w / 2 + 4, sigY + 16).lineWidth(0.9).strokeColor(TEXT).stroke();
-      doc.font('Helvetica').fontSize(9.5).fillColor(MUTED);
-      sig.title.slice(0, 3).forEach((line, j) => {
-        doc.text(line, centerX - boxW / 2, sigY + 24 + j * 12, { width: boxW, align: 'center', lineBreak: false });
-      });
-    });
-
-    doc.end();
+  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0, autoFirstPage: false });
+  const stream = fs.createWriteStream(pdfPath);
+  const written = new Promise((resolve, reject) => {
     stream.on('finish', resolve);
     stream.on('error', reject);
   });
+  doc.pipe(stream);
+
+  for (let i = 0; i < employeeNames.length; i++) {
+    doc.addPage();
+    drawCertificatePage(doc, { t, employeeName: employeeNames[i], eventTitle, issuedDate, awardDate, venue });
+    // A whole-staff batch is hundreds of pages: let other requests
+    // (heartbeats, live updates) run, and the file stream drain, in between.
+    if (i % 10 === 9) await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  doc.end();
+  await written;
 
   return { pdfPath };
 }
 
-module.exports = { generateCertificatePdf, DEFAULT_TEMPLATE, resolveTemplate };
+function drawCertificatePage(doc, { t, employeeName, eventTitle, issuedDate, awardDate, venue }) {
+  const W = doc.page.width;
+  const H = doc.page.height;
+
+  // Navy background with lighter diagonal panels.
+  doc.rect(0, 0, W, H).fill(NAVY);
+  doc.polygon([W * 0.55, 0], [W * 0.8, 0], [W * 0.35, H], [W * 0.1, H]).fillOpacity(0.35).fill(NAVY_LIGHT);
+  doc.polygon([W * 0.9, 0], [W, 0], [W, H * 0.3], [W * 0.75, H]).fillOpacity(0.25).fill(NAVY_LIGHT);
+  doc.fillOpacity(1);
+
+  // Gold ribbons: top-right and bottom-left corners.
+  doc.polygon([W * 0.82, 0], [W * 0.875, 0], [W, H * 0.2], [W, H * 0.285])
+    .fill(goldGradient(doc, W * 0.82, 0, W, H * 0.28));
+  doc.polygon([W * 0.9, 0], [W * 0.925, 0], [W, H * 0.12], [W, H * 0.16])
+    .fill(goldGradient(doc, W * 0.9, 0, W, H * 0.16));
+  doc.polygon([0, H * 0.72], [0, H * 0.8], [W * 0.13, H], [W * 0.075, H])
+    .fill(goldGradient(doc, 0, H * 0.72, W * 0.13, H));
+  doc.polygon([0, H * 0.84], [0, H * 0.88], [W * 0.075, H], [W * 0.05, H])
+    .fill(goldGradient(doc, 0, H * 0.84, W * 0.075, H));
+
+  // White card with a thin gold inner border.
+  const cx = 38, cy = 32, cw = W - 76, ch = H - 60;
+  doc.rect(cx, cy, cw, ch).fill('#FFFFFF');
+  doc.rect(cx + 7, cy + 7, cw - 14, ch - 14).lineWidth(1.2).strokeColor('#D4A94A').stroke();
+
+  // Greek-key corners (top-left and bottom-right).
+  drawCornerKey(doc, 14, 12, 1, 1);
+  drawCornerKey(doc, W - 14, H - 12, -1, -1);
+
+  // Header: logo + school name.
+  const headerName = t.schoolName;
+  let headerSize = 19;
+  doc.font('Times-Bold');
+  while (headerSize > 10 && doc.fontSize(headerSize).widthOfString(headerName) > 560) headerSize -= 0.5;
+  const nameW = doc.widthOfString(headerName);
+  const logoSize = 50;
+  const gap = 10;
+  const headerX = (W - (logoSize + gap + nameW)) / 2;
+  if (fs.existsSync(LOGO_PATH)) doc.image(LOGO_PATH, headerX, 52, { width: logoSize, height: logoSize });
+  const textX = headerX + logoSize + gap;
+  doc.fillColor(NAVY).text(headerName, textX, 62, { lineBreak: false });
+  doc.font('Times-Roman').fontSize(10).fillColor(NAVY)
+    .text(t.accreditation, textX, 85, { width: nameW, align: 'center', lineBreak: false });
+
+  // Title.
+  let titleSize = 66;
+  doc.font('Times-Bold');
+  while (titleSize > 30 && doc.fontSize(titleSize).widthOfString(t.title) > 680) titleSize -= 1;
+  doc.fontSize(titleSize).fillColor(TITLE_BLUE)
+    .text(t.title, 0, 118 + (66 - titleSize) / 2, { width: W, align: 'center', characterSpacing: 2, lineBreak: false });
+  doc.font('Times-Roman').fontSize(22).fillColor(TITLE_BLUE)
+    .text(t.subtitle, 0, 192, { width: W, align: 'center', characterSpacing: 1, lineBreak: false });
+
+  doc.font('Helvetica').fontSize(15).fillColor(TEXT)
+    .text(t.awardText, 0, 252, { width: W, align: 'center', lineBreak: false });
+
+  // Recipient name over the blue line.
+  let nameSize = 30;
+  doc.font('Times-Bold');
+  while (nameSize > 16 && doc.fontSize(nameSize).widthOfString(employeeName) > 460) nameSize -= 1;
+  doc.fontSize(nameSize).fillColor(NAVY)
+    .text(employeeName, 0, 356 - nameSize, { width: W, align: 'center', lineBreak: false });
+  doc.moveTo(W / 2 - 230, 362).lineTo(W / 2 + 230, 362).lineWidth(1.2).strokeColor(TITLE_BLUE).stroke();
+
+  // "for attending the ___. Given this award on ___ at ___."
+  drawBlankLine(doc, [
+    { text: 'for attending the ' },
+    { text: eventTitle, fill: true },
+    { text: '. Given this' }
+  ], 378, { maxWidth: 560 });
+  drawBlankLine(doc, [
+    { text: 'award on ' },
+    { text: formatLongDate(awardDate || issuedDate), fill: true },
+    { text: ' at ' },
+    { text: venue || t.defaultVenue, fill: true },
+    { text: '.' }
+  ], 400, { maxWidth: 560 });
+
+  // Signatories.
+  const sigY = 486;
+  const signatories = [
+    { name: t.signatory1Name, title: t.signatory1Title.split(/\r?\n/) },
+    { name: t.signatory2Name, title: t.signatory2Title.split(/\r?\n/) }
+  ];
+  [W * 0.29, W * 0.71].forEach((centerX, i) => {
+    const sig = signatories[i];
+    const boxW = 250;
+    let sigSize = 13;
+    doc.font('Helvetica-Bold');
+    while (sigSize > 8 && doc.fontSize(sigSize).widthOfString(sig.name) > boxW) sigSize -= 0.5;
+    doc.fillColor(TEXT);
+    const w = doc.widthOfString(sig.name);
+    doc.text(sig.name, centerX - boxW / 2, sigY, { width: boxW, align: 'center', lineBreak: false });
+    doc.moveTo(centerX - w / 2 - 4, sigY + 16).lineTo(centerX + w / 2 + 4, sigY + 16).lineWidth(0.9).strokeColor(TEXT).stroke();
+    doc.font('Helvetica').fontSize(9.5).fillColor(MUTED);
+    sig.title.slice(0, 3).forEach((line, j) => {
+      doc.text(line, centerX - boxW / 2, sigY + 24 + j * 12, { width: boxW, align: 'center', lineBreak: false });
+    });
+  });
+}
+
+module.exports = { generateCertificatePdf, generateCertificatesPdf, DEFAULT_TEMPLATE, resolveTemplate };

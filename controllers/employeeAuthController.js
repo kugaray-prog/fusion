@@ -1,7 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
-const { isBlockedStatus, sendDeviceBlocked, getBlockedStatus } = require('../services/deviceAccess');
+const { isBlockedStatus, sendDeviceBlocked, getBlockedStatus, cleanDeviceInfo } = require('../services/deviceAccess');
 const config = require('../config/config');
 const { logAction } = require('../services/auditService');
 const { notifyAdmins, employeeLabel, deviceLabel } = require('../services/adminNotificationService');
@@ -757,9 +757,10 @@ async function linkDevice(req, res, next) {
       }
       deviceStatus = existingDevice[0].status;
     } else {
+      const info = cleanDeviceInfo({ model: device_model, brand: device_brand, os: device_os });
       await pool.query(
         `INSERT INTO mobile_devices (employee_id, device_uid, model, brand, os, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
-        [employee.id, device_uid, device_model || null, device_brand || null, device_os || null]
+        [employee.id, device_uid, info.model, info.brand, info.os]
       );
       const device = deviceLabel({ brand: device_brand, model: device_model, device_uid });
       await notifyAdmins({

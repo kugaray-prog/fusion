@@ -39,7 +39,11 @@ export default function AttendanceScreen({ route }) {
   const session = eventId != null ? tracking?.sessions?.[eventId] : null;
 
   const isInside = !!presence?.inside;
-  const isOpen = !!session?.id && !session?.time_out;
+  // Awaiting face verification: the server stopped the clock until it passes.
+  const isPaused = !!session?.id && !!session?.requires_face_verification;
+  // pendingExitAt: the phone saw them leave the polygon -- show it as timed
+  // out right away instead of waiting for the server to confirm.
+  const isOpen = !!session?.id && !session?.time_out && !session?.pendingExitAt && !isPaused;
   const hasAnySession = !!session?.id;
   const durationSeconds = eventId != null ? tracking?.getDurationSeconds?.(eventId) || 0 : 0;
   const sessionCount = session?.session_count || 0;
@@ -54,13 +58,14 @@ export default function AttendanceScreen({ route }) {
   // yet or still waiting on the first GPS fix.
   let statusLabel = 'Checking your location…';
   if (!geofence) statusLabel = 'This event is no longer available.';
+  else if (isPaused) statusLabel = 'Time paused — complete face verification to resume recording.';
   else if (isOpen) statusLabel = `You are inside "${geofence.title}" — time is being recorded.`;
   else if (!eventActive) statusLabel = `"${geofence.title}" hasn't started yet — attendance opens at ${new Date(geofence.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
   else if (!presence) statusLabel = 'Checking your location…';
   else if (isInside) statusLabel = 'Inside the geofence — timing in…';
   else statusLabel = `Outside the "${geofence.title}" geofence boundary.`;
 
-  const statusIsGood = isInside || isOpen;
+  const statusIsGood = !isPaused && (isInside || isOpen);
   const statusIsNeutral = !statusIsGood && (!eventActive || !presence);
 
   // Soft pulsing "recording" dot next to the status line while a session is
@@ -107,7 +112,7 @@ export default function AttendanceScreen({ route }) {
 
       <FadeIn delay={120}>
         <View style={styles.durationCard}>
-          <Text style={styles.durationLabel}>{isOpen ? 'On-going — total time today' : 'Total time recorded today'}</Text>
+          <Text style={styles.durationLabel}>{isPaused ? 'Paused — verify your face to resume' : isOpen ? 'On-going — total time today' : 'Total time recorded today'}</Text>
           <Text style={styles.durationValue}>{formatDuration(durationSeconds)}</Text>
           {sessionCount > 1 && (
             <Text style={styles.sessionCountText}>Across {sessionCount} time-in/time-out sessions</Text>

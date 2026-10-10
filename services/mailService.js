@@ -1,8 +1,15 @@
 const dns = require('dns').promises;
+const nodemailer = require('nodemailer');
 
-// Outgoing email (admin verification codes). Two HTTP-based senders --
-// Render's free instances block outbound SMTP, so Gmail/SMTP would only
-// work on localhost:
+// Outgoing email (admin verification codes). Three senders:
+//
+//   Gmail SMTP (nodemailer) -- needs 2-Step Verification + an App Password.
+//   Render's free instances block outbound SMTP, so on Render keep one of
+//   the HTTP senders below configured as the fallback.
+//     SMTP_USER         the Gmail address that sends (e.g. you@gmail.com)
+//     SMTP_PASS         the 16-character App Password (spaces are ignored)
+//     SMTP_HOST         optional, default smtp.gmail.com
+//     SMTP_PORT         optional, default 465 (SSL); 587 uses STARTTLS
 //
 //   Brevo (https://www.brevo.com, free 300/day)
 //     BREVO_API_KEY     API key (Brevo > SMTP & API > API Keys)
@@ -11,26 +18,27 @@ const dns = require('dns').promises;
 //   account that deployed it -- no activation needed)
 //     MAIL_RELAY_URL    the script's Web App URL (.../exec)
 //     MAIL_RELAY_SECRET the same secret set as RELAY_SECRET in the script
-//   MAIL_FROM_NAME      optional display name for both (default "GeoAttend CSPC")
+//   MAIL_FROM_NAME      optional display name for all (default "GeoAttend CSPC")
 //
-// With both set, Brevo is tried first and the relay is the fallback. With
-// neither, development servers print the email to the terminal instead;
-// production refuses (sendMail throws).
+// Senders are tried in order SMTP -> Brevo -> relay; the first that works
+// wins. With none set, development servers print the email to the terminal
+// instead; production refuses (sendMail throws).
 
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
 const FROM_NAME = () => process.env.MAIL_FROM_NAME || 'GeoAttend CSPC';
 
+const hasSmtp = () => Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
 const hasBrevo = () => Boolean(process.env.BREVO_API_KEY && process.env.MAIL_FROM_EMAIL);
 const hasRelay = () => Boolean(process.env.MAIL_RELAY_URL && process.env.MAIL_RELAY_SECRET);
 
 function isConfigured() {
-  return hasBrevo() || hasRelay();
+  return hasSmtp() || hasBrevo() || hasRelay();
 }
 
 async function sendMail({ to, subject, html, text }) {
   if (!isConfigured()) {
     if (process.env.NODE_ENV === 'production') {
-      throw Object.assign(new Error('Email sending is not configured on this server (set MAIL_RELAY_URL/MAIL_RELAY_SECRET or BREVO_API_KEY/MAIL_FROM_EMAIL).'), { status: 503 });
+      throw Object.assign(new Error('Email sending is not configured on this server (set SMTP_USER/SMTP_PASS, BREVO_API_KEY/MAIL_FROM_EMAIL or MAIL_RELAY_URL/MAIL_RELAY_SECRET).'), { status: 503 });
     }
     console.log('\n[mail] No email sender configured -- email NOT sent, printed here instead:');
     console.log(`[mail] To: ${to}\n[mail] Subject: ${subject}\n[mail] ${text || html}\n`);
@@ -38,22 +46,77 @@ async function sendMail({ to, subject, html, text }) {
   }
 
   const message = { to, subject, html, text };
-  let brevoError = null;
-  if (hasBrevo()) {
+  const hasFallback = hasBrevo() || hasRelay();
+  const senders = [
+    hasSmtp() && !(hasFallback && Date.now() < smtpUnreachableUntil) && ['Gmail SMTP', sendViaSmtp],
+    hasBrevo() && ['Brevo', sendViaBrevo],
+    hasRelay() && ['Apps Script relay', sendViaRelay]
+  ].filter(Boolean);
+  let lastError = null;
+  for (const [name, send] of senders) {
     try {
-      return await sendViaBrevo(message);
+      return await send(message);
     } catch (err) {
-      if (!hasRelay()) throw err;
-      brevoError = err;
-      console.warn(`[mail] Brevo failed (${err.message}); trying the Apps Script relay.`);
+      lastError = err;
+      console.warn(`[mail] ${name} failed (${err.message}).`);
     }
   }
-  try {
-    return await sendViaRelay(message);
-  } catch (err) {
-    if (brevoError) console.error('[mail] Both senders failed.');
-    throw err;
+  if (senders.length > 1) console.error('[mail] All senders failed.');
+  throw lastError;
+}
+
+// Errors meaning the SMTP server couldn't be reached at all (not a rejection).
+const SMTP_CONNECTION_ERRORS = ['ETIMEDOUT', 'ECONNECTION', 'ESOCKET', 'ECONNREFUSED'];
+// On a host that blocks outbound SMTP (Render's free tier), every attempt
+// waits out connectionTimeout before failing. After one such failure, SMTP is
+// skipped for this long when another sender is configured, so each email
+// doesn't pay that ~10 s first.
+const SMTP_RETRY_AFTER_MS = 10 * 60 * 1000;
+let smtpUnreachableUntil = 0;
+
+let smtpTransport = null;
+function getSmtpTransport() {
+  if (!smtpTransport) {
+    const port = Number(process.env.SMTP_PORT) || 465;
+    smtpTransport = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port,
+      secure: port === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS.replace(/\s+/g, '') },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000
+    });
   }
+  return smtpTransport;
+}
+
+// Gmail rewrites the From address to SMTP_USER anyway, so it's always used.
+async function sendViaSmtp({ to, subject, html, text }) {
+  try {
+    await getSmtpTransport().sendMail({
+      from: { name: FROM_NAME(), address: process.env.SMTP_USER },
+      to,
+      subject,
+      html,
+      text
+    });
+  } catch (err) {
+    console.error(`[mail] SMTP rejected the email to ${to}: ${err.code || ''} ${err.response || err.message}`);
+    if (SMTP_CONNECTION_ERRORS.includes(err.code)) smtpUnreachableUntil = Date.now() + SMTP_RETRY_AFTER_MS;
+    throw Object.assign(new Error(`The verification email could not be sent. ${explainSmtpError(err)}`), { status: 502 });
+  }
+  return { sent: true, via: 'smtp' };
+}
+
+function explainSmtpError(err) {
+  if (err.code === 'EAUTH' || err.responseCode === 535) {
+    return 'Gmail rejected the login. SMTP_PASS must be a 16-character App Password (Google Account > Security > 2-Step Verification > App passwords), not your normal Gmail password.';
+  }
+  if (SMTP_CONNECTION_ERRORS.includes(err.code)) {
+    return 'Could not connect to the SMTP server. This host may block outbound SMTP (Render\'s free tier does) -- use Brevo or the Apps Script relay there.';
+  }
+  return `SMTP said: ${err.response || err.message}`;
 }
 
 async function sendViaBrevo({ to, subject, html, text }) {

@@ -79,35 +79,47 @@ module.exports = {
     maxAccuracyMeters: Number(process.env.ATTENDANCE_MAX_ACCURACY_METERS) || 100,
     // A reading just outside the boundary still counts as inside if the
     // boundary is within the reading's own GPS accuracy, up to this many
-    // meters. Phone GPS drifts 5-20m, so without it someone standing inside
-    // near the edge of a small geofence could be read as outside and never
-    // get timed in. The mobile app applies the same rule (keep them in sync:
-    // mobile/src/context/AttendanceTrackingContext.js). 0 turns it off.
+    // meters. Off (0) by default: the admin's polygon is the exact boundary,
+    // and leaving it times the employee out right away. The same value is
+    // used for time-in and time-out so the two can't disagree and flap at
+    // the edge. The mobile app applies the same rule (keep them in sync:
+    // mobile/src/context/AttendanceTrackingContext.js).
     edgeToleranceMeters: process.env.GEOFENCE_EDGE_TOLERANCE_METERS !== undefined
       ? Number(process.env.GEOFENCE_EDGE_TOLERANCE_METERS)
-      : 20,
+      : 0,
     // Refuse check-ins (and treat heartbeats as "outside") when the phone
     // reports the reading came from a mock-location provider (Fake GPS etc.).
     rejectMockLocations: process.env.REJECT_MOCK_LOCATIONS !== 'false',
     // How many consecutive "outside the geofence" location pings from the
     // mobile app are required before the server auto-closes an attendance
-    // session (sets time_out). Requiring more than one absorbs a single
-    // noisy/inaccurate GPS reading instead of ending the session on it.
-    autoEndOutsideStreakThreshold: Number(process.env.ATTENDANCE_AUTO_END_STREAK) || 2,
+    // session (sets time_out). 1 = the first reading outside the polygon
+    // times the employee out immediately, at the moment that reading was
+    // taken. Raise it to absorb noisy GPS at the cost of a later time-out.
+    autoEndOutsideStreakThreshold: Number(process.env.ATTENDANCE_AUTO_END_STREAK) || 1,
     // Minimum minutes between accepted heartbeat pings for the same
     // attendance record, to avoid flooding the DB from a tight watchPosition loop.
-    heartbeatMinIntervalSeconds: Number(process.env.ATTENDANCE_HEARTBEAT_MIN_SECONDS) || 20,
-    // Geo-anomaly ("one person carrying another's phone") detection: two
-    // different employees' devices reporting positions within this many
-    // degrees of each other (~0.0001 = ~11m) for the same event, get flagged
-    // for face verification once they've stayed together for
-    // anomalyConfirmSeconds. anomalyWindowMinutes is how fresh the OTHER
-    // device's last reported position must be to count (pings arrive every
-    // ~25s, so a couple of minutes means "still there right now"). See
-    // detectGeoAnomaly.
-    anomalyCoordTolerance: Number(process.env.ANOMALY_COORD_TOLERANCE) || 0.0001,
-    anomalyWindowMinutes: Number(process.env.ANOMALY_WINDOW_MINUTES) || 2,
-    anomalyConfirmSeconds: Number(process.env.ANOMALY_CONFIRM_SECONDS) || 60
+    heartbeatMinIntervalSeconds: Number(process.env.ATTENDANCE_HEARTBEAT_MIN_SECONDS) || 10,
+    // An open session whose phone hasn't been heard from (no heartbeat or
+    // time-in) for this many seconds is timed out at the last moment it was
+    // heard from. The app pings every ~15 s while a session is open, also in
+    // the background with the app closed, so silence means Location was
+    // turned off or the app/phone stopped with no screen open to report it.
+    // 0 turns this off.
+    silentSessionSeconds: process.env.ATTENDANCE_SILENT_SESSION_SECONDS !== undefined
+      ? Number(process.env.ATTENDANCE_SILENT_SESSION_SECONDS)
+      : 60,
+    // Geo-anomaly ("one person carrying another's phone") detection, see
+    // detectGeoAnomaly. Two different employees' phones for the same event
+    // reporting positions within anomalyDistanceMeters of each other
+    // (straight-line distance, default 0.5 m -- about a handspan or two) are
+    // flagged for face verification right away. anomalyWindowSeconds is how
+    // fresh the OTHER phone's last reported position must be to count.
+    // anomalyRecheckSeconds: after passing face verification, a record is
+    // left alone for this long; if the phones are still together after
+    // that, it's flagged again -- so every 30 seconds by default.
+    anomalyDistanceMeters: Number(process.env.ANOMALY_DISTANCE_METERS) || 1,
+    anomalyWindowSeconds: Number(process.env.ANOMALY_WINDOW_SECONDS) || 30,
+    anomalyRecheckSeconds: Number(process.env.ANOMALY_RECHECK_SECONDS) || 30
   },
   // Default/initial Geo-Fence location: CSPC (Camarines Sur Polytechnic
   // Colleges). Used to pre-fill the map/coordinates when an admin opens the

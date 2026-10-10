@@ -23,6 +23,9 @@ import FaceVerificationScreen from './src/screens/FaceVerificationScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import { colors } from './src/theme';
+// Registers the background attendance task at startup -- Android can relaunch
+// the app's JS in the background just to deliver it a location reading.
+import './src/tasks/backgroundAttendance';
 
 const Stack = createNativeStackNavigator();
 

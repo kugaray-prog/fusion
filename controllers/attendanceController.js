@@ -5,6 +5,7 @@ const faceService = require('../services/faceService');
 const config = require('../config/config');
 const { logAction } = require('../services/auditService');
 const { notifyAdmins, employeeLabel, deviceLabel } = require('../services/adminNotificationService');
+const realtime = require('../services/realtime');
 // NOTE: employee_ratings (the Ratings module) is no longer fed from here.
 // It's now generated on-demand, per actual EVENT, by
 // ratingController.generateRatingsForRange — run automatically every time
@@ -29,26 +30,131 @@ function edgeTolerance(accuracy) {
   return Math.min(acc, config.attendance.edgeToleranceMeters);
 }
 
+// Runs bookkeeping that the reply doesn't depend on (logs, notifications,
+// rating recalculation) after the response has been sent: the database is
+// remote, so every round trip left in the request path delays the time-in or
+// time-out the employee is waiting on. A failure here is logged, never sent.
+function afterResponse(label, work) {
+  Promise.resolve()
+    .then(work)
+    .catch((err) => console.error(`[attendance] ${label} failed:`, err.message));
+}
+
+// The duration clock is stopped while a record awaits face verification:
+// its open session is closed right now and folded into the running total,
+// but the attendance row itself stays open (time_out NULL) so the app keeps
+// pinging and doesn't try to time in again. resumeSessionAfterVerification
+// opens a fresh session once the employee passes verification.
+async function pauseOpenSession(attendanceId) {
+  const [openRows] = await pool.query(
+    'SELECT id FROM attendance_sessions WHERE attendance_id = ? AND time_out IS NULL ORDER BY time_in DESC LIMIT 1',
+    [attendanceId]
+  );
+  const openSession = openRows[0];
+  if (!openSession) return;
+  // `time_out IS NULL` makes the close atomic: two pings flagging the same
+  // record at once (or this and the heartbeat's auto time-out) would
+  // otherwise both close the session and both add its duration to the total.
+  const [closed] = await pool.query(
+    `UPDATE attendance_sessions
+     SET time_out = NOW(), duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, time_in, NOW()))
+     WHERE id = ? AND time_out IS NULL`,
+    [openSession.id]
+  );
+  if (closed.affectedRows === 0) return; // someone else closed (and counted) it first
+  const [[updatedSession]] = await pool.query('SELECT duration_seconds FROM attendance_sessions WHERE id = ?', [openSession.id]);
+  const sessionDurationSeconds = updatedSession ? updatedSession.duration_seconds : 0;
+  await pool.query(
+    `UPDATE attendance SET total_duration_seconds = COALESCE(total_duration_seconds, 0) + ?,
+       work_hours = ROUND(total_duration_seconds / 3600, 2) WHERE id = ?`,
+    [sessionDurationSeconds, attendanceId]
+  );
+  await pool.query(
+    `INSERT INTO attendance_logs (attendance_id, employee_id, action, details)
+     SELECT id, employee_id, 'duration_paused', ? FROM attendance WHERE id = ?`,
+    [JSON.stringify({ reason: 'face_verification_required', sessionDurationSeconds }), attendanceId]
+  );
+}
+
+// Restarts the duration clock after a paused record is verified, as long as
+// the employee is still timed in (not auto-ended while waiting) and the
+// event is still running. If they left in the meantime, their next re-entry
+// time-in opens the session instead.
+async function resumeSessionAfterVerification(attendanceId, latitude, longitude) {
+  // The attendance row is locked for the check-then-insert, so two
+  // verifications landing together (a double submit, or the employee's own
+  // and an admin-assisted one) can't both see "no open session" and open two.
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query('SELECT id FROM attendance WHERE id = ? FOR UPDATE', [attendanceId]);
+    const [rows] = await conn.query(
+      `SELECT a.id, a.employee_id, a.time_out, e.end_datetime,
+              (SELECT COUNT(*) FROM attendance_sessions s WHERE s.attendance_id = a.id AND s.time_out IS NULL) AS open_sessions
+       FROM attendance a LEFT JOIN events e ON a.event_id = e.id
+       WHERE a.id = ?`,
+      [attendanceId]
+    );
+    const record = rows[0];
+    if (!record || record.time_out || Number(record.open_sessions) > 0
+        || (record.end_datetime && new Date(record.end_datetime) <= new Date())) {
+      await conn.commit();
+      return false;
+    }
+    const [sessionResult] = await conn.query(
+      `INSERT INTO attendance_sessions (attendance_id, employee_id, time_in, in_latitude, in_longitude)
+       VALUES (?, ?, NOW(), ?, ?)`,
+      [attendanceId, record.employee_id, latitude || null, longitude || null]
+    );
+    await conn.query(
+      `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'duration_resumed', ?)`,
+      [attendanceId, record.employee_id, JSON.stringify({ session_id: sessionResult.insertId })]
+    );
+    await conn.commit();
+    return true;
+  } catch (err) {
+    await conn.rollback().catch(() => {});
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 // Logs a geo_anomalies row for one attendance record, flags it for face
-// verification, and notifies its employee.
+// verification, stops its duration clock, and notifies its employee --
+// including a live push so their app opens Face Verification right away
+// instead of waiting for its next heartbeat.
 async function flagAttendanceForVerification({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude, details }) {
+  // Only the first of two pings flagging the same record at once (each
+  // phone's own ping sees the other) logs and notifies; the second finds it
+  // already flagged.
+  const [flagged] = await pool.query(
+    'UPDATE attendance SET requires_face_verification = 1, verification_status = ? WHERE id = ? AND COALESCE(requires_face_verification, 0) = 0',
+    ['Pending', attendanceId]
+  );
+  if (flagged.affectedRows === 0) return;
+
   await pool.query(
     `INSERT INTO geo_anomalies (attendance_id, employee_id, event_id, device_uid, anomaly_type, details, latitude, longitude)
      VALUES (?, ?, ?, ?, 'duplicate_geolocation', ?, ?, ?)`,
     [attendanceId, employeeId, eventId, deviceUid || null, details, latitude, longitude]
   );
 
-  await pool.query('UPDATE attendance SET requires_face_verification = 1, verification_status = ? WHERE id = ?', ['Pending', attendanceId]);
+  await pauseOpenSession(attendanceId);
+  realtime.notifyEmployee(employeeId, 'attendance');
+
+  const [[event]] = await pool.query('SELECT title FROM events WHERE id = ?', [eventId]);
+  const eventPart = event?.title ? ` at "${event.title}"` : '';
 
   await pool.query(
     `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Face Verification Required', ?, 'face_verification_required')`,
-    [employeeId, 'Your phone reported the same location as another employee\'s phone. Open the app and complete face verification before the event ends, or your attendance will not be recorded.']
+    [employeeId, `Your phone reported the same location as another employee's phone${eventPart}. Open the app and complete face verification before the event ends, or your attendance will not be recorded.`]
   );
 
   await notifyAdmins({
     type: 'geo_anomaly', severity: 'warning', targetView: 'geofence', employeeId,
     title: 'Possible proxy attendance',
-    message: `${await employeeLabel(employeeId)}'s phone stayed at the same spot as another employee's phone. They were asked to complete face verification.`
+    message: `${await employeeLabel(employeeId)}'s phone was at the same spot as another employee's phone${eventPart}. They were asked to complete face verification.`
   });
 }
 
@@ -64,69 +170,83 @@ async function flagAttendanceForVerification({ attendanceId, employeeId, eventId
 // Both sides of a match are flagged: the server can't tell which phone is
 // the "real" one, and only the employee actually present can pass the face
 // verification on their own phone. A record that's already flagged just
-// reports true again (so its app keeps being prompted); a record that
-// already passed face verification is never re-flagged, so a legitimate
-// employee standing next to a colleague isn't nagged in a loop.
+// reports true again (so its app keeps being prompted).
 //
-// Co-location must be SUSTAINED for config.attendance.anomalyConfirmSeconds
-// (1 minute by default) before anyone is flagged: two employees merely
-// walking past each other shouldn't trigger it, but two phones that stay
-// together (one person carrying both) will. Once confirmed, EVERY open
-// record at that spot is flagged, however many there are.
+// Triggers on the FIRST ping that finds another employee's phone within
+// config.attendance.anomalyDistanceMeters (0.5 m by default), as long as
+// that other phone reported its position within the last
+// config.attendance.anomalyWindowSeconds (30 s) -- no waiting period. Every
+// open record at that spot is flagged, however many there are.
+//
+// Passing face verification does NOT exempt a record: it's only left alone
+// for config.attendance.anomalyRecheckSeconds (30 s) after it was verified,
+// so for as long as the phones stay together, face verification is asked
+// for again every 30 seconds.
 //
 // Returns whether THIS record currently requires face verification.
-//
-// attendanceId -> ms timestamp when this record was first seen next to
-// another employee's device, reset as soon as a ping finds nobody nearby.
-// Kept in memory rather than the database: pings arrive every ~25s, so a
-// server restart only restarts the one-minute count.
-const coLocatedSince = new Map();
-
 async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude }) {
+  // Ages are worked out in SQL (TIMESTAMPDIFF against NOW()) rather than by
+  // parsing the DATETIME strings in Node, so they stay right whatever
+  // timezone the Node process and the database session happen to use.
   const [selfRows] = await pool.query(
-    'SELECT requires_face_verification, face_verified_at FROM attendance WHERE id = ?',
+    'SELECT requires_face_verification, TIMESTAMPDIFF(SECOND, face_verified_at, NOW()) AS verified_ago_s FROM attendance WHERE id = ?',
     [attendanceId]
   );
   const self = selfRows[0];
   if (!self) return false;
   if (self.requires_face_verification) return true;
-  if (self.face_verified_at) return false;
 
-  const tol = config.attendance.anomalyCoordTolerance;
-  const windowMinutes = config.attendance.anomalyWindowMinutes;
-  const [rows] = await pool.query(
-    `SELECT a.id, a.employee_id, a.requires_face_verification, a.face_verified_at,
-            COALESCE(a.last_lat, a.latitude) AS cur_lat, COALESCE(a.last_lng, a.longitude) AS cur_lng,
-            md.device_uid
-     FROM attendance a
-     LEFT JOIN mobile_devices md ON a.device_id = md.id
-     WHERE a.event_id = ? AND a.employee_id != ? AND a.id != ?
-       AND a.time_out IS NULL
-       AND (
-         (a.last_ping_at >= NOW() - INTERVAL ? MINUTE
-           AND ABS(a.last_lat - ?) < ? AND ABS(a.last_lng - ?) < ?)
-         OR
-         (GREATEST(a.time_in, COALESCE((SELECT MAX(s.time_in) FROM attendance_sessions s WHERE s.attendance_id = a.id), a.time_in))
-             >= NOW() - INTERVAL ? MINUTE
-           AND ABS(a.latitude - ?) < ? AND ABS(a.longitude - ?) < ?)
-       )`,
+  const recheckSeconds = config.attendance.anomalyRecheckSeconds;
+  const recentlyVerified = (row) => row.verified_ago_s != null && Number(row.verified_ago_s) < recheckSeconds;
+  if (recentlyVerified(self)) return false;
+
+  // The SQL box is only a coarse prefilter (a degree box sized to the
+  // distance threshold); the real check is the straight-line distance below,
+  // so only phones practically side by side count -- not merely nearby.
+  const maxMeters = config.attendance.anomalyDistanceMeters;
+  const latTol = maxMeters / 111320;
+  const lngTol = maxMeters / (111320 * Math.max(Math.cos(Number(latitude) * Math.PI / 180), 0.01));
+  const windowSeconds = config.attendance.anomalyWindowSeconds;
+  const [candidates] = await pool.query(
+    `SELECT x.*, (x.last_ping_at >= NOW() - INTERVAL ? SECOND) AS ping_fresh,
+            (x.latest_time_in >= NOW() - INTERVAL ? SECOND) AS time_in_fresh,
+            (x.last_ping_at IS NOT NULL AND (x.latest_time_in IS NULL OR x.last_ping_at >= x.latest_time_in)) AS ping_is_newest
+     FROM (
+       SELECT a.id, a.employee_id, a.requires_face_verification,
+              TIMESTAMPDIFF(SECOND, a.face_verified_at, NOW()) AS verified_ago_s,
+              a.last_lat, a.last_lng, a.latitude, a.longitude, a.last_ping_at,
+              GREATEST(a.time_in, COALESCE((SELECT MAX(s.time_in) FROM attendance_sessions s WHERE s.attendance_id = a.id), a.time_in)) AS latest_time_in,
+              md.device_uid
+       FROM attendance a
+       LEFT JOIN mobile_devices md ON a.device_id = md.id
+       WHERE a.event_id = ? AND a.employee_id != ? AND a.id != ?
+         AND a.time_out IS NULL
+     ) x
+     WHERE (x.last_ping_at >= NOW() - INTERVAL ? SECOND
+             AND ABS(x.last_lat - ?) < ? AND ABS(x.last_lng - ?) < ?)
+        OR (x.latest_time_in >= NOW() - INTERVAL ? SECOND
+             AND ABS(x.latitude - ?) < ? AND ABS(x.longitude - ?) < ?)`,
     [
+      windowSeconds, windowSeconds,
       eventId, employeeId, attendanceId,
-      windowMinutes, latitude, tol, longitude, tol,
-      windowMinutes, latitude, tol, longitude, tol
+      windowSeconds, latitude, latTol, longitude, lngTol,
+      windowSeconds, latitude, latTol, longitude, lngTol
     ]
   );
-  if (!rows.length) {
-    coLocatedSince.delete(attendanceId);
-    return false;
+  const within = (lat, lng) => lat != null && lng != null &&
+    geofenceService.distanceMeters(Number(latitude), Number(longitude), Number(lat), Number(lng)) <= maxMeters;
+  // Each other phone is judged only by its NEWEST known position: a ping
+  // after its time-in supersedes the time-in spot, so a phone that has
+  // walked away doesn't still count as "here" off its old check-in point.
+  const rows = [];
+  for (const c of candidates) {
+    if (Number(c.ping_is_newest)) {
+      if (Number(c.ping_fresh) && within(c.last_lat, c.last_lng)) rows.push({ ...c, cur_lat: c.last_lat, cur_lng: c.last_lng });
+    } else if (Number(c.time_in_fresh) && within(c.latitude, c.longitude)) {
+      rows.push({ ...c, cur_lat: c.latitude, cur_lng: c.longitude });
+    }
   }
-
-  const nowMs = Date.now();
-  if (!coLocatedSince.has(attendanceId)) coLocatedSince.set(attendanceId, nowMs);
-  if (nowMs - coLocatedSince.get(attendanceId) < config.attendance.anomalyConfirmSeconds * 1000) {
-    return false;
-  }
-  coLocatedSince.delete(attendanceId);
+  if (!rows.length) return false;
 
   const first = rows[0];
   await flagAttendanceForVerification({
@@ -141,8 +261,9 @@ async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, 
   });
 
   for (const other of rows) {
-    coLocatedSince.delete(other.id);
-    if (other.requires_face_verification || other.face_verified_at) continue;
+    if (Number(other.requires_face_verification)) continue;
+    // Just passed verification -- it gets its own 30 seconds first.
+    if (recentlyVerified(other)) continue;
     await flagAttendanceForVerification({
       attendanceId: other.id,
       employeeId: other.employee_id,
@@ -308,6 +429,7 @@ async function finalizeEndedEventStatuses() {
       'UPDATE attendance SET attendance_status = ?, status_finalized = 1 WHERE id = ?',
       [finalStatus, record.id]
     );
+    realtime.notifyEmployee(record.employee_id, 'attendance');
     await pool.query(
       `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'status_finalized', ?)`,
       [record.id, record.employee_id, JSON.stringify({
@@ -375,7 +497,8 @@ async function getMyHistory(req, res, next) {
   try {
     await settleEndedEvents();
     const [rows] = await pool.query(
-      `SELECT a.*, ${DISPLAY_STATUS_SQL} AS attendance_status, ev.title AS event_title${ATTENDANCE_DURATION_SUBQUERIES} FROM attendance a
+      `SELECT a.*, ${DISPLAY_STATUS_SQL} AS attendance_status, ev.title AS event_title, ev.venue AS event_venue,
+              ev.start_datetime AS event_start, ev.end_datetime AS event_end${ATTENDANCE_DURATION_SUBQUERIES} FROM attendance a
        LEFT JOIN events ev ON a.event_id = ev.id
        WHERE a.employee_id = ?
        ORDER BY a.attendance_date DESC, a.time_in DESC
@@ -452,7 +575,9 @@ async function getAttendance(req, res, next) {
     }
 
     const [rows] = await pool.query(
-      `SELECT a.*, ${DISPLAY_STATUS_SQL} AS attendance_status, e.full_name, e.employee_code, d.name AS department_name, ev.title AS event_title${ATTENDANCE_DURATION_SUBQUERIES}
+      `SELECT a.*, ${DISPLAY_STATUS_SQL} AS attendance_status, e.full_name, e.employee_code, d.name AS department_name, ev.title AS event_title,
+              ev.start_datetime AS event_start, ev.end_datetime AS event_end,
+              ${presenceRulePercent()} AS presence_required_percent${ATTENDANCE_DURATION_SUBQUERIES}
        FROM attendance a
        JOIN employees e ON a.employee_id = e.id
        JOIN departments d ON e.department_id = d.id
@@ -579,10 +704,30 @@ async function submitAttendance(req, res, next) {
       });
     }
 
+    // Every lookup the checks below need, fetched together: the database is
+    // remote, so each sequential round trip delays the time-in.
+    const now = new Date();
+    const today = localDate(now);
+    const [[employeeExists], [deviceRows], [eventRows], [geofenceRows], [eventPointRows], [existingRows]] = await Promise.all([
+      pool.query('SELECT id FROM employees WHERE id = ?', [employee_id]),
+      pool.query('SELECT * FROM mobile_devices WHERE device_uid = ? AND employee_id = ?', [device_uid, employee_id]),
+      pool.query('SELECT * FROM events WHERE id = ?', [event_id]),
+      pool.query('SELECT * FROM geofences WHERE event_id = ? AND is_active = 1', [event_id]),
+      pool.query(
+        `SELECT gp.geofence_id, gp.lat, gp.lng FROM geofence_points gp
+         JOIN geofences g ON g.id = gp.geofence_id
+         WHERE g.event_id = ? AND g.is_active = 1 ORDER BY gp.point_order`,
+        [event_id]
+      ),
+      pool.query(
+        'SELECT * FROM attendance WHERE employee_id = ? AND attendance_date = ? AND event_id = ?',
+        [employee_id, today, event_id]
+      )
+    ]);
+
     // Same stale-local-session guard as deviceController.registerDevice —
     // fail with a clear, specific message instead of an FK constraint crash
     // if this device's cached employee_id no longer exists.
-    const [employeeExists] = await pool.query('SELECT id FROM employees WHERE id = ?', [employee_id]);
     if (!employeeExists[0]) {
       return res.status(404).json({
         success: false,
@@ -592,10 +737,6 @@ async function submitAttendance(req, res, next) {
     }
 
     // 1. Device authorization
-    const [deviceRows] = await pool.query(
-      'SELECT * FROM mobile_devices WHERE device_uid = ? AND employee_id = ?',
-      [device_uid, employee_id]
-    );
     const device = deviceRows[0];
     if (!device) {
       await notifyAdmins({
@@ -623,17 +764,14 @@ async function submitAttendance(req, res, next) {
     }
 
     // 3. Event schedule
-    const [eventRows] = await pool.query('SELECT * FROM events WHERE id = ?', [event_id]);
     const event = eventRows[0];
     if (!event) return res.status(404).json({ success: false, message: 'Event not found.' });
 
-    const now = new Date();
     if (now < new Date(event.start_datetime) || now > new Date(event.end_datetime)) {
       return res.status(400).json({ success: false, message: 'Attendance is only allowed during the scheduled event window.' });
     }
 
     // 4. Geofence containment
-    const [geofenceRows] = await pool.query('SELECT * FROM geofences WHERE event_id = ? AND is_active = 1', [event_id]);
     const geofence = geofenceRows[0];
     if (!geofence) return res.status(404).json({ success: false, message: 'No active geofence configured for this event.' });
     if (geofenceRows.length > 1) {
@@ -646,14 +784,12 @@ async function submitAttendance(req, res, next) {
 
     let points = [];
     if (geofence.shape_type !== 'circle') {
-      const [pointRows] = await pool.query(
-        'SELECT lat, lng FROM geofence_points WHERE geofence_id = ? ORDER BY point_order',
-        [geofence.id]
-      );
       // mysql2 returns DECIMAL columns as strings by default — convert to Number
       // here (mirroring geofenceController.js's own conversion) so this array is
       // safe to hand to geofenceService regardless of that service's internals.
-      points = pointRows.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }));
+      points = eventPointRows
+        .filter((p) => Number(p.geofence_id) === Number(geofence.id))
+        .map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }));
     }
 
     const { inside, distanceMeters } = geofenceService.isInsideGeofence(
@@ -693,11 +829,6 @@ async function submitAttendance(req, res, next) {
     // accumulates into that day's total_duration_seconds. `attendance` stays
     // one row per employee/event/day (status, ratings, running total);
     // `attendance_sessions` holds one row per individual time-in/time-out.
-    const today = localDate(now);
-    const [existingRows] = await pool.query(
-      'SELECT * FROM attendance WHERE employee_id = ? AND attendance_date = ? AND event_id = ?',
-      [employee_id, today, event_id]
-    );
     const existing = existingRows[0];
 
     const lateGraceMs = config.attendance.lateGraceMinutes * 60 * 1000;
@@ -713,23 +844,44 @@ async function submitAttendance(req, res, next) {
         return res.status(409).json({ success: false, message: 'Attendance session already in progress for this event.' });
       }
 
+      // Still awaiting face verification: the employee is timed back in, but
+      // the clock stays stopped (no session) until they verify -- see
+      // pauseOpenSession / resumeSessionAfterVerification.
+      if (existing.requires_face_verification) {
+        await pool.query(
+          `UPDATE attendance SET time_out = NULL, outside_streak = 0, latitude = ?, longitude = ?, last_lat = ?, last_lng = ?, accuracy_meters = ? WHERE id = ?`,
+          [latitude, longitude, latitude, longitude, accuracy || null, existing.id]
+        );
+        realtime.broadcastNow('attendance-status');
+        res.status(200).json({
+          success: true,
+          message: 'Welcome back — complete face verification to resume your time.',
+          data: { id: existing.id, action: 're_time_in', status: existing.attendance_status, requiresFaceVerification: true }
+        });
+        afterResponse('re-entry time-in log', () => pool.query(
+          `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'time_in', ?)`,
+          [existing.id, employee_id, JSON.stringify({ latitude, longitude, re_entry: true, paused_for_face_verification: true })]
+        ));
+        return;
+      }
+
       // The employee left and has now re-entered the geofence while the
       // event is still running: open a brand-new session, and flip the
       // parent row back to "on-going" (time_out = NULL) without touching
       // its original time_in or accumulated total_duration_seconds.
-      const [sessionResult] = await pool.query(
-        `INSERT INTO attendance_sessions (attendance_id, employee_id, time_in, in_latitude, in_longitude)
-         VALUES (?, ?, NOW(), ?, ?)`,
-        [existing.id, employee_id, latitude, longitude]
-      );
-      await pool.query(
-        `UPDATE attendance SET time_out = NULL, outside_streak = 0, latitude = ?, longitude = ?, accuracy_meters = ? WHERE id = ?`,
-        [latitude, longitude, accuracy || null, existing.id]
-      );
-      await pool.query(
-        `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'time_in', ?)`,
-        [existing.id, employee_id, JSON.stringify({ latitude, longitude, session_id: sessionResult.insertId, re_entry: true })]
-      );
+      const [[sessionResult]] = await Promise.all([
+        pool.query(
+          `INSERT INTO attendance_sessions (attendance_id, employee_id, time_in, in_latitude, in_longitude)
+           VALUES (?, ?, NOW(), ?, ?)`,
+          [existing.id, employee_id, latitude, longitude]
+        ),
+        pool.query(
+          `UPDATE attendance SET time_out = NULL, outside_streak = 0, latitude = ?, longitude = ?, last_lat = ?, last_lng = ?, accuracy_meters = ? WHERE id = ?`,
+          [latitude, longitude, latitude, longitude, accuracy || null, existing.id]
+        )
+      ]);
+      // Admin attendance views show the re-entry right away.
+      realtime.broadcastNow('attendance-status');
 
       const anomalyDetectedAgain = await detectGeoAnomaly({
         attendanceId: existing.id,
@@ -739,18 +891,24 @@ async function submitAttendance(req, res, next) {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude)
       });
-      if (!anomalyDetectedAgain) {
-        await pool.query(
-          `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Time-In Recorded', ?, 'attendance_success')`,
-          [employee_id, `You re-entered "${event.title}" and were automatically timed in again.`]
-        );
-      }
 
-      return res.status(200).json({
+      res.status(200).json({
         success: true,
         message: 'Welcome back — time-in recorded again.',
         data: { id: existing.id, sessionId: sessionResult.insertId, action: 'time_in', status: existing.attendance_status, requiresFaceVerification: anomalyDetectedAgain }
       });
+      // The time-in itself is saved; the log and the notification don't hold up the reply.
+      afterResponse('re-entry time-in log', () => Promise.all([
+        pool.query(
+          `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'time_in', ?)`,
+          [existing.id, employee_id, JSON.stringify({ latitude, longitude, session_id: sessionResult.insertId, re_entry: true })]
+        ),
+        !anomalyDetectedAgain && pool.query(
+          `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Time-In Recorded', ?, 'attendance_success')`,
+          [employee_id, `You re-entered "${event.title}" and were automatically timed in again.`]
+        )
+      ]));
+      return;
     }
 
     // First time-in of the day for this event.
@@ -779,11 +937,8 @@ async function submitAttendance(req, res, next) {
        VALUES (?, ?, NOW(), ?, ?)`,
       [insertResult.insertId, employee_id, latitude, longitude]
     );
-
-    await pool.query(
-      `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'time_in', ?)`,
-      [insertResult.insertId, employee_id, JSON.stringify({ latitude, longitude, isLate })]
-    );
+    // Admin attendance views show the time-in right away.
+    realtime.broadcastNow('attendance-status');
 
     const anomalyDetected = await detectGeoAnomaly({
       attendanceId: insertResult.insertId,
@@ -794,15 +949,6 @@ async function submitAttendance(req, res, next) {
       longitude: parseFloat(longitude)
     });
 
-    if (!anomalyDetected) {
-      await pool.query(
-        `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Attendance Recorded', ?, 'attendance_success')`,
-        [employee_id, `You were timed in for "${event.title}"${isLate ? ' (late)' : ''}. Stay inside the event area for at least ${presenceRulePercent()}% of the event to be counted; your status shows as Ongoing until it ends.`]
-      );
-    }
-
-    await recalculateAllRatings(employee_id);
-
     res.status(201).json({
       success: true,
       message: anomalyDetected
@@ -810,6 +956,19 @@ async function submitAttendance(req, res, next) {
         : `Time-in recorded${isLate ? ' (late)' : ''}. Your status shows as Ongoing until the event ends.`,
       data: { id: insertResult.insertId, action: 'time_in', status: isLate ? 'Late' : 'Present', lateMinutes, requiresFaceVerification: anomalyDetected }
     });
+    // The time-in itself is saved; the log, notification and rating
+    // recalculation don't hold up the reply.
+    afterResponse('time-in follow-up', () => Promise.all([
+      pool.query(
+        `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'time_in', ?)`,
+        [insertResult.insertId, employee_id, JSON.stringify({ latitude, longitude, isLate })]
+      ),
+      !anomalyDetected && pool.query(
+        `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Attendance Recorded', ?, 'attendance_success')`,
+        [employee_id, `You were timed in for "${event.title}"${isLate ? ' (late)' : ''}. Stay inside the event area for at least ${presenceRulePercent()}% of the event to be counted; your status shows as Ongoing until it ends.`]
+      ),
+      recalculateAllRatings(employee_id)
+    ]));
   } catch (err) {
     next(err);
   }
@@ -892,6 +1051,8 @@ async function recordVerificationAttendance({ employeeId, eventId, method, ocrRe
         `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'anomaly_resolved', ?)`,
         [existing.id, employeeId, JSON.stringify({ method, adminId: adminId || null })]
       );
+      await resumeSessionAfterVerification(existing.id, null, null);
+      realtime.notifyEmployee(employeeId, 'attendance');
       return {
         success: true,
         status: 200,
@@ -942,6 +1103,7 @@ async function recordVerificationAttendance({ employeeId, eventId, method, ocrRe
   );
 
   await recalculateAllRatings(employeeId);
+  realtime.notifyEmployee(employeeId, 'attendance');
 
   return {
     success: true,
@@ -954,8 +1116,8 @@ async function recordVerificationAttendance({ employeeId, eventId, method, ocrRe
 }
 
 // POST /api/attendance/:id/face-verify  (employee JWT required)
-// Body (multipart): selfie (file), latitude, longitude, liveness_verified,
-// liveness_actions
+// Body (multipart): selfie (file), video (optional mp4/mov liveness clip),
+// latitude, longitude, liveness_verified, liveness_actions
 //
 // This is the automatic, on-device self-verification an employee's app
 // triggers the moment a geo-anomaly flags their attendance (see
@@ -980,9 +1142,12 @@ async function faceVerify(req, res, next) {
     const [rows] = await pool.query('SELECT * FROM attendance WHERE id = ? AND employee_id = ?', [id, req.employee.id]);
     const record = rows[0];
     if (!record) return res.status(404).json({ success: false, message: 'Attendance record not found.' });
-    if (!req.file) return res.status(400).json({ success: false, message: 'A selfie photo is required.' });
+    const selfieFile = req.files?.selfie?.[0];
+    const videoFile = req.files?.video?.[0];
+    if (!selfieFile) return res.status(400).json({ success: false, message: 'A selfie photo is required.' });
 
-    const selfiePath = `/uploads/selfies/${req.file.filename}`;
+    const selfiePath = `/uploads/selfies/${selfieFile.filename}`;
+    const videoPath = videoFile ? `/uploads/face_videos/${videoFile.filename}` : null;
     const livenessActions = typeof req.body.liveness_actions === 'string' ? req.body.liveness_actions.slice(0, 120) : null;
     // Every attempt's photo is kept on record (face_records, source
     // 'mobile_anomaly') and shown with the admin's Face Verification
@@ -1024,7 +1189,7 @@ async function faceVerify(req, res, next) {
 
     let embedding;
     try {
-      embedding = await faceService.getEmbedding(req.file.path);
+      embedding = await faceService.getEmbedding(selfieFile.path);
     } catch (err) {
       await recordAttempt('no_face_detected');
       return res.status(502).json({
@@ -1050,7 +1215,7 @@ async function faceVerify(req, res, next) {
     if (!match) {
       await pool.query(
         `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'face_verify_failed', ?)`,
-        [id, req.employee.id, JSON.stringify({ latitude, longitude, reason: 'no_match', selfie_path: selfiePath })]
+        [id, req.employee.id, JSON.stringify({ latitude, longitude, reason: 'no_match', selfie_path: selfiePath, video_path: videoPath })]
       );
       await recordAttempt('no_match');
       return res.status(401).json({
@@ -1085,10 +1250,21 @@ async function faceVerify(req, res, next) {
 
     await pool.query(
       `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'face_verified', ?)`,
-      [id, req.employee.id, JSON.stringify({ latitude, longitude, similarity: match.similarity, liveness_actions: livenessActions, selfie_path: selfiePath })]
+      [id, req.employee.id, JSON.stringify({ latitude, longitude, similarity: match.similarity, liveness_actions: livenessActions, selfie_path: selfiePath, video_path: videoPath })]
     );
 
-    res.json({ success: true, result: 'matched', message: 'Face verification submitted. Your attendance is now confirmed.' });
+    // The clock was stopped when this record was flagged -- start it again.
+    const resumed = await resumeSessionAfterVerification(id, latitude, longitude);
+    realtime.notifyEmployee(req.employee.id, 'attendance');
+
+    res.json({
+      success: true,
+      result: 'matched',
+      resumed,
+      message: resumed
+        ? 'Face verified. Your attendance is confirmed and your time is being recorded again.'
+        : 'Face verification submitted. Your attendance is now confirmed.'
+    });
   } catch (err) {
     next(err);
   }
@@ -1109,6 +1285,72 @@ async function getAnomalies(req, res, next) {
       [resolved === '1' ? 1 : 0]
     );
     res.json({ success: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /api/attendance/anomaly-rechecks  (admin — Verification page countdown)
+// Records that passed face verification less than anomalyRecheckSeconds ago
+// whose phone is STILL within anomalyDistanceMeters of another employee's
+// phone for the same event (the same distance test detectGeoAnomaly runs).
+// Those will be flagged again once the recheck window runs out, so the admin
+// page shows a countdown for each. seconds_left is computed in SQL time, the
+// client just ticks it down.
+async function getAnomalyRechecks(req, res, next) {
+  try {
+    const recheckSeconds = config.attendance.anomalyRecheckSeconds;
+    const windowSeconds = config.attendance.anomalyWindowSeconds;
+    const maxMeters = config.attendance.anomalyDistanceMeters;
+    const [rows] = await pool.query(
+      `SELECT x.*, (x.last_ping_at IS NOT NULL AND (x.latest_time_in IS NULL OR x.last_ping_at >= x.latest_time_in)) AS ping_is_newest,
+              (x.last_ping_at >= NOW() - INTERVAL ? SECOND) AS ping_fresh,
+              (x.latest_time_in >= NOW() - INTERVAL ? SECOND) AS time_in_fresh
+       FROM (
+         SELECT a.id, a.employee_id, a.event_id, a.requires_face_verification,
+                TIMESTAMPDIFF(SECOND, a.face_verified_at, NOW()) AS verified_ago_s,
+                a.last_lat, a.last_lng, a.latitude, a.longitude, a.last_ping_at,
+                GREATEST(a.time_in, COALESCE((SELECT MAX(s.time_in) FROM attendance_sessions s WHERE s.attendance_id = a.id), a.time_in)) AS latest_time_in,
+                e.full_name, e.employee_code, ev.title AS event_title
+         FROM attendance a
+         JOIN employees e ON a.employee_id = e.id
+         LEFT JOIN events ev ON a.event_id = ev.id
+         WHERE a.time_out IS NULL
+           AND a.event_id IN (
+             SELECT event_id FROM attendance
+             WHERE time_out IS NULL AND face_verified_at >= NOW() - INTERVAL ? SECOND
+           )
+       ) x`,
+      [windowSeconds, windowSeconds, recheckSeconds]
+    );
+    // Each phone's newest known position, only if it's fresh enough to count.
+    const pos = (r) => {
+      if (Number(r.ping_is_newest)) {
+        return Number(r.ping_fresh) && r.last_lat != null ? { lat: Number(r.last_lat), lng: Number(r.last_lng) } : null;
+      }
+      return Number(r.time_in_fresh) && r.latitude != null ? { lat: Number(r.latitude), lng: Number(r.longitude) } : null;
+    };
+    const data = [];
+    for (const r of rows) {
+      if (Number(r.requires_face_verification)) continue;
+      if (r.verified_ago_s == null || Number(r.verified_ago_s) >= recheckSeconds) continue;
+      const me = pos(r);
+      if (!me) continue;
+      const near = rows.find((o) => o.id !== r.id && o.event_id === r.event_id && o.employee_id !== r.employee_id &&
+        (() => { const p = pos(o); return p && geofenceService.distanceMeters(me.lat, me.lng, p.lat, p.lng) <= maxMeters; })());
+      if (!near) continue;
+      data.push({
+        attendance_id: r.id,
+        employee_id: r.employee_id,
+        full_name: r.full_name,
+        employee_code: r.employee_code,
+        event_title: r.event_title,
+        near_full_name: near.full_name,
+        near_employee_code: near.employee_code,
+        seconds_left: Math.max(0, recheckSeconds - Number(r.verified_ago_s))
+      });
+    }
+    res.json({ success: true, data, recheckSeconds, distanceMeters: maxMeters });
   } catch (err) {
     next(err);
   }
@@ -1192,6 +1434,7 @@ async function updateAttendance(req, res, next) {
 
     await recalculateAllRatings(rows[0].employee_id);
     await logAction({ adminId: req.admin.id, action: 'update', module: 'attendance', details: { id, attendance_status }, ip: req.ip });
+    realtime.notifyEmployee(rows[0].employee_id, 'attendance');
 
     res.json({ success: true, message: 'Attendance record updated and ratings recalculated.' });
   } catch (err) {
@@ -1208,6 +1451,7 @@ async function deleteAttendance(req, res, next) {
     await pool.query('DELETE FROM attendance WHERE id = ?', [req.params.id]);
     await recalculateAllRatings(rows[0].employee_id);
     await logAction({ adminId: req.admin.id, action: 'delete', module: 'attendance', details: { id: req.params.id }, ip: req.ip });
+    realtime.notifyEmployee(rows[0].employee_id, 'attendance');
 
     res.json({ success: true, message: 'Attendance record deleted and ratings recalculated.' });
   } catch (err) {
@@ -1220,9 +1464,10 @@ async function deleteAttendance(req, res, next) {
 // The mobile app calls this periodically (see config.attendance.heartbeatMinIntervalSeconds)
 // while an attendance session is open (time_in set, time_out not yet set).
 // When the employee's location falls outside the event's geofence for
-// config.attendance.autoEndOutsideStreakThreshold consecutive pings in a row,
-// the server automatically closes the session (sets time_out + work_hours) —
-// a single stray/inaccurate GPS reading is not enough to end it early.
+// config.attendance.autoEndOutsideStreakThreshold consecutive pings in a row
+// (1 by default: the first outside reading), the server automatically closes
+// the session (sets time_out + work_hours). The app sends that reading the
+// instant it's taken, so the time-out lands in real time.
 //
 // `observed_at` (optional, ISO datetime) is when the mobile app actually took
 // this GPS reading, which can be well before the ping reaches the server: GPS
@@ -1256,6 +1501,148 @@ function resolveHeartbeatEndTime(observedAtRaw, sessionOpenedAt) {
   return observed;
 }
 
+const TIME_OUT_MESSAGES = {
+  location_off: 'Your Location was turned off, so your session was automatically timed out. Turn Location back on to continue.',
+  left_geofence: 'You left the event area, so your session was automatically timed out.',
+  no_signal: 'Your phone stopped reporting its location (Location turned off, or the app stopped), so your session was automatically timed out.'
+};
+
+// Times out an attendance row's open session at `endTime`: closes the
+// session, folds its duration into the running total and sets time_out. A
+// later re-entry (see submitAttendance) opens a new session and keeps adding
+// to this same total rather than overwriting it. Used by heartbeat() and by
+// the closeSilentSessions sweep. Admin views are told at once; the log and
+// the employee's notification are written afterwards, without being awaited.
+async function autoTimeOut({ record, openSession, endTime, latitude, longitude, outsideStreak, reason }) {
+  const id = record.id;
+  // The closed session's own duration_seconds is added to the total in the
+  // same UPDATE (countedSessionId) instead of being read back first.
+  let countedSessionId = null;
+  let fallbackSeconds = 0;
+  if (openSession) {
+    const [closed] = await pool.query(
+      `UPDATE attendance_sessions
+       SET time_out = ?, duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, time_in, ?)),
+           out_latitude = ?, out_longitude = ?, auto_ended = 1
+       WHERE id = ? AND time_out IS NULL`,
+      [endTime, endTime, latitude, longitude, openSession.id]
+    );
+    // 0 rows: a concurrent pauseOpenSession already closed this session
+    // and added its time to the total -- don't count it twice.
+    if (closed.affectedRows !== 0) countedSessionId = openSession.id;
+  } else {
+    // No open session while awaiting face verification is expected (the
+    // clock is paused -- see pauseOpenSession), so nothing to add then.
+    // Re-read the flag: another employee's ping may have flagged this
+    // record (and closed its session) after `record` was loaded.
+    // Otherwise it shouldn't normally happen (a session is opened every
+    // time time_out is cleared) — fall back to the parent row's own
+    // time_in so a duration is still recorded instead of silently dropping it.
+    const [[fresh]] = await pool.query('SELECT requires_face_verification FROM attendance WHERE id = ?', [id]);
+    if (!fresh?.requires_face_verification) {
+      fallbackSeconds = Math.max(0, Math.round((endTime.getTime() - new Date(record.time_in).getTime()) / 1000));
+    }
+  }
+
+  // Added in SQL rather than overwritten from `record`, so a concurrent
+  // pauseOpenSession's addition to the total isn't lost.
+  await pool.query(
+    `UPDATE attendance SET time_out = ?,
+       total_duration_seconds = COALESCE(total_duration_seconds, 0) + ?
+         + COALESCE((SELECT duration_seconds FROM attendance_sessions WHERE id = ?), 0),
+       work_hours = ROUND(total_duration_seconds / 3600, 2), last_lat = ?, last_lng = ?, last_ping_at = NOW(),
+       outside_streak = ?, auto_ended = 1 WHERE id = ?`,
+    [endTime, fallbackSeconds, countedSessionId, latitude, longitude, outsideStreak, id]
+  );
+  // Admin attendance views update now, not after the log/notification
+  // writes below or the usual coalescing delay.
+  realtime.broadcastNow('attendance-status');
+  realtime.notifyEmployee(record.employee_id, 'attendance');
+
+  afterResponse('time-out follow-up', async () => {
+    const [[totals]] = await pool.query(
+      `SELECT a.total_duration_seconds, s.duration_seconds AS session_seconds
+       FROM attendance a LEFT JOIN attendance_sessions s ON s.id = ?
+       WHERE a.id = ?`,
+      [countedSessionId, id]
+    );
+    const totalDurationSeconds = Number(totals?.total_duration_seconds) || 0;
+    const sessionDurationSeconds = countedSessionId ? Number(totals?.session_seconds) || 0 : fallbackSeconds;
+    const workHours = (totalDurationSeconds / 3600).toFixed(2);
+    await Promise.all([
+      pool.query(
+        `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'auto_time_out', ?)`,
+        [id, record.employee_id, JSON.stringify({ latitude, longitude, reason, sessionDurationSeconds, totalDurationSeconds, observedAt: endTime.toISOString() })]
+      ),
+      pool.query(
+        `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Time-Out Recorded', ?, 'attendance_auto_end')`,
+        [record.employee_id, `${TIME_OUT_MESSAGES[reason] || TIME_OUT_MESSAGES.left_geofence} Total time so far: ${workHours} hour(s).`]
+      )
+    ]);
+  });
+}
+
+// Times out every open session whose phone has gone silent: no heartbeat (or
+// time-in) for config.attendance.silentSessionSeconds. The app keeps pinging
+// every ~15 s while a session is open -- in the background too, even with
+// the app closed (see mobile/src/tasks/backgroundAttendance.js) -- so silence
+// means its Location was turned off, or the app or phone stopped, with no
+// screen open to report it. The time-out is set at the last moment the phone
+// was heard from, not now. Run on a timer from server.js.
+//
+// Right after this server starts, phones haven't had a chance to reach it
+// yet (it may have been down a while), so nothing is closed until it has
+// been up for one full silence window.
+const serverStartedAt = Date.now();
+let sweeping = false;
+async function closeSilentSessions() {
+  const silentSeconds = config.attendance.silentSessionSeconds;
+  if (!(silentSeconds > 0) || sweeping) return;
+  if (Date.now() - serverStartedAt < silentSeconds * 1000) return;
+  sweeping = true;
+  try {
+    // Ages are compared in SQL, against the database's own clock, like
+    // detectGeoAnomaly does.
+    const [rows] = await pool.query(
+      `SELECT x.* FROM (
+         SELECT a.*,
+                GREATEST(COALESCE(a.last_ping_at, a.time_in),
+                         COALESCE((SELECT MAX(s.time_in) FROM attendance_sessions s WHERE s.attendance_id = a.id), a.time_in)) AS last_heard_at
+         FROM attendance a
+         JOIN events e ON e.id = a.event_id
+         WHERE a.time_out IS NULL AND a.verification_method = 'mobile_gps' AND e.end_datetime > NOW()
+       ) x
+       WHERE x.last_heard_at < NOW() - INTERVAL ? SECOND`,
+      [silentSeconds]
+    );
+    for (const record of rows) {
+      const [[[still]], [[openSession]]] = await Promise.all([
+        pool.query('SELECT time_out, last_ping_at FROM attendance WHERE id = ?', [record.id]),
+        pool.query(
+          'SELECT * FROM attendance_sessions WHERE attendance_id = ? AND time_out IS NULL ORDER BY time_in DESC LIMIT 1',
+          [record.id]
+        )
+      ]);
+      // A ping (or another time-out) may have landed since the scan.
+      if (!still || still.time_out || still.last_ping_at !== record.last_ping_at) continue;
+      await autoTimeOut({
+        record,
+        openSession,
+        endTime: new Date(record.last_heard_at),
+        latitude: record.last_lat ?? record.latitude,
+        longitude: record.last_lng ?? record.longitude,
+        outsideStreak: record.outside_streak || 0,
+        reason: 'no_signal'
+      });
+      console.log(`[attendance] Timed out attendance #${record.id}: no signal from the phone since ${record.last_heard_at}.`);
+    }
+  } catch (err) {
+    console.error('[attendance] Silent-session sweep failed:', err.message);
+  } finally {
+    sweeping = false;
+  }
+}
+
 async function heartbeat(req, res, next) {
   try {
     const { id } = req.params;
@@ -1287,31 +1674,29 @@ async function heartbeat(req, res, next) {
     // the outside-streak logic below would never catch it and the session
     // (and its duration) would keep running forever. Close it immediately,
     // capped at the event's own end time.
-    const [eventRows] = await pool.query('SELECT end_datetime FROM events WHERE id = ?', [record.event_id]);
+    // Fetched together -- every round trip here delays the time-out.
+    const [[eventRows], [geofenceRows], [pointRows], [openSessionRows]] = await Promise.all([
+      pool.query('SELECT end_datetime FROM events WHERE id = ?', [record.event_id]),
+      pool.query('SELECT * FROM geofences WHERE id = ?', [record.geofence_id]),
+      pool.query('SELECT lat, lng FROM geofence_points WHERE geofence_id = ? ORDER BY point_order', [record.geofence_id]),
+      pool.query(
+        'SELECT * FROM attendance_sessions WHERE attendance_id = ? AND time_out IS NULL ORDER BY time_in DESC LIMIT 1',
+        [id]
+      )
+    ]);
     if (eventRows[0] && new Date(eventRows[0].end_datetime) <= new Date()) {
       await settleEndedEvents();
       return res.json({ success: true, message: 'Event has ended.', data: { ended: true } });
     }
 
-    // Debounce: ignore pings that arrive faster than the configured minimum interval.
-    if (record.last_ping_at && !locationOff) {
-      const secondsSinceLast = (Date.now() - new Date(record.last_ping_at).getTime()) / 1000;
-      if (secondsSinceLast < config.attendance.heartbeatMinIntervalSeconds) {
-        return res.json({ success: true, message: 'Ping ignored (too soon).', data: { ended: false } });
-      }
-    }
-
-    const [geofenceRows] = await pool.query('SELECT * FROM geofences WHERE id = ?', [record.geofence_id]);
     const geofence = geofenceRows[0];
     let inside = true;
     if (locationOff) {
       inside = false;
     } else if (geofence) {
-      let points = [];
-      if (geofence.shape_type !== 'circle') {
-        const [pointRows] = await pool.query('SELECT lat, lng FROM geofence_points WHERE geofence_id = ? ORDER BY point_order', [geofence.id]);
-        points = pointRows.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }));
-      }
+      const points = geofence.shape_type !== 'circle'
+        ? pointRows.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }))
+        : [];
       ({ inside } = geofenceService.isInsideGeofence(parseFloat(latitude), parseFloat(longitude), { ...geofence, points }, edgeTolerance(accuracy)));
     }
     // A mock (Fake GPS) reading proves nothing about where the phone is, so
@@ -1319,56 +1704,41 @@ async function heartbeat(req, res, next) {
     // keep a session open.
     if (isMockedLocation(mocked)) inside = false;
 
+    // Debounce: an inside ping that arrives faster than the configured
+    // minimum interval only updates the live position. An OUTSIDE ping is
+    // never debounced -- leaving the polygon must time the employee out the
+    // moment the app reports it, not on some later ping.
+    if (inside && record.last_ping_at && !locationOff) {
+      const secondsSinceLast = (Date.now() - new Date(record.last_ping_at).getTime()) / 1000;
+      if (secondsSinceLast < config.attendance.heartbeatMinIntervalSeconds) {
+        // Too soon to run the full check again, but the app also sends
+        // these the moment the employee moves, so the admin's attendance view
+        // follows their live position. last_ping_at stays put so the
+        // debounce timing is unchanged.
+        if (!observed_at && latitude != null && longitude != null) {
+          await pool.query('UPDATE attendance SET last_lat = ?, last_lng = ? WHERE id = ?', [latitude, longitude, id]);
+        }
+        return res.json({ success: true, message: 'Ping ignored (too soon).', data: { ended: false, inside } });
+      }
+    }
+
     const newStreak = inside ? 0 : (record.outside_streak || 0) + 1;
     const shouldAutoEnd = locationOff || newStreak >= config.attendance.autoEndOutsideStreakThreshold;
 
     if (shouldAutoEnd) {
-      // Close whichever session is still open for this attendance row, and
-      // fold its duration into the running total — a later re-entry (see
-      // submitAttendance) opens a new session and keeps adding to this same
-      // total rather than overwriting it.
-      const [openSessionRows] = await pool.query(
-        'SELECT * FROM attendance_sessions WHERE attendance_id = ? AND time_out IS NULL ORDER BY time_in DESC LIMIT 1',
-        [id]
-      );
-      const openSession = openSessionRows[0];
-      const endTime = resolveHeartbeatEndTime(observed_at, openSession?.time_in || record.time_in);
-
-      let sessionDurationSeconds = 0;
-      if (openSession) {
-        await pool.query(
-          `UPDATE attendance_sessions
-           SET time_out = ?, duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, time_in, ?)),
-               out_latitude = ?, out_longitude = ?, auto_ended = 1
-           WHERE id = ?`,
-          [endTime, endTime, latitude, longitude, openSession.id]
-        );
-        const [[updatedSession]] = await pool.query('SELECT duration_seconds FROM attendance_sessions WHERE id = ?', [openSession.id]);
-        sessionDurationSeconds = updatedSession ? updatedSession.duration_seconds : 0;
-      } else {
-        // Shouldn't normally happen (a session is opened every time time_out
-        // is cleared) — fall back to the parent row's own time_in so a
-        // duration is still recorded instead of silently dropping it.
-        sessionDurationSeconds = Math.max(0, Math.round((endTime.getTime() - new Date(record.time_in).getTime()) / 1000));
-      }
-
-      const totalDurationSeconds = (record.total_duration_seconds || 0) + sessionDurationSeconds;
-      const workHours = (totalDurationSeconds / 3600).toFixed(2);
-
-      await pool.query(
-        `UPDATE attendance SET time_out = ?, total_duration_seconds = ?, work_hours = ?, last_lat = ?, last_lng = ?, last_ping_at = NOW(), outside_streak = ?, auto_ended = 1 WHERE id = ?`,
-        [endTime, totalDurationSeconds, workHours, latitude, longitude, newStreak, id]
-      );
-      await pool.query(
-        `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'auto_time_out', ?)`,
-        [id, req.employee.id, JSON.stringify({ latitude, longitude, reason: locationOff ? 'location_off' : 'left_geofence', sessionDurationSeconds, totalDurationSeconds, observedAt: endTime.toISOString() })]
-      );
-      await pool.query(
-        `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Time-Out Recorded', ?, 'attendance_auto_end')`,
-        [req.employee.id, locationOff
-          ? `Your Location was turned off, so your session was automatically timed out. Turn Location back on to continue. Total time so far: ${workHours} hour(s).`
-          : `You left the event area, so your session was automatically timed out. Total time so far: ${workHours} hour(s).`]
-      );
+      const endTime = resolveHeartbeatEndTime(observed_at, openSessionRows[0]?.time_in || record.time_in);
+      await autoTimeOut({
+        record,
+        openSession: openSessionRows[0],
+        endTime,
+        latitude,
+        longitude,
+        outsideStreak: newStreak,
+        reason: locationOff ? 'location_off' : 'left_geofence'
+      });
+      // The time-out is saved: the app gets its answer before the
+      // log/notification writes autoTimeOut leaves running.
+      return res.json({ success: true, data: { ended: true, inside, outsideStreak: newStreak, requiresFaceVerification: !!record.requires_face_verification } });
     } else {
       await pool.query(
         `UPDATE attendance SET last_lat = ?, last_lng = ?, last_ping_at = NOW(), outside_streak = ? WHERE id = ?`,
@@ -1410,10 +1780,12 @@ module.exports = {
   getSessionsAdmin,
   faceVerify,
   getAnomalies,
+  getAnomalyRechecks,
   resolveAnomaly,
   updateAttendance,
   deleteAttendance,
   heartbeat,
+  closeSilentSessions,
   recordVerificationAttendance,
   // Used by reportController/ratingController to settle ended events'
   // attendance before counting it, and to show Ongoing for running events.

@@ -52,7 +52,8 @@ const uploadFace = multer({
 // fields ('image' + optional 'video') routed to two different folders in a
 // single multipart request — hence a dedicated storage function keyed by
 // fieldname rather than reusing makeStorage() above.
-const REGISTRATION_FOLDERS = { image: 'faces', video: 'face_videos' };
+// Also used by the attendance face re-verification upload ('selfie' + 'video').
+const REGISTRATION_FOLDERS = { image: 'faces', selfie: 'selfies', video: 'face_videos' };
 Object.values(REGISTRATION_FOLDERS).forEach((sub) => {
   const dest = path.join(__dirname, '..', 'uploads', sub);
   if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });

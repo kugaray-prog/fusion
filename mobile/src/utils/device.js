@@ -24,6 +24,16 @@ export function getDeviceInfo() {
     uid: getDeviceUid(),
     model: Device.modelName || 'Unknown',
     brand: Device.brand || 'Unknown',
-    os: `${Device.osName || ''} ${Device.osVersion || ''}`.trim() || 'Unknown'
+    os: `${osName()} ${Device.osVersion || ''}`.trim() || 'Unknown'
   };
+}
+
+// On Android, Device.osName is Build.VERSION.BASE_OS when set, and some
+// vendors (e.g. Xiaomi/HyperOS) fill that with a whole build fingerprint like
+// "Xiaomi/garnet_global/garnet:14/UKQ1.../V816...:user/release-keys" -- too
+// long to store or show. Fall back to a plain "Android" in that case.
+function osName() {
+  const name = (Device.osName || '').trim();
+  if (/[/:]/.test(name)) return 'Android';
+  return name;
 }

@@ -45,4 +45,16 @@ async function getBlockedStatus(deviceUid, employeeId = null) {
   return isBlockedStatus(rows[0].status) ? rows[0].status : null;
 }
 
-module.exports = { BLOCKED_STATUSES, isBlockedStatus, blockedMessage, sendDeviceBlocked, getBlockedStatus };
+// Fits client-reported device details to the mobile_devices column sizes.
+// Some Android builds (e.g. Xiaomi/HyperOS) report a full build fingerprint
+// as the OS name, which overflowed os VARCHAR(60) and failed registration
+// with a raw "Data too long" error; older app builds still send it.
+function cleanDeviceInfo({ model, brand, os }) {
+  const clip = (v, max) => {
+    const s = v == null ? '' : String(v).trim();
+    return s ? s.slice(0, max) : null;
+  };
+  return { model: clip(model, 120), brand: clip(brand, 120), os: clip(os, 60) };
+}
+
+module.exports = { BLOCKED_STATUSES, isBlockedStatus, blockedMessage, sendDeviceBlocked, getBlockedStatus, cleanDeviceInfo };

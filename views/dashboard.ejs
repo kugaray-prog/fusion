@@ -292,6 +292,12 @@
         #face-liveness-banner { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; padding: 18px 22px 22px; text-align: center; background: #fff; border-top-left-radius: 22px; border-top-right-radius: 22px; box-shadow: 0 -10px 30px rgba(112,144,176,0.18); }
         #face-liveness-banner::before { content: ''; display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--border); margin: 0 auto 14px; }
         #face-liveness-instruction { font-size: 0.95rem; font-weight: 800; letter-spacing: 0.01em; margin-bottom: 12px; color: var(--text-main); }
+        /* 3-2-1 countdown shown inside the guide ring before the check starts */
+        #face-countdown { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 4; font-size: 5.5rem; font-weight: 800; line-height: 1; color: #fff; text-shadow: 0 4px 24px rgba(0,0,0,0.55); pointer-events: none; }
+        #face-countdown.tick { animation: faceCountTick 0.9s ease-out; }
+        @keyframes faceCountTick { 0% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; } 25% { opacity: 1; } 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+        @media (prefers-reduced-motion: reduce) { #face-countdown.tick { animation: none; } }
+        #face-liveness-timer { margin-top: -4px; font-size: 0.75rem; font-weight: 700; color: var(--text-muted); font-variant-numeric: tabular-nums; }
         .liveness-dots { display: flex; justify-content: center; gap: 8px; }
         .liveness-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); transition: 0.3s; }
         .liveness-dot.done { background: var(--success); }
@@ -1732,6 +1738,10 @@
                      still needs an admin to confirm identity via OCR or Face
                      Verification below -- see G_App.verification.loadAlerts(). -->
                 <div id="verification-alerts" style="margin-bottom: 20px;"></div>
+                <!-- Verified records still within the anomaly distance of another
+                     phone: countdown to the next anomaly recheck -- see
+                     G_App.verification.loadRechecks(). -->
+                <div id="verification-rechecks" style="margin-bottom: 20px;"></div>
 
                 <div class="ins-toggle vf-tabs" role="tablist" aria-label="Verification method">
                     <button type="button" role="tab" id="verification-tab-ocr" class="active" aria-selected="true" aria-controls="ocr-panel" onclick="G_App.verification.switchTab('ocr')"><i data-lucide="scan-text"></i> ID Card Scan (OCR)</button>
@@ -1829,6 +1839,8 @@
                             <div id="face-guide-frame" style="position:absolute;top:50%;left:50%;width:220px;height:290px;margin:-145px 0 0 -110px;border:3px solid rgba(255,255,255,0.55);border-radius:50%;pointer-events:none;z-index:3;">
                                 <div id="face-scan-line" style="display:none;position:absolute;left:0;right:0;top:0;height:2px;background:var(--success);box-shadow:0 0 15px var(--success);animation:scanning 2s linear infinite;"></div>
                             </div>
+                            <!-- 3-2-1 countdown before the liveness check begins -->
+                            <div id="face-countdown" class="hidden" aria-live="assertive"></div>
                             <!-- Idle hint labels (shown before "Start" is tapped) -->
                             <div id="face-idle-label" style="position:absolute;bottom:118px;left:0;right:0;text-align:center;color:#fff;font-size:13px;font-weight:700;text-shadow:0 1px 8px rgba(0,0,0,0.55);pointer-events:none;z-index:4;">Center your face within the frame</div>
                             <div id="face-idle-sublabel" style="position:absolute;bottom:96px;left:0;right:0;text-align:center;color:rgba(255,255,255,0.75);font-size:11px;pointer-events:none;z-index:4;">Hold steady &nbsp;&bull;&nbsp; Ensure good lighting</div>
@@ -1839,6 +1851,7 @@
                             <!-- Liveness "hold still" banner -- a light bottom sheet, GCash-style -->
                             <div id="face-liveness-banner" class="hidden">
                                 <div id="face-liveness-instruction">Get ready…</div>
+                                <div id="face-liveness-timer" class="hidden" aria-live="polite"></div>
                             </div>
                             <!-- Idle action sheet -- houses the Start button; swaps places with the banner above once verification begins -->
                             <div id="face-idle-sheet" class="vf-sheet">
@@ -1924,9 +1937,22 @@
                             <h3 style="margin-bottom: 20px; font-weight: 800; font-size: 1.2rem;">Certificate of Attendance</h3>
                             <div style="display: flex; flex-direction: column; gap: 15px;">
                                 <div>
+                                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">Recipients</label>
+                                    <select id="cert-scope" class="geo-input" onchange="G_App.settings.onCertScopeChange()">
+                                        <option value="employee">One employee</option>
+                                        <option value="department">All employees in a department</option>
+                                        <option value="all">All employees</option>
+                                    </select>
+                                </div>
+                                <div id="cert-employee-wrap">
                                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">Select Employee</label>
                                     <select id="cert-employee-select" class="geo-input"></select>
                                 </div>
+                                <div id="cert-department-wrap" class="hidden">
+                                    <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">Select Department</label>
+                                    <select id="cert-department-select" class="geo-input" onchange="G_App.settings.onCertScopeChange()"></select>
+                                </div>
+                                <p id="cert-scope-count" class="hidden" style="margin: -5px 0 0; font-size: 0.8rem; color: var(--text-muted);"></p>
                                 <div>
                                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">Event/Seminar Title</label>
                                     <input type="text" id="cert-event" class="geo-input" placeholder="e.g. Annual Strategic Planning">
@@ -1996,7 +2022,7 @@
                                 <h3 style="font-weight: 800; font-size: 1.2rem;">Admin Accounts</h3>
                                 <button class="btn-primary" style="padding: 10px 16px; font-size: 0.8rem;" onclick="G_App.adminAccounts.openModal()"><i data-lucide="user-plus" size="14"></i> New Admin</button>
                             </div>
-                            <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 15px;">Super Admin has full access. Admin is restricted to Verification (OCR & Face) only.</p>
+                            <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 15px;">HRMDU Admin has full access. Staff Admin is restricted to Verification (OCR & Face) only.</p>
                             <div id="admin-accounts-list" style="display:flex; flex-direction:column; gap:10px;"></div>
                         </div>
                     </div>
@@ -2037,8 +2063,8 @@
                     <p class="aa-hint">No password needed. The new admin signs in with their institutional Google account after the email is verified.</p>
                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Role</label>
                     <select id="aa-role" class="geo-input">
-                        <option value="admin">Admin — Verification only</option>
-                        <option value="super_admin">Super Admin — full access</option>
+                        <option value="admin">Staff Admin — Verification Only</option>
+                        <option value="super_admin">HRMDU Admin — Full Access</option>
                     </select>
                     <div style="display: flex; gap: 15px; margin-top: 10px;">
                         <button class="btn-primary" style="background: var(--border); color: var(--text-main); flex: 1;" onclick="G_App.adminAccounts.closeModal()">Cancel</button>

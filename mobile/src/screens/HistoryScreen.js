@@ -9,6 +9,7 @@ import FadeIn from '../components/FadeIn';
 import AppHeader from '../components/AppHeader';
 import Skeleton from '../components/Skeleton';
 import { formatDuration, liveDurationSeconds } from '../utils/duration';
+import { useLiveUpdates } from '../api/realtime';
 import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 const FILTERS = [
@@ -36,7 +37,8 @@ export default function HistoryScreen({ navigation }) {
       const { data } = await api.get('/attendance/my-history');
       setRecords(data.data || []);
     } catch (err) {
-      setRecords([]);
+      // Keep what's on screen: this also runs on live updates in the
+      // background, where a brief network blip shouldn't blank the list.
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -44,6 +46,9 @@ export default function HistoryScreen({ navigation }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  // An admin edited this employee's attendance, or an event ended and its
+  // final status was settled.
+  useLiveUpdates(['attendance'], load);
 
   // Ticks any still-open ("on-going") record's Duration cell forward once a
   // second, since its total keeps accumulating in real time until the

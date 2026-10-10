@@ -194,6 +194,10 @@ app.set(
 // API Routes
 // ------------------------------------------------------------
 
+// Tells open admin dashboards (over the /ws WebSocket) when data changes,
+// so they refresh right away -- see services/realtime.js.
+app.use('/api', require('./services/realtime').broadcastMutations);
+
 // Admin authentication
 app.use(
   '/api/auth',
@@ -411,7 +415,8 @@ app.use(errorHandler);
 // logged and the server starts anyway.
 require('./services/schemaUpgrades').run()
   .catch((err) => console.error('Schema upgrade failed:', err.message))
-  .finally(() => app.listen(PORT, () => {
+  .finally(() => {
+  const server = app.listen(PORT, () => {
   console.log('');
   console.log('==========================================');
   console.log('       GeoAttend Server');
@@ -433,4 +438,14 @@ require('./services/schemaUpgrades').run()
   // Keep uploads/ filled with every captured photo (face verification, OCR,
   // registrations) from the shared database -- see services/uploadStore.js.
   require('./services/uploadStore').startDiskSync();
-  }));
+
+  // Times out open attendance sessions whose phone has gone silent
+  // (Location turned off or the app stopped while closed) -- see
+  // attendanceController.closeSilentSessions.
+  const { closeSilentSessions } = require('./controllers/attendanceController');
+  setInterval(closeSilentSessions, 15000);
+  });
+
+  // Live dashboard updates (WebSocket at /ws) on the same port.
+  require('./services/realtime').attach(server);
+  });

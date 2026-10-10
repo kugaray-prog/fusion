@@ -12,6 +12,7 @@ import FadeIn from '../components/FadeIn';
 import Skeleton from '../components/Skeleton';
 import AppHeader from '../components/AppHeader';
 import { scheduleTodayEventReminders } from '../utils/eventReminders';
+import { useLiveUpdates } from '../api/realtime';
 import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 function isToday(dateStr) {
@@ -49,6 +50,8 @@ export default function DashboardScreen({ navigation }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  // An admin added or changed an event / event area.
+  useLiveUpdates(['events', 'geofences'], load);
 
   // Re-fetch whenever the Dashboard comes back into focus (e.g. returning from
   // Attendance/History/Profile), and poll every 30s while it stays visible, so a

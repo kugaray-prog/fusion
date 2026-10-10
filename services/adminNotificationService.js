@@ -26,6 +26,7 @@ async function notifyAdmins({ type, severity = 'info', title, message, targetVie
       `INSERT INTO admin_notifications (type, severity, title, message, target_view, employee_id) VALUES (?, ?, ?, ?, ?, ?)`,
       [type, severity, title, message, targetView, employeeId]
     );
+    require('./realtime').broadcast('notifications');
   } catch (err) {
     console.error('[adminNotifications] Could not save alert:', err.message);
   }

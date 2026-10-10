@@ -58,6 +58,75 @@ async function generateCertificate(req, res, next) {
   }
 }
 
+// POST /api/certificates/generate-bulk
+//   { scope: 'all' | 'department', department_id?, event_title, event_id?, award_date?, venue?, preview? }
+// One certificate (and certificates row) per active, approved employee in
+// scope, all printed into a single multi-page PDF.
+async function generateBulkCertificates(req, res, next) {
+  try {
+    const { scope, department_id, event_title, event_id } = req.body;
+    const awardDate = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.award_date || '')) ? req.body.award_date : null;
+    let venue = String(req.body.venue || '').trim().slice(0, 150);
+    if (!event_title && !req.body.preview) return res.status(400).json({ success: false, message: 'event_title is required.' });
+    if (scope !== 'all' && !(scope === 'department' && department_id)) {
+      return res.status(400).json({ success: false, message: 'Choose all employees or a department.' });
+    }
+
+    const params = [];
+    let where = "is_approved = 1 AND status <> 'Inactive'";
+    if (scope === 'department') { where += ' AND department_id = ?'; params.push(department_id); }
+    const [emps] = await pool.query(`SELECT id, full_name FROM employees WHERE ${where} ORDER BY full_name`, params);
+    // preview: just report how many certificates this selection would make.
+    if (req.body.preview) {
+      res.locals.noBroadcast = true; // read-only: don't make every dashboard refresh
+      return res.json({ success: true, data: { count: emps.length } });
+    }
+    if (!emps.length) return res.status(404).json({ success: false, message: 'No active employees found for that selection.' });
+
+    if (!venue && event_id) {
+      const [eventRows] = await pool.query('SELECT venue FROM events WHERE id = ?', [event_id]);
+      venue = eventRows[0]?.venue || '';
+    }
+
+    const template = await loadTemplate();
+    const batch = `CERT-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+    const issuedDate = localDate();
+    const pad = String(emps.length).length;
+
+    const { pdfPath } = await certificateService.generateCertificatesPdf({
+      fileName: `${batch}-BATCH`,
+      employeeNames: emps.map((e) => e.full_name),
+      eventTitle: event_title,
+      issuedDate,
+      awardDate,
+      venue,
+      template
+    });
+    const relativePath = `/uploads/certificates/${path.basename(pdfPath)}`;
+
+    const rows = emps.map((e, i) => [
+      e.id, event_id || null, `${batch}-${String(i + 1).padStart(pad, '0')}`, event_title, issuedDate, relativePath
+    ]);
+    await pool.query(
+      `INSERT INTO certificates (employee_id, event_id, certificate_number, event_title, issued_date, pdf_path) VALUES ?`,
+      [rows]
+    );
+
+    await logAction({
+      adminId: req.admin.id, action: 'generate_bulk', module: 'certificates',
+      details: { batch, scope, departmentId: department_id || null, count: emps.length }, ip: req.ip
+    });
+
+    res.status(201).json({
+      success: true,
+      message: `${emps.length} certificate(s) generated.`,
+      data: { count: emps.length, batch, downloadUrl: relativePath }
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // GET /api/certificates
 async function getCertificates(req, res, next) {
   try {
@@ -114,4 +183,4 @@ async function saveTemplate(req, res, next) {
   }
 }
 
-module.exports = { generateCertificate, getCertificates, getTemplate, saveTemplate };
+module.exports = { generateCertificate, generateBulkCertificates, getCertificates, getTemplate, saveTemplate };

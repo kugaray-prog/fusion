@@ -290,13 +290,20 @@ const G_App = {
             document.body.classList.toggle('dark-mode');
             G_App.ui.redrawDashboardCharts();
         },
-        // Auto-refresh: every 30s, silently re-fetch whichever view is
-        // currently on screen so stats/tables/charts stay live without the
-        // admin needing to manually reload the page.
+        // Auto-refresh fallback: changes normally arrive instantly over the
+        // live WebSocket (G_App.live). This 30s tick only re-fetches when the
+        // socket is down, or every 2 min while it's up to pick up
+        // time-based changes nobody triggers (e.g. an event ending, Ongoing
+        // turning into Present/Absent).
         autoRefreshTimer: null,
+        lastRefreshAt: 0,
+        LIVE_FALLBACK_MS: 120000,
         startAutoRefresh: () => {
             if (G_App.ui.autoRefreshTimer) return;
-            G_App.ui.autoRefreshTimer = setInterval(() => G_App.ui.refreshActiveView(), 30000);
+            G_App.ui.autoRefreshTimer = setInterval(() => {
+                if (G_App.live.connected && Date.now() - G_App.ui.lastRefreshAt < G_App.ui.LIVE_FALLBACK_MS) return;
+                G_App.ui.refreshActiveView();
+            }, 30000);
         },
         stopAutoRefresh: () => {
             if (G_App.ui.autoRefreshTimer) {
@@ -308,6 +315,7 @@ const G_App = {
             if (document.hidden) return; // don't burn API calls on a backgrounded tab
             const activeView = document.querySelector('.view.active');
             if (!activeView) return;
+            G_App.ui.lastRefreshAt = Date.now();
             try {
                 switch (activeView.id) {
                     case 'dashboard':
@@ -1860,8 +1868,8 @@ const G_App = {
                         <td>${G_App.attendance.timeSessionCell(log)}</td>
                         <td>${G_App.attendance.durationCell(log)}</td>
                         <td>${G_App.attendance.methodCell(log)}</td>
-                        <td>${log.longitude ?? '--'}</td>
-                        <td>${log.latitude ?? '--'}</td>
+                        <td>${log.last_lng ?? log.longitude ?? '--'}</td>
+                        <td>${log.last_lat ?? log.latitude ?? '--'}</td>
                         <td>${G_App.attendance.faceVerificationCell(log)}</td>`}
                         <td>${G_App.attendance.statusBadge(log.attendance_status)}</td>
                     </tr>
@@ -1958,7 +1966,20 @@ const G_App = {
             const minutes = Math.floor((totalSeconds % 3600) / 60);
             const label = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
             const color = log.time_out ? 'var(--text-main)' : 'var(--warning)';
-            return `<span style="font-weight:700; color:${color};">${label}</span>`;
+            return `<span style="font-weight:700; color:${color};">${label}</span>${G_App.attendance.presencePercent(log, totalSeconds)}`;
+        },
+        // Share of the event's whole scheduled duration spent inside the
+        // geofence so far — the same ratio the end-of-event rule checks
+        // (presence_required_percent, 80% by default) to decide Present vs
+        // Absent. Green once it reaches the requirement.
+        presencePercent: (log, attendedSeconds) => {
+            const start = new Date(log.event_start).getTime();
+            const end = new Date(log.event_end).getTime();
+            if (isNaN(start) || isNaN(end) || end <= start) return '';
+            const percent = Math.min(100, Math.floor((attendedSeconds * 1000 / (end - start)) * 100));
+            const required = Number(log.presence_required_percent) || 80;
+            const color = percent >= required ? 'var(--success)' : 'var(--text-muted)';
+            return `<div style="font-size:0.75rem; font-weight:700; color:${color};" title="Time inside the event area out of the event's full duration (needs ${required}% to count as present)">${percent}% of event</div>`;
         },
         // How this row's time-in was captured — the normal mobile app + GPS
         // flow, or an admin-run alternative at the Verification kiosk (ID
@@ -2535,6 +2556,7 @@ const G_App = {
                 }
                 if (document.hidden) return;
                 G_App.verification.loadAlerts();
+                G_App.verification.loadRechecks();
                 G_App.ocr.loadRecords();
                 G_App.face.loadRecords();
             }, 5000);
@@ -2569,6 +2591,7 @@ const G_App = {
             if (!document.getElementById('ocr-output').innerHTML.trim()) G_App.verification.resetResults();
             G_App.verification.startLive();
             G_App.verification.loadAlerts();
+            G_App.verification.loadRechecks();
             // Only spin up the camera for whichever tab is currently visible.
             if (G_App.verification.activeTab === 'face') {
                 G_App.face.initCamera();
@@ -2593,6 +2616,65 @@ const G_App = {
             } catch (err) {
                 // Non-fatal -- OCR/Face verification still works without this panel.
             }
+        },
+        // Records that just passed face verification but whose phone is still
+        // within the anomaly distance of another employee's phone. Each gets a
+        // live countdown to when the server will ask for face verification
+        // again (config.attendance.anomalyRecheckSeconds).
+        recheckTimer: null,
+        loadRechecks: async () => {
+            try {
+                const { data } = await apiFetch('/attendance/anomaly-rechecks');
+                G_App.verification.renderRechecks(data || []);
+            } catch (err) {
+                // Non-fatal, like loadAlerts.
+            }
+        },
+        renderRechecks: (rows) => {
+            const container = document.getElementById('verification-rechecks');
+            if (!container) return;
+            clearInterval(G_App.verification.recheckTimer);
+            G_App.verification.recheckTimer = null;
+            if (!rows.length) {
+                container.innerHTML = '';
+                return;
+            }
+            const now = Date.now();
+            container.innerHTML = `
+                <div class="card" style="background: #FFFBEB; border-color: #FDE68A;">
+                    <h3 style="color: var(--warning); font-weight: 800; display:flex; align-items:center; gap:10px; margin-bottom: 6px;">
+                        <i data-lucide="timer"></i> ${rows.length} Verified Record${rows.length > 1 ? 's' : ''} Still Near Another Phone
+                    </h3>
+                    <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 15px;">These passed face verification, but the anomaly distance check is still true. Face verification will be asked again when the countdown ends.</p>
+                    <div style="display:flex; flex-direction:column; gap:10px;">
+                        ${rows.map(r => `
+                            <div style="background:#fff; border-radius:14px; padding:14px 18px; display:flex; justify-content:space-between; align-items:center; gap:15px; flex-wrap:wrap;">
+                                <div>
+                                    <strong>${escapeHtml(r.full_name)}</strong> <span style="color:var(--text-muted); font-size:0.8rem;">(${escapeHtml(r.employee_code)})</span>
+                                    — ${escapeHtml(r.event_title || 'Unknown event')}<br>
+                                    <span style="color:var(--text-muted); font-size:0.8rem;">Same location as ${escapeHtml(r.near_full_name)} (${escapeHtml(r.near_employee_code)})</span>
+                                </div>
+                                <span class="badge badge-warning" style="flex-shrink:0; font-variant-numeric: tabular-nums;"><i data-lucide="timer" size="11"></i> Recheck in <b class="vf-recheck-count" data-deadline="${now + Number(r.seconds_left) * 1000}">${Number(r.seconds_left)}s</b></span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+            const tick = () => {
+                const els = container.querySelectorAll('.vf-recheck-count');
+                if (!els.length) {
+                    clearInterval(G_App.verification.recheckTimer);
+                    G_App.verification.recheckTimer = null;
+                    return;
+                }
+                els.forEach(el => {
+                    const left = Math.max(0, Math.ceil((Number(el.dataset.deadline) - Date.now()) / 1000));
+                    el.textContent = left > 0 ? `${left}s` : 'now…';
+                });
+            };
+            tick();
+            G_App.verification.recheckTimer = setInterval(tick, 1000);
         },
         renderAlerts: (alerts) => {
             const container = document.getElementById('verification-alerts');
@@ -2875,22 +2957,51 @@ const G_App = {
         // to the camera or an empty frame won't hold the skin-tone blob
         // check below across several consecutive samples the way a real,
         // slightly-moving live face does).
+        // Big 3-2-1 inside the guide ring so the person has time to get into
+        // position before the timed liveness check starts.
+        runCountdown: async (seconds = 3) => {
+            const el = document.getElementById('face-countdown');
+            const instructionEl = document.getElementById('face-liveness-instruction');
+            if (!el) return;
+            el.classList.remove('hidden');
+            for (let n = seconds; n > 0; n--) {
+                el.innerText = n;
+                el.classList.remove('tick');
+                void el.offsetWidth; // restart the tick animation
+                el.classList.add('tick');
+                if (instructionEl) instructionEl.innerText = `Get ready… starting in ${n}`;
+                await new Promise((r) => setTimeout(r, 1000));
+            }
+            el.classList.add('hidden');
+            el.innerText = '';
+        },
         detectFaceHold: (timeoutMs = 12000) => new Promise((resolve) => {
             const video = document.getElementById('face-video');
             const instructionEl = document.getElementById('face-liveness-instruction');
+            const timerEl = document.getElementById('face-liveness-timer');
             const workCanvas = document.createElement('canvas');
             let settled = false, noFaceStreak = 0, holdStreak = 0;
             const start = Date.now();
+
+            const updateTimer = () => {
+                if (!timerEl) return;
+                const left = Math.max(0, Math.ceil((timeoutMs - (Date.now() - start)) / 1000));
+                timerEl.innerText = `${left}s left`;
+            };
+            if (timerEl) timerEl.classList.remove('hidden');
+            updateTimer();
 
             const finish = (ok) => {
                 if (settled) return;
                 settled = true;
                 clearInterval(timer);
+                if (timerEl) timerEl.classList.add('hidden');
                 resolve(ok);
             };
 
             const timer = setInterval(() => {
                 if (Date.now() - start > timeoutMs) return finish(false);
+                updateTimer();
                 const m = G_App.face.sampleFaceMetrics(video, workCanvas);
                 if (!m) {
                     noFaceStreak++;
@@ -2926,9 +3037,11 @@ const G_App = {
             if (idleSubLabel) idleSubLabel.classList.add('hidden');
             if (idleSheet) idleSheet.classList.add('hidden');
             banner.classList.remove('hidden');
-            G_App.verification.showResult('face', { tone: 'busy', title: 'Checking liveness…', lines: ['Hold still and look at the camera.'] });
+            G_App.verification.showResult('face', { tone: 'busy', title: 'Get ready…', lines: ['Position the face inside the frame.'] });
 
+            await G_App.face.runCountdown(3);
             instructionEl.innerText = G_App.face.HOLD_STILL_INSTRUCTION;
+            G_App.verification.showResult('face', { tone: 'busy', title: 'Checking liveness…', lines: ['Hold still and look at the camera.'] });
             const passed = await G_App.face.detectFaceHold();
             G_App.face.setGuideState(passed ? 'pass' : 'fail');
 
@@ -3214,7 +3327,40 @@ const G_App = {
         render: () => {
             const certSel = document.getElementById('cert-employee-select');
             if (certSel) certSel.innerHTML = G_App.state.employees.map(e => `<option value="${e.id}">${e.full_name} (${e.employee_code})</option>`).join('');
+            const deptSel = document.getElementById('cert-department-select');
+            if (deptSel) {
+                const current = deptSel.value;
+                deptSel.innerHTML = (G_App.state.departments || []).map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join('');
+                if (current) deptSel.value = current;
+            }
+            G_App.settings.onCertScopeChange();
             lucide.createIcons();
+        },
+        // Recipients: one employee, a whole department, or everyone (active,
+        // approved employees -- the server does the selecting and counting).
+        certScopeBody: () => {
+            const scope = document.getElementById('cert-scope')?.value || 'employee';
+            return scope === 'department'
+                ? { scope, department_id: document.getElementById('cert-department-select').value }
+                : { scope };
+        },
+        onCertScopeChange: async () => {
+            const body = G_App.settings.certScopeBody();
+            document.getElementById('cert-employee-wrap').classList.toggle('hidden', body.scope !== 'employee');
+            document.getElementById('cert-department-wrap').classList.toggle('hidden', body.scope !== 'department');
+            const countEl = document.getElementById('cert-scope-count');
+            countEl.classList.add('hidden');
+            if (body.scope === 'employee' || (body.scope === 'department' && !body.department_id)) return;
+            try {
+                const { data } = await apiFetch('/certificates/generate-bulk', { method: 'POST', body: JSON.stringify({ ...body, preview: true }) });
+                // Ignore a stale answer if the selection changed meanwhile.
+                if (JSON.stringify(G_App.settings.certScopeBody()) !== JSON.stringify(body)) return;
+                const n = data.count;
+                countEl.textContent = n
+                    ? `${n} certificate${n === 1 ? '' : 's'} will be generated in one PDF (one page each).`
+                    : 'No active employees in this selection.';
+                countEl.classList.remove('hidden');
+            } catch (err) { /* count is only a hint */ }
         },
         // Editable certificate wording (school name, title, signatories...).
         certTemplateFields: ['schoolName', 'accreditation', 'title', 'subtitle', 'awardText', 'defaultVenue',
@@ -3265,6 +3411,33 @@ const G_App = {
             const event = document.getElementById('cert-event').value || 'Professional Development Workshop';
             const awardDate = document.getElementById('cert-date').value;
             const venue = document.getElementById('cert-venue').value.trim();
+            const scopeBody = G_App.settings.certScopeBody();
+
+            if (scopeBody.scope !== 'employee') {
+                if (scopeBody.scope === 'department' && !scopeBody.department_id) return toast('Select a department first.', 'error');
+                const who = scopeBody.scope === 'all'
+                    ? 'all active employees'
+                    : `all active employees of ${document.getElementById('cert-department-select').selectedOptions[0]?.text || 'this department'}`;
+                const ok = await confirmDialog({
+                    title: 'Generate certificates?',
+                    message: `A certificate for "${event}" will be made for ${who}, combined into one PDF.`,
+                    confirmText: 'Generate',
+                    danger: false
+                });
+                if (!ok) return;
+                try {
+                    const result = await apiFetch('/certificates/generate-bulk', {
+                        method: 'POST',
+                        body: JSON.stringify({ ...scopeBody, event_title: event, award_date: awardDate, venue })
+                    });
+                    toast(`${result.data.count} certificate(s) generated.`, 'success');
+                    window.open(result.data.downloadUrl, '_blank');
+                } catch (err) {
+                    toast(err.message, 'error');
+                }
+                return;
+            }
+
             if (!employeeId) return toast('Select an employee first.', 'error');
 
             try {
@@ -3404,6 +3577,87 @@ const G_App = {
         }
     },
 
+    // Live updates: a WebSocket to /ws (services/realtime.js) that says
+    // "something changed" ({ type: 'change', topic }) whenever data is
+    // written -- an employee timing in, a heartbeat, an admin edit, a new
+    // alert. The open view then re-fetches through the normal API, so the
+    // page stays current without reloading. Reconnects with backoff; while
+    // disconnected the 30s auto-refresh and 20s bell polling take over.
+    live: {
+        socket: null,
+        connected: false,
+        retryMs: 1000,
+        MAX_RETRY_MS: 30000,
+        DEBOUNCE_MS: 500,
+        refreshTimer: null,
+        missedWhileHidden: false,
+        connect: () => {
+            const live = G_App.live;
+            const token = localStorage.getItem('ga_token');
+            if (!token || live.socket) return;
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const socket = new WebSocket(`${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}`);
+            live.socket = socket;
+            socket.onopen = () => {
+                const wasReconnect = live.retryMs > 1000;
+                live.connected = true;
+                live.retryMs = 1000;
+                // Catch up on anything that changed while disconnected.
+                if (wasReconnect) { live.scheduleRefresh(); G_App.notifications.load(); }
+            };
+            socket.onmessage = (event) => {
+                let msg;
+                try { msg = JSON.parse(event.data); } catch (e) { return; }
+                if (msg.type !== 'change') return;
+                // 'notifications' = a new alert (notifyAdmins); 'admin-notifications'
+                // = another tab marked alerts read / cleared them.
+                if (msg.topic === 'notifications' || msg.topic === 'admin-notifications') G_App.notifications.load();
+                else live.scheduleRefresh(msg.topic);
+            };
+            socket.onclose = () => {
+                live.socket = null;
+                live.connected = false;
+                if (!localStorage.getItem('ga_token')) return; // signed out
+                setTimeout(live.connect, live.retryMs);
+                live.retryMs = Math.min(live.retryMs * 2, live.MAX_RETRY_MS);
+            };
+        },
+        // Several changes in a burst (e.g. many employees timing in at once)
+        // become one re-fetch, and re-fetches are throttled to one per
+        // MIN_INTERVAL_MS. "attendance" gets the longer
+        // ATTENDANCE_MIN_INTERVAL_MS: every employee's heartbeat announces
+        // it, so while an event runs it arrives continuously, and the
+        // Dashboard view makes ~5 API calls per refresh -- every 5s that
+        // alone is ~900 of the per-account limit of 1000 per 15 minutes.
+        // A hidden tab refreshes when it's shown again.
+        // "attendance-status" is sent only when an employee is actually timed
+        // in or out (never by plain heartbeats), so it's shown almost at once:
+        // a short debounce, then at most one refresh per STATUS_MIN_INTERVAL_MS.
+        MIN_INTERVAL_MS: 5000,
+        ATTENDANCE_MIN_INTERVAL_MS: 15000,
+        STATUS_MIN_INTERVAL_MS: 1000,
+        STATUS_DEBOUNCE_MS: 150,
+        refreshDueAt: 0,
+        scheduleRefresh: (topic) => {
+            const live = G_App.live;
+            if (document.hidden) { live.missedWhileHidden = true; return; }
+            const isStatus = topic === 'attendance-status';
+            const minInterval = isStatus ? live.STATUS_MIN_INTERVAL_MS
+                : topic === 'attendance' ? live.ATTENDANCE_MIN_INTERVAL_MS : live.MIN_INTERVAL_MS;
+            const sinceLast = Date.now() - G_App.ui.lastRefreshAt;
+            const wait = Math.max(isStatus ? live.STATUS_DEBOUNCE_MS : live.DEBOUNCE_MS, minInterval - sinceLast);
+            if (live.refreshTimer) {
+                if (Date.now() + wait >= live.refreshDueAt) return; // the queued one comes soon enough
+                clearTimeout(live.refreshTimer);
+            }
+            live.refreshDueAt = Date.now() + wait;
+            live.refreshTimer = setTimeout(() => {
+                live.refreshTimer = null;
+                G_App.ui.refreshActiveView();
+            }, wait);
+        }
+    },
+
     // Notification bell (Notification & Alert module): device registrations,
     // unregistered/blocked device attempts, geo anomalies, rejected
     // attendance. Polled every 20s; new warnings also pop up as a toast.
@@ -3426,7 +3680,13 @@ const G_App = {
             const n = G_App.notifications;
             if (n.timer) return;
             n.load();
-            n.timer = setInterval(() => n.load(), n.POLL_MS);
+            // Polling is only the fallback; new alerts arrive over G_App.live.
+            // Still re-checked every LIVE_FALLBACK_MS while "connected", like
+            // the views, in case the socket is silently dead (laptop sleep,
+            // network switch) and the browser hasn't noticed yet.
+            n.timer = setInterval(() => {
+                if (!G_App.live.connected || Date.now() - n.lastLoadAt >= G_App.ui.LIVE_FALLBACK_MS) n.load();
+            }, n.POLL_MS);
         },
         timeAgo: (value) => {
             const then = new Date(String(value).replace(' ', 'T'));
@@ -3438,8 +3698,10 @@ const G_App = {
             if (secs < 7 * 86400) return `${Math.floor(secs / 86400)} day${secs < 2 * 86400 ? '' : 's'} ago`;
             return then.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
         },
+        lastLoadAt: 0,
         load: async () => {
             const n = G_App.notifications;
+            n.lastLoadAt = Date.now();
             try {
                 const { data, unread } = await apiFetch('/admin-notifications?limit=50');
                 const newestId = data.length ? data[0].id : 0;
@@ -3524,7 +3786,7 @@ const G_App = {
                         <span style="color:var(--text-muted); font-size:0.8rem;">${a.email}</span>
                     </div>
                     <div style="display:flex; align-items:center; gap:10px;">
-                        <span class="badge badge-${a.role === 'super_admin' ? 'info' : 'warning'}">${a.role === 'super_admin' ? 'Super Admin' : 'Admin (OCR only)'}</span>
+                        <span class="badge badge-${a.role === 'super_admin' ? 'info' : 'warning'}">${a.role === 'super_admin' ? 'HRMDU Admin' : 'Staff Admin'}</span>
                         <button class="btn-icon btn-delete" onclick="G_App.adminAccounts.remove(${a.id})"><i data-lucide="trash" size="14"></i></button>
                     </div>
                 </div>
@@ -3858,6 +4120,7 @@ const G_App = {
         G_App.mobile.render();
         G_App.ui.startAutoRefresh();
         G_App.notifications.start();
+        G_App.live.connect();
         lucide.createIcons();
 
         // Open the section named in the URL (/employees, /events, ...); on a
@@ -3871,6 +4134,12 @@ const G_App = {
         }
     }
 };
+
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !G_App.live.missedWhileHidden) return;
+    G_App.live.missedWhileHidden = false;
+    G_App.live.scheduleRefresh();
+});
 
 window.onload = async () => {
     const failsafe = setTimeout(G_App.splash.hide, G_App.splash.MAX_MS);

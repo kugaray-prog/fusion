@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing, ScrollView } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
-import FaceDetection from '../utils/faceDetection';
+import { livenessFailureMessage, livenessCaption, wait } from '../utils/faceCapture';
+import LiveFaceCamera, { discardCapture } from '../components/LiveFaceCamera';
 import { colors, radius, shadow } from '../theme';
-import { verifyAttendanceFace } from '../api/client';
+import { verifyAttendanceFace, getMyHistory } from '../api/client';
 import { useAttendanceTracking } from '../context/AttendanceTrackingContext';
 import AppHeader from '../components/AppHeader';
 import { useResponsive, MAX_WIDTH } from '../utils/responsive';
@@ -22,19 +22,13 @@ import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 // flagged as it already was; only a genuine match
 // (controllers/attendanceController.js faceVerify) clears it.
 //
-// The capture algorithm (hold steady, then blink) is the same one
-// RegistrationScreen.js uses, deliberately duplicated rather than shared so
-// a future change to one doesn't silently change the other's behavior --
-// keep both in sync if the underlying algorithm changes.
-const DETECTION_TIMEOUT_MS = 12000;
-const CONFIRM_FRAMES = 3;
+// The capture is a live video selfie (hold steady, then blink), shared with
+// RegistrationScreen.js -- see components/LiveFaceCamera.js.
 const DETECTION_ATTEMPTS = 3;
-const BLINK_TIMEOUT_MS = 8000;
-const EYES_OPEN_THRESHOLD = 0.6;
-const EYES_CLOSED_THRESHOLD = 0.3;
-const MAX_BLINK_FACE_DROPOUT = 6;
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const formatTime = (value) => (value
+  ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  : '');
 
 export default function FaceVerificationScreen({ route, navigation }) {
   const { attendanceId, eventTitle } = route.params || {};
@@ -47,29 +41,67 @@ export default function FaceVerificationScreen({ route, navigation }) {
   // 'idle' | 'scanning' | 'blink' | 'uploading' | 'success' | 'failed'
   const { isTablet, isCompactHeight, topPad, insets, contentStyle } = useResponsive();
   const [stage, setStage] = useState('idle');
-  const [liveFaceDetected, setLiveFaceDetected] = useState(false);
-  const [blinkEyesClosed, setBlinkEyesClosed] = useState(false);
+  // Latest per-frame status from the live camera (drives the caption).
+  const [live, setLive] = useState({ phase: 'hold', faceDetected: false, hint: null, eyesClosed: false });
   const [errorMsg, setErrorMsg] = useState('');
+  // The flagged record's event (title, venue, schedule), so the employee
+  // can see exactly which event this verification is for. Starts from the
+  // title the caller passed and is filled in from their attendance history.
+  const [eventInfo, setEventInfo] = useState(eventTitle ? { title: eventTitle } : null);
+
+  useEffect(() => {
+    if (!attendanceId) return undefined;
+    let cancelled = false;
+    getMyHistory()
+      .then((history) => {
+        const record = (history?.data || []).find((a) => String(a.id) === String(attendanceId));
+        if (cancelled || !record) return;
+        setEventInfo({
+          title: record.event_title || eventTitle,
+          venue: record.event_venue,
+          start: record.event_start,
+          end: record.event_end,
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [attendanceId, eventTitle]);
 
   const scanPulse = useRef(new Animated.Value(0)).current;
 
+  // Location is looked up while the face scan runs, not after it, so it
+  // never holds up the upload. A recent cached fix is fine; a fresh one is
+  // only requested when there isn't one.
+  const locationRef = useRef(null);
   useEffect(() => {
-    if (!permission) return;
-    if (!permission.granted) {
-      requestPermission();
-      return;
-    }
-    // Auto-starts as soon as the camera is actually usable -- "automatic na
-    // bubukas ang Face Verification screen" extends to the capture itself
-    // starting on its own, not just the screen appearing with a button to tap.
-    if (!startedRef.current) {
-      startedRef.current = true;
-      const t = setTimeout(() => runVerification(), 600);
-      return () => clearTimeout(t);
-    }
+    locationRef.current = Location.getLastKnownPositionAsync({ maxAge: 60000 })
+      .then((loc) => loc || Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }))
+      .catch(() => null);
+  }, []);
+
+  useEffect(() => {
+    if (permission && !permission.granted) requestPermission();
   }, [permission]);
 
-  useEffect(() => () => { verifyingRef.current = false; }, []);
+  // Auto-starts the moment the camera reports it's ready -- "automatic na
+  // bubukas ang Face Verification screen" extends to the capture itself
+  // starting on its own, not just the screen appearing with a button to tap.
+  const handleCameraReady = () => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    runVerification();
+  };
+
+  useEffect(() => () => {
+    verifyingRef.current = false;
+    cameraRef.current?.cancel();
+  }, []);
+
+  const handleLiveStatus = (s) => {
+    if (!verifyingRef.current) return;
+    setLive(s);
+    setStage(s.phase === 'blink' ? 'blink' : 'scanning');
+  };
 
   useEffect(() => {
     if (stage !== 'scanning' && stage !== 'blink') return undefined;
@@ -81,149 +113,78 @@ export default function FaceVerificationScreen({ route, navigation }) {
     return () => loop.stop();
   }, [stage, scanPulse]);
 
-  const detectFaceHold = async () => {
-    const startedAt = Date.now();
-    let holdStreak = 0;
-    while (Date.now() - startedAt < DETECTION_TIMEOUT_MS) {
-      if (!verifyingRef.current) return false;
-      let photo;
-      try {
-        photo = await cameraRef.current.takePictureAsync({ quality: 0.3, skipProcessing: true, base64: false });
-      } catch (err) {
-        await wait(150);
-        continue;
-      }
-      let faces = [];
-      try {
-        faces = await FaceDetection.detect(photo.uri, {
-          performanceMode: 'fast', landmarkMode: 'none', contourMode: 'none', minFaceSize: 0.15,
-        });
-      } catch (err) { faces = []; }
-      if (photo.uri) FileSystem.deleteAsync(photo.uri, { idempotent: true }).catch(() => {});
-
-      const face = faces && faces[0];
-      setLiveFaceDetected(!!face);
-      holdStreak = face ? holdStreak + 1 : 0;
-      if (holdStreak >= CONFIRM_FRAMES) return true;
-    }
-    return false;
-  };
-
-  const detectBlink = async () => {
-    const startedAt = Date.now();
-    let phase = 'awaiting-close';
-    let noFaceStreak = 0;
-    while (Date.now() - startedAt < BLINK_TIMEOUT_MS) {
-      if (!verifyingRef.current) return false;
-      let photo;
-      try {
-        photo = await cameraRef.current.takePictureAsync({ quality: 0.3, skipProcessing: true, base64: false });
-      } catch (err) {
-        await wait(150);
-        continue;
-      }
-      let faces = [];
-      try {
-        faces = await FaceDetection.detect(photo.uri, {
-          performanceMode: 'fast', landmarkMode: 'none', contourMode: 'none',
-          classificationMode: 'all', minFaceSize: 0.15,
-        });
-      } catch (err) { faces = []; }
-      if (photo.uri) FileSystem.deleteAsync(photo.uri, { idempotent: true }).catch(() => {});
-
-      const face = faces && faces[0];
-      setLiveFaceDetected(!!face);
-      if (!face) {
-        noFaceStreak += 1;
-        if (noFaceStreak >= MAX_BLINK_FACE_DROPOUT) return false;
-        continue;
-      }
-      noFaceStreak = 0;
-      const { leftEyeOpenProbability: left, rightEyeOpenProbability: right } = face;
-      if (left == null || right == null) continue;
-      const openness = (left + right) / 2;
-      if (phase === 'awaiting-close' && openness < EYES_CLOSED_THRESHOLD) {
-        phase = 'awaiting-reopen';
-        setBlinkEyesClosed(true);
-      } else if (phase === 'awaiting-reopen' && openness > EYES_OPEN_THRESHOLD) {
-        return true;
-      }
-    }
-    return false;
-  };
-
   const runVerification = async () => {
-    if (!cameraRef.current || verifyingRef.current) return;
+    if (verifyingRef.current) return;
+    if (!cameraRef.current) {
+      setStage('failed');
+      setErrorMsg('The camera is not ready yet. Please try again.');
+      return;
+    }
     setErrorMsg('');
+    setLive({ phase: 'hold', faceDetected: false, hint: null, eyesClosed: false });
     verifyingRef.current = true;
 
-    let confirmed = false;
-    let failedOnBlink = false;
-    for (let i = 0; i < DETECTION_ATTEMPTS && !confirmed; i++) {
-      if (!verifyingRef.current) return;
+    let result = { ok: false, reason: 'no-face' };
+    for (let i = 0; i < DETECTION_ATTEMPTS && !result.ok; i++) {
+      if (!verifyingRef.current || !cameraRef.current) return;
       setStage('scanning');
-      const held = await detectFaceHold();
-      if (!verifyingRef.current) return;
-      let blinked = false;
-      if (held) {
-        setBlinkEyesClosed(false);
-        setStage('blink');
-        blinked = await detectBlink();
-        if (!verifyingRef.current) return;
+      result = await cameraRef.current.runLiveness();
+      if (result.reason === 'cancelled' || !verifyingRef.current) {
+        discardCapture(result);
+        return;
       }
-      confirmed = held && blinked;
-      failedOnBlink = held && !blinked;
-      if (!confirmed && i < DETECTION_ATTEMPTS - 1) await wait(700);
+      if (!result.ok && i < DETECTION_ATTEMPTS - 1) await wait(400);
     }
 
-    if (!confirmed) {
+    if (!result.ok) {
       verifyingRef.current = false;
       setStage('failed');
-      setErrorMsg(failedOnBlink
-        ? "Couldn't confirm a blink. Keep your face in frame and blink normally, then try again."
-        : "Couldn't detect your face. Make sure your face is centered and well-lit, then try again.");
+      setErrorMsg(livenessFailureMessage(result.reason));
       return;
     }
 
+    // The selfie still is grabbed the instant the blink completes (eyes
+    // open, facing the camera); the video selfie covers the whole check.
     setStage('uploading');
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7, skipProcessing: true });
-
-      let latitude; let longitude;
-      try {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        latitude = loc?.coords?.latitude;
-        longitude = loc?.coords?.longitude;
-      } catch (e) {
-        // Location is a nice-to-have on this record, not a requirement --
-        // GPS already had to be on to reach this flagged state in the first place.
-      }
+      // Location is a nice-to-have on this record, not a requirement -- GPS
+      // already had to be on to reach this flagged state in the first place
+      // -- so it gets at most a moment, in parallel with the video finishing.
+      const [loc, videoUri] = await Promise.all([
+        Promise.race([locationRef.current || Promise.resolve(null), wait(1500).then(() => null)]),
+        result.video,
+      ]);
+      const latitude = loc?.coords?.latitude;
+      const longitude = loc?.coords?.longitude;
 
       const formData = new FormData();
-      formData.append('selfie', { uri: photo.uri, name: 'verify.jpg', type: 'image/jpeg' });
+      formData.append('selfie', { uri: result.photoUri, name: 'verify.jpg', type: 'image/jpeg' });
+      if (videoUri) formData.append('video', { uri: videoUri, name: 'verify.mp4', type: 'video/mp4' });
       formData.append('liveness_verified', 'true');
       formData.append('liveness_actions', 'hold,blink');
       if (latitude != null) formData.append('latitude', String(latitude));
       if (longitude != null) formData.append('longitude', String(longitude));
 
-      const result = await verifyAttendanceFace(attendanceId, formData);
+      const response = await verifyAttendanceFace(attendanceId, formData);
       verifyingRef.current = false;
 
-      if (result?.success) {
+      if (response?.success) {
         setStage('success');
         refreshAfterVerification?.();
         setTimeout(() => {
           clearPendingVerification?.(attendanceId);
           navigation.replace('Dashboard');
-        }, 1600);
+        }, 700);
       } else {
         setStage('failed');
-        setErrorMsg(result?.message || 'Verification failed. Please try again.');
+        setErrorMsg(response?.message || 'Verification failed. Please try again.');
       }
     } catch (err) {
       verifyingRef.current = false;
       setStage('failed');
       setErrorMsg(err?.response?.data?.message || "Couldn't verify your face. Please check your connection and try again.");
+    } finally {
+      discardCapture(result);
     }
   };
 
@@ -234,6 +195,7 @@ export default function FaceVerificationScreen({ route, navigation }) {
   // screen right back up rather than only ever retrying on a full app restart.
   const handleCancel = () => {
     verifyingRef.current = false;
+    cameraRef.current?.cancel();
     clearPendingVerification?.(attendanceId);
     navigation.replace('Dashboard');
   };
@@ -242,8 +204,7 @@ export default function FaceVerificationScreen({ route, navigation }) {
   const ringOpacity = scanPulse.interpolate({ inputRange: [0, 0.7, 1], outputRange: [0.5, 0.15, 0] });
 
   let caption = 'Preparing camera…';
-  if (stage === 'scanning') caption = !liveFaceDetected ? 'Center your face in the frame' : 'Hold still and look at the camera';
-  else if (stage === 'blink') caption = blinkEyesClosed ? 'Great — now open your eyes' : 'Blink your eyes';
+  if (stage === 'scanning' || stage === 'blink') caption = livenessCaption(live);
   else if (stage === 'uploading') caption = 'Verifying…';
   else if (stage === 'success') caption = 'Verified! Your attendance is confirmed.';
   else if (stage === 'failed') caption = errorMsg || 'Verification failed.';
@@ -258,16 +219,41 @@ export default function FaceVerificationScreen({ route, navigation }) {
     <ScrollView style={styles.flex} contentContainerStyle={[contentStyle(MAX_WIDTH.form), { paddingTop: topPad, paddingBottom: insets.bottom }]}>
       <AppHeader title="Face Verification" />
 
+      <View style={styles.eventCard}>
+        <View style={styles.eventIcon}>
+          <Ionicons name="calendar" size={20} color={colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.eventLabel}>EVENT</Text>
+          <Text style={styles.eventTitle} numberOfLines={2}>{eventInfo?.title || 'Loading event…'}</Text>
+          {!!eventInfo?.venue && (
+            <Text style={styles.eventMeta} numberOfLines={1}>
+              <Ionicons name="location-outline" size={12} color={colors.textSub} /> {eventInfo.venue}
+            </Text>
+          )}
+          {!!eventInfo?.start && (
+            <Text style={styles.eventMeta}>
+              <Ionicons name="time-outline" size={12} color={colors.textSub} /> {formatTime(eventInfo.start)}{eventInfo.end ? ` – ${formatTime(eventInfo.end)}` : ''}
+            </Text>
+          )}
+        </View>
+      </View>
+
       <View style={styles.alertCard}>
         <Ionicons name="alert-circle" size={20} color={colors.warning} />
         <Text style={styles.alertText}>
-          We noticed unusual activity on your check-in{eventTitle ? ` for "${eventTitle}"` : ''}. Please verify it's really you to confirm your attendance.
+          Your phone was at the same spot as another employee's phone{eventInfo?.title ? ` during "${eventInfo.title}"` : ''}. Please verify it's really you to confirm your attendance.
         </Text>
       </View>
 
       <View style={[styles.cameraWrap, { height: cameraHeight }]}>
         {permission?.granted ? (
-          <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="front" />
+          <LiveFaceCamera
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            onReady={handleCameraReady}
+            onStatus={handleLiveStatus}
+          />
         ) : (
           <View style={[StyleSheet.absoluteFill, styles.permissionFallback]}>
             <Ionicons name="camera-outline" size={40} color="#fff" />
@@ -319,6 +305,17 @@ export default function FaceVerificationScreen({ route, navigation }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
+  eventCard: {
+    flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 10,
+    backgroundColor: '#fff', borderRadius: radius.md, padding: 14, ...shadow,
+  },
+  eventIcon: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  eventLabel: { color: colors.textSub, fontSize: 10.5, fontWeight: '800', letterSpacing: 0.8 },
+  eventTitle: { color: colors.textMain, fontSize: 15, fontWeight: '800', marginTop: 2 },
+  eventMeta: { color: colors.textSub, fontSize: 12, fontWeight: '600', marginTop: 3 },
   alertCard: {
     flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginBottom: 14,
     backgroundColor: colors.warningBg, borderRadius: radius.md, padding: 14,

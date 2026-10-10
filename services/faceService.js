@@ -76,17 +76,37 @@ function getRecognizerSession() {
 const FEAT_STRIDE_FPN = [8, 16, 32];
 const NUM_ANCHORS = 2;
 
+// Longest side a photo is decoded at. Faces are aligned down to 112x112
+// anyway, so decoding a 12MP phone photo at full size only costs time.
+const MAX_DECODE_SIDE = 1600;
+
 /**
- * Resizes the source photo to fit within detectorInputSize x detectorInputSize
+ * Decodes a photo ONCE into an upright, interleaved RGB raw buffer that both
+ * detection and alignment then work from. `.rotate()` applies the EXIF
+ * orientation: phone cameras (expo-camera with skipProcessing) often save
+ * the pixels sideways and only record the rotation in EXIF, and SCRFD
+ * misses or mislocates faces that are lying on their side.
+ */
+async function loadImage(imagePath) {
+  const { data, info } = await sharp(imagePath)
+    .rotate()
+    .resize(MAX_DECODE_SIDE, MAX_DECODE_SIDE, { fit: 'inside', withoutEnlargement: true })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return { data, width: info.width, height: info.height };
+}
+
+/**
+ * Resizes the decoded photo to fit within detectorInputSize x detectorInputSize
  * (aspect-ratio preserved, placed at the top-left, zero-padded elsewhere) and
  * returns a normalized NCHW tensor -- this exact letterbox scheme (top-left,
  * not centered) mirrors InsightFace's own SCRFD preprocessing.
  */
-async function preprocessDetectorInput(imagePath) {
+async function preprocessDetectorInput(image) {
   const inputSize = config.face.detectorInputSize;
-  const meta = await sharp(imagePath).metadata();
-  const origWidth = meta.width;
-  const origHeight = meta.height;
+  const origWidth = image.width;
+  const origHeight = image.height;
 
   const imRatio = origHeight / origWidth;
   let newWidth;
@@ -100,9 +120,8 @@ async function preprocessDetectorInput(imagePath) {
   }
   const detScale = newHeight / origHeight; // == newWidth / origWidth
 
-  const { data } = await sharp(imagePath)
+  const { data } = await sharp(image.data, { raw: { width: origWidth, height: origHeight, channels: 3 } })
     .resize(newWidth, newHeight, { fit: 'fill' })
-    .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
 
@@ -221,12 +240,14 @@ function nms(boxes, scores, kpss, iouThreshold) {
 }
 
 /**
- * Detects the most prominent face in a photo. Returns { score, box, kps }
- * (kps = 5 [x,y] landmark points, in ORIGINAL image coordinates) or null if
- * no face cleared the confidence threshold.
+ * Detects the most prominent face in a photo (a file path, or an image
+ * already decoded by loadImage). Returns { score, box, kps } (kps = 5 [x,y]
+ * landmark points, in the upright decoded image's coordinates) or null if no
+ * face cleared the confidence threshold.
  */
-async function detectFace(imagePath) {
-  const { tensorData, inputSize, detScale } = await preprocessDetectorInput(imagePath);
+async function detectFace(imageOrPath) {
+  const image = typeof imageOrPath === 'string' ? await loadImage(imageOrPath) : imageOrPath;
+  const { tensorData, inputSize, detScale } = await preprocessDetectorInput(image);
   const { boxes, scores, kpss } = await runDetector(tensorData, inputSize);
   if (boxes.length === 0) return null;
 
@@ -362,11 +383,10 @@ function warpAffine(src, srcW, srcH, transform, outW, outH) {
 }
 
 /** Aligns the detected face to a canonical 112x112 RGB raw buffer. */
-async function alignFace(imagePath, kps) {
-  const { data, info } = await sharp(imagePath).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+function alignFace(image, kps) {
   const transform = solveSimilarityTransform(kps, ARCFACE_DST_112);
   const inputSize = config.face.inputSize;
-  return warpAffine(data, info.width, info.height, transform, inputSize, inputSize);
+  return warpAffine(image.data, image.width, image.height, transform, inputSize, inputSize);
 }
 
 // -- Recognition (embedding) -------------------------------------------------
@@ -404,13 +424,14 @@ async function embedAlignedFace(rawRgbBuffer) {
  * photo the way a detection-less approach would.
  */
 async function getEmbedding(imagePath) {
-  const face = await detectFace(imagePath);
+  const image = await loadImage(imagePath);
+  const face = await detectFace(image);
   if (!face || !face.kps) {
     throw new Error(
       'No face was detected in the photo. Please retake it with your face centered, unobstructed, and well-lit.'
     );
   }
-  const aligned = await alignFace(imagePath, face.kps);
+  const aligned = alignFace(image, face.kps);
   return embedAlignedFace(aligned);
 }
 
