@@ -443,7 +443,11 @@ require('./services/schemaUpgrades').run()
   // (Location turned off or the app stopped while closed) -- see
   // attendanceController.closeSilentSessions.
   const { closeSilentSessions } = require('./controllers/attendanceController');
-  setInterval(closeSilentSessions, 15000);
+  // Every 5 s, so a silent phone is caught soon after the window passes.
+  setInterval(closeSilentSessions, 5000);
+  // Clears anomaly alerts once their event has ended (see expireEndedEventAnomalies).
+  const { expireEndedEventAnomalies } = require('./controllers/attendanceController');
+  setInterval(() => expireEndedEventAnomalies().catch(err => console.error('[anomalies] Expire failed:', err.message)), 30000);
   });
 
   // Live dashboard updates (WebSocket at /ws) on the same port.

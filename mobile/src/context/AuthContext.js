@@ -5,6 +5,7 @@ import api, { googleLogin, linkDevice, getDeviceStatus, setStaleSessionHandler, 
 import { getDeviceUid } from '../utils/device';
 import { startLive, stopLive, useLiveUpdates } from '../api/realtime';
 import { alertDeviceBlocked } from '../utils/deviceBlockedAlert';
+import { registerForPushNotifications, unregisterPushNotifications } from '../utils/pushNotifications';
 
 // How often a signed-in app re-checks whether an admin has blacklisted or
 // rejected this device (also re-checked whenever the app comes back to the
@@ -164,6 +165,9 @@ export function AuthProvider({ children }) {
   const cancelRegistration = () => setPendingGoogle(null);
 
   const logout = async () => {
+    // Needs the session token, so before it's removed; capped so an offline
+    // phone isn't stuck on sign-out.
+    await Promise.race([unregisterPushNotifications(), new Promise((r) => setTimeout(r, 3000))]);
     await AsyncStorage.multiRemove(['employee_token', 'employee_data', 'device_status']);
     setEmployee(null);
     setDeviceStatus(null);
@@ -186,6 +190,12 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     setDeviceBlockedHandler(handleDeviceBlocked);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // An approved phone registers for push notifications, so a new event
+  // reaches it even while the app is closed.
+  useEffect(() => {
+    if (employee && deviceStatus === 'approved') registerForPushNotifications();
+  }, [employee?.id, deviceStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // While signed in, re-check this device's status periodically and each
   // time the app returns to the foreground.

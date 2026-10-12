@@ -30,6 +30,15 @@ function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Replaces a <select>'s options but keeps what was picked, so a live refresh
+// (G_App.live) doesn't reset a filter or a half-filled form.
+function setSelectOptions(select, html) {
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = html;
+    if (current && [...select.options].some(o => o.value === current)) select.value = current;
+}
+
 // Lowercases, strips accents (Peña -> pena) and turns punctuation into
 // spaces, so search text and the thing searched compare word by word.
 function normalizeSearchText(value) {
@@ -311,13 +320,56 @@ const G_App = {
                 G_App.ui.autoRefreshTimer = null;
             }
         },
-        refreshActiveView: async () => {
+        // topics = what changed (from G_App.live); empty for the fallback tick.
+        refreshActiveView: async (topics = new Set()) => {
             if (document.hidden) return; // don't burn API calls on a backgrounded tab
             const activeView = document.querySelector('.view.active');
             if (!activeView) return;
             G_App.ui.lastRefreshAt = Date.now();
             try {
+                // Lists other sections' dropdowns are built from (Reports,
+                // Settings, the employee form) -- kept current whatever is open.
+                if (topics.has('departments') && activeView.id !== 'departments') await G_App.departments.load();
+                if (['employees', 'departments', 'devices'].some(t => topics.has(t)) && activeView.id !== 'employees') await G_App.employees.load();
+                if (topics.has('employee-options')) G_App.employeeOptions.load();
+
+                // Heartbeats announce "attendance" every few seconds while an
+                // event runs; sections that don't show attendance skip those.
+                const attendanceOnly = topics.size > 0 && [...topics].every(t => t.startsWith('attendance'));
+                if (attendanceOnly && ['employees', 'departments', 'mobile-app', 'reports', 'settings'].includes(activeView.id)) return;
+
                 switch (activeView.id) {
+                    case 'employees':
+                        if (topics.has('departments')) await G_App.departments.load();
+                        await G_App.employees.load();
+                        break;
+                    case 'departments':
+                        await G_App.departments.render();
+                        break;
+                    case 'mobile-app':
+                        await G_App.mobile.render();
+                        break;
+                    case 'verification-section':
+                        await Promise.all([
+                            G_App.verification.loadAlerts(), G_App.verification.loadRechecks(),
+                            G_App.ocr.loadRecords(), G_App.face.loadRecords()
+                        ]);
+                        break;
+                    case 'reports':
+                        G_App.reports.init(); // the Personnel / Office dropdowns
+                        if (topics.has('events')) {
+                            delete document.getElementById('rpt-event').dataset.loaded;
+                            await G_App.reports.loadEventFilter();
+                        }
+                        break;
+                    case 'settings': {
+                        G_App.settings.render();
+                        await G_App.adminAccounts.load();
+                        // Don't overwrite the IP list while it's being edited.
+                        const ips = document.getElementById('network-allowed-ips');
+                        if (topics.has('network') && ips && document.activeElement !== ips) await G_App.network.load();
+                        break;
+                    }
                     case 'dashboard':
                         await G_App.ui.updateDashboard();
                         break;
@@ -695,9 +747,9 @@ const G_App = {
                 ? data.map(d => `<option>${d.name}</option>`).join('')
                 : '<option value="" disabled selected>No departments yet — add one first</option>';
 
-            document.getElementById('inp-dept').innerHTML = options;
-            document.getElementById('filter-dept').innerHTML = '<option value="all">All Departments</option>' + (data.map(d => `<option>${d.name}</option>`).join(''));
-            document.getElementById('rpt-dept').innerHTML = '<option value="all">All Offices</option>' + (data.map(d => `<option>${d.name}</option>`).join(''));
+            setSelectOptions(document.getElementById('inp-dept'), options);
+            setSelectOptions(document.getElementById('filter-dept'), '<option value="all">All Departments</option>' + (data.map(d => `<option>${d.name}</option>`).join('')));
+            setSelectOptions(document.getElementById('rpt-dept'), '<option value="all">All Offices</option>' + (data.map(d => `<option>${d.name}</option>`).join('')));
         },
         render: async () => {
             await G_App.departments.load();
@@ -1315,7 +1367,9 @@ const G_App = {
         drawnPoints: [],          // vertices of the polygon currently being drawn/edited
         drawMarkers: [],          // click markers for the in-progress polygon
         drawPolygon: null,        // live preview polygon layer for the in-progress shape
-        showAll: false,           // false = only the 3 most recently-created events; true = full list
+        statusFilter: 'all',      // status chip above the map: all / active / upcoming / expired
+        PAGE_SIZE: 12,            // event cards shown before "Show more"
+        visibleCount: 12,
         defaultLocation: null,    // CSPC coordinates, fetched once and cached
         loadAlerts: async () => {
             try {
@@ -1459,9 +1513,98 @@ const G_App = {
             const type = document.getElementById('gf-recurrence-type').value;
             document.getElementById('gf-recurrence-fields').classList.toggle('hidden', type !== 'weekly');
         },
-        toggleViewAll: () => {
-            G_App.geofence.showAll = !G_App.geofence.showAll;
+        // ---- Filters (search, status, schedule type, date, sort) ----
+        // They narrow both the event list and the shapes drawn on the map.
+        parseDate: (value) => new Date(String(value || '').replace(' ', 'T')),
+        setStatus: (status) => {
+            G_App.geofence.statusFilter = status;
+            document.querySelectorAll('#gf-status-chips button').forEach(b => b.classList.toggle('active', b.dataset.status === status));
+            G_App.geofence.onFilterChange();
+        },
+        onFilterChange: () => {
+            const custom = document.getElementById('gf-filter-date').value === 'custom';
+            document.getElementById('gf-filter-range').classList.toggle('hidden', !custom);
+            G_App.geofence.visibleCount = G_App.geofence.PAGE_SIZE;
             G_App.geofence.renderList();
+            G_App.geofence.updateMapPolygons();
+        },
+        clearFilters: () => {
+            document.getElementById('gf-filter-search').value = '';
+            document.getElementById('gf-filter-type').value = 'all';
+            document.getElementById('gf-filter-date').value = 'all';
+            document.getElementById('gf-filter-from').value = '';
+            document.getElementById('gf-filter-to').value = '';
+            G_App.geofence.setStatus('all');
+        },
+        hasActiveFilters: () => G_App.geofence.statusFilter !== 'all'
+            || document.getElementById('gf-filter-search').value.trim() !== ''
+            || document.getElementById('gf-filter-type').value !== 'all'
+            || document.getElementById('gf-filter-date').value !== 'all',
+        // [from, to) window for the date filter, or null for "Any date".
+        dateWindow: () => {
+            const mode = document.getElementById('gf-filter-date').value;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+            if (mode === 'today') return [today, addDays(today, 1)];
+            if (mode === 'week') {
+                const monday = addDays(today, -((today.getDay() + 6) % 7));
+                return [monday, addDays(monday, 7)];
+            }
+            if (mode === 'month') return [new Date(today.getFullYear(), today.getMonth(), 1), new Date(today.getFullYear(), today.getMonth() + 1, 1)];
+            if (mode === 'custom') {
+                const from = document.getElementById('gf-filter-from').value;
+                const to = document.getElementById('gf-filter-to').value;
+                if (!from && !to) return null;
+                return [from ? new Date(`${from}T00:00`) : new Date(0), to ? addDays(new Date(`${to}T00:00`), 1) : new Date(8.64e15)];
+            }
+            return null;
+        },
+        // Events matching every filter except the status chip (so the chips
+        // can show how many of each status the other filters leave).
+        filterExceptStatus: () => {
+            const q = normalizeSearchText(document.getElementById('gf-filter-search').value);
+            const type = document.getElementById('gf-filter-type').value;
+            const win = G_App.geofence.dateWindow();
+            return (G_App.state.geofences || []).filter(gf => {
+                if (q && !normalizeSearchText(`${gf.title || ''} ${gf.venue || ''}`).includes(q)) return false;
+                if (type !== 'all' && (gf.recurrence_type === 'weekly' ? 'weekly' : 'none') !== type) return false;
+                if (win) {
+                    const start = G_App.geofence.parseDate(gf.start_datetime);
+                    const end = G_App.geofence.parseDate(gf.end_datetime);
+                    if (!(start < win[1] && end >= win[0])) return false; // overlaps the window
+                }
+                return true;
+            });
+        },
+        filtered: () => {
+            const gfApp = G_App.geofence;
+            const status = gfApp.statusFilter;
+            const list = gfApp.filterExceptStatus().filter(gf => status === 'all' || gf.computed_status === status);
+            const sort = document.getElementById('gf-filter-sort').value;
+            const startOf = (gf) => gfApp.parseDate(gf.start_datetime).getTime();
+            if (sort === 'start-asc') list.sort((a, b) => startOf(a) - startOf(b));
+            else if (sort === 'start-desc') list.sort((a, b) => startOf(b) - startOf(a));
+            else if (sort === 'title') list.sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
+            return list; // "newest" = the server's order (most recently created first)
+        },
+        showMore: () => {
+            G_App.geofence.visibleCount += G_App.geofence.PAGE_SIZE;
+            G_App.geofence.renderList();
+        },
+        fitToFiltered: () => {
+            const map = G_App.geofence.map;
+            if (!map) return;
+            const bounds = new google.maps.LatLngBounds();
+            let any = false;
+            G_App.geofence.mappable().forEach(gf => (gf.points || []).forEach(p => { bounds.extend(p); any = true; }));
+            if (!any) return toast('No event boundaries to show for these filters.', 'info');
+            map.fitBounds(bounds, 40);
+            if (map.getZoom() > 18) map.setZoom(18);
+        },
+        // Highlights the card of the event open in the form.
+        markEditing: (id) => {
+            document.querySelectorAll('#geofence-list .gf-item').forEach(el => el.classList.toggle('is-editing', el.dataset.id == id));
         },
         focusOn: (lat, lng) => {
             if (!G_App.geofence.map) return;
@@ -1665,6 +1808,7 @@ const G_App = {
             if (!gf) return;
             document.getElementById('gf-form-title').innerText = 'Edit Event & Geofence';
             document.getElementById('gf-id').value = gf.id;
+            G_App.geofence.markEditing(gf.id);
             document.getElementById('gf-title').value = gf.title;
             document.getElementById('gf-venue').value = gf.venue || '';
             // Editing an existing (possibly already past) event shouldn't be
@@ -1698,6 +1842,7 @@ const G_App = {
         },
         clearForm: () => {
             document.getElementById('gf-form-title').innerText = 'Create Event & Geofence';
+            G_App.geofence.markEditing(null);
             ['gf-id', 'gf-title', 'gf-venue', 'gf-start', 'gf-end', 'gf-lat', 'gf-lng'].forEach(id => document.getElementById(id).value = '');
             document.getElementById('gf-recurrence-type').value = 'none';
             document.getElementById('gf-recurrence-end').value = '';
@@ -1714,53 +1859,91 @@ const G_App = {
             }
             lucide.createIcons();
         },
+        // Shapes to draw: the filtered events, minus expired ones (their
+        // boundary no longer applies) unless the "Expired" chip is picked.
+        mappable: () => G_App.geofence.filtered().filter(gf => (gf.points || []).length >= 3
+            && (gf.computed_status !== 'expired' || G_App.geofence.statusFilter === 'expired')),
+        STATUS_COLORS: { active: '#05CD99', upcoming: '#0D00A5', expired: '#A3AED0' },
         updateMapPolygons: () => {
+            if (!G_App.geofence.map) return;
             G_App.geofence.polygonLayers.forEach(layer => layer.setMap(null));
             G_App.geofence.polygonLayers = [];
-            G_App.state.geofences.forEach(gf => {
-                if (!gf.points || gf.points.length < 3) return;
-                // An expired event's boundary no longer applies, so it's left off
-                // the map. The 30s auto-refresh drops it shortly after it ends; the
-                // event stays in the list (marked EXPIRED) for editing/deleting.
-                if (gf.computed_status === 'expired') return;
+            G_App.geofence.mappable().forEach(gf => {
+                const color = G_App.geofence.STATUS_COLORS[gf.computed_status] || '#0D00A5';
                 const polygon = new google.maps.Polygon({
                     paths: gf.points.map(p => ({ lat: p.lat, lng: p.lng })),
-                    strokeColor: gf.computed_status === 'active' ? '#05CD99' : '#0D00A5',
-                    strokeWeight: 2, strokeOpacity: 0.9,
-                    fillColor: gf.computed_status === 'active' ? '#05CD99' : '#0D00A5',
-                    fillOpacity: 0.12,
+                    strokeColor: color, strokeWeight: 2, strokeOpacity: 0.9,
+                    fillColor: color, fillOpacity: 0.12,
                     map: G_App.geofence.map
                 });
                 polygon.addListener('click', (e) => {
-                    G_App.geofence.infoWindow.setContent(`<b>${gf.title}</b><br>${gf.venue || ''}`);
+                    G_App.geofence.infoWindow.setContent(
+                        `<b>${escapeHtml(gf.title)}</b><br>${escapeHtml(gf.venue || '')}<br>` +
+                        `<span style="text-transform:capitalize; color:${color}; font-weight:700;">${gf.computed_status}</span> · ` +
+                        `<a href="javascript:void(0)" onclick="G_App.geofence.edit('${gf.id}')">Edit</a>`
+                    );
                     G_App.geofence.infoWindow.setPosition(e.latLng);
                     G_App.geofence.infoWindow.open(G_App.geofence.map);
                 });
                 G_App.geofence.polygonLayers.push(polygon);
             });
         },
+        formatRange: (startValue, endValue) => {
+            const start = G_App.geofence.parseDate(startValue);
+            const end = G_App.geofence.parseDate(endValue);
+            if (isNaN(start) || isNaN(end)) return `${startValue} → ${endValue}`;
+            const day = { month: 'short', day: 'numeric', year: 'numeric' };
+            const time = { hour: 'numeric', minute: '2-digit' };
+            if (start.toDateString() === end.toDateString()) {
+                return `${start.toLocaleDateString(undefined, day)} · ${start.toLocaleTimeString(undefined, time)} – ${end.toLocaleTimeString(undefined, time)}`;
+            }
+            return `${start.toLocaleDateString(undefined, day)} ${start.toLocaleTimeString(undefined, time)} → ${end.toLocaleDateString(undefined, day)} ${end.toLocaleTimeString(undefined, time)}`;
+        },
         renderList: () => {
+            const gfApp = G_App.geofence;
             const all = G_App.state.geofences || [];
-            const visible = G_App.geofence.showAll ? all : all.slice(0, 3);
-            document.getElementById('geofence-list-title').innerText = G_App.geofence.showAll ? `All Events (${all.length})` : 'Recent Events';
-            document.getElementById('geofence-view-all-link').innerText = G_App.geofence.showAll ? 'Show Recent' : 'View All';
+            // Chip counts reflect the other filters, so they show what each chip would leave.
+            const base = gfApp.filterExceptStatus();
+            const counts = { all: base.length, active: 0, upcoming: 0, expired: 0 };
+            base.forEach(gf => { counts[gf.computed_status] = (counts[gf.computed_status] || 0) + 1; });
+            document.querySelectorAll('#gf-status-chips button').forEach(b => {
+                b.querySelector('.ev-chip-count').textContent = all.length ? counts[b.dataset.status] || 0 : '';
+            });
+
+            const list = gfApp.filtered();
+            const visible = list.slice(0, gfApp.visibleCount);
+            const filtering = gfApp.hasActiveFilters();
+            document.getElementById('gf-filter-clear').classList.toggle('hidden', !filtering);
+            document.getElementById('geofence-list-count').textContent = filtering
+                ? `${list.length} of ${all.length}`
+                : `${all.length} total`;
+            document.getElementById('geofence-list-more').classList.toggle('hidden', list.length <= visible.length);
+
+            const editingId = document.getElementById('gf-id').value;
+            const statusBadge = { active: 'success', upcoming: 'warning', expired: 'danger' };
             document.getElementById('geofence-list').innerHTML = visible.map(gf => `
-                <div class="card" style="padding:15px; background:var(--bg-body); margin-bottom: 5px;">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                        <div onclick="G_App.geofence.focusOn(${gf.center_lat},${gf.center_lng})" style="cursor:pointer; flex: 1;">
-                            <h5 style="font-weight:800; color:var(--primary)">${gf.title} <span class="badge badge-${gf.computed_status === 'active' ? 'success' : (gf.computed_status === 'expired' ? 'danger' : 'warning')}">${gf.computed_status}</span>
-                                ${gf.recurrence_type === 'weekly' ? '<span class="badge badge-info" title="Recurring event"><i data-lucide=\'repeat\' size=\'10\'></i> Recurring</span>' : ''}
-                            </h5>
-                            <div style="font-size:0.7rem; color:var(--text-muted)">${gf.venue || 'No Venue'} · ${(gf.points || []).length} boundary points</div>
-                            <div style="font-size:0.65rem; color:var(--text-muted); margin-top:5px;">${gf.start_datetime} → ${gf.end_datetime}</div>
-                        </div>
-                        <div style="display:flex; gap:5px;">
-                            <button class="btn-icon btn-edit" onclick="G_App.geofence.edit('${gf.id}')"><i data-lucide="edit-2" size="12"></i></button>
-                            <button class="btn-icon btn-delete" onclick="G_App.geofence.delete('${gf.id}')"><i data-lucide="trash-2" size="12"></i></button>
+                <div class="gf-item status-${gf.computed_status}${gf.id == editingId ? ' is-editing' : ''}" data-id="${gf.id}">
+                    <div class="gf-item-top">
+                        <div class="gf-item-title">${escapeHtml(gf.title)}</div>
+                        <div class="gf-item-badges">
+                            <span class="badge badge-${statusBadge[gf.computed_status] || 'info'}" style="text-transform:capitalize;">${gf.computed_status}</span>
+                            ${gf.recurrence_type === 'weekly' ? '<span class="badge badge-info" title="Recurring event"><i data-lucide="repeat" size="10"></i> Recurring</span>' : ''}
                         </div>
                     </div>
+                    <div class="gf-item-meta">
+                        <span><i data-lucide="map-pin"></i>${escapeHtml(gf.venue || 'No venue')}</span>
+                        <span><i data-lucide="clock"></i>${escapeHtml(gfApp.formatRange(gf.start_datetime, gf.end_datetime))}</span>
+                        <span><i data-lucide="hexagon"></i>${(gf.points || []).length} boundary points</span>
+                    </div>
+                    <div class="gf-item-actions">
+                        <button type="button" class="dash-link" onclick="G_App.geofence.focusOn(${Number(gf.center_lat)},${Number(gf.center_lng)})"><i data-lucide="crosshair"></i> Show on map</button>
+                        <button class="btn-icon btn-edit" title="Edit" onclick="G_App.geofence.edit('${gf.id}')"><i data-lucide="edit-2" size="12"></i></button>
+                        <button class="btn-icon btn-delete" title="Delete" onclick="G_App.geofence.delete('${gf.id}')"><i data-lucide="trash-2" size="12"></i></button>
+                    </div>
                 </div>
-            `).join('') || '<p style="color:var(--text-muted); font-size:0.8rem; text-align:center; padding: 20px 0;">No events yet.</p>';
+            `).join('') || (all.length
+                ? '<div class="gf-empty">No events match these filters. <button type="button" class="dash-link" onclick="G_App.geofence.clearFilters()">Clear filters</button></div>'
+                : '<div class="gf-empty">No events yet. Fill in the form above and draw a boundary on the map to create one.</div>');
             lucide.createIcons();
         }
     },
@@ -2048,9 +2231,8 @@ const G_App = {
         monthNames: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
 
         init: () => {
-            const empSel = document.getElementById('rpt-employee');
-            empSel.innerHTML = '<option value="all">All Personnel</option>' +
-                G_App.state.employees.map(e => `<option value="${e.id}">${e.full_name}</option>`).join('');
+            setSelectOptions(document.getElementById('rpt-employee'), '<option value="all">All Personnel</option>' +
+                G_App.state.employees.map(e => `<option value="${e.id}">${e.full_name}</option>`).join(''));
             G_App.reports.loadEventFilter();
         },
         // Populated once (like the Dashboard's own event filter) — cheap, and
@@ -2060,8 +2242,8 @@ const G_App = {
             if (!sel || sel.dataset.loaded) return;
             try {
                 const { data } = await apiFetch('/events?limit=100&status=all');
-                sel.innerHTML = '<option value="all">All Events</option>' +
-                    data.map(e => `<option value="${e.id}" data-start="${escapeHtml(e.start_datetime)}">${escapeHtml(e.title)} — ${new Date(e.start_datetime).toLocaleDateString()}</option>`).join('');
+                setSelectOptions(sel, '<option value="all">All Events</option>' +
+                    data.map(e => `<option value="${e.id}" data-start="${escapeHtml(e.start_datetime)}">${escapeHtml(e.title)} — ${new Date(e.start_datetime).toLocaleDateString()}</option>`).join(''));
                 sel.dataset.loaded = '1';
             } catch (err) { /* non-fatal */ }
         },
@@ -3326,7 +3508,7 @@ const G_App = {
     settings: {
         render: () => {
             const certSel = document.getElementById('cert-employee-select');
-            if (certSel) certSel.innerHTML = G_App.state.employees.map(e => `<option value="${e.id}">${e.full_name} (${e.employee_code})</option>`).join('');
+            setSelectOptions(certSel, G_App.state.employees.map(e => `<option value="${e.id}">${e.full_name} (${e.employee_code})</option>`).join(''));
             const deptSel = document.getElementById('cert-department-select');
             if (deptSel) {
                 const current = deptSel.value;
@@ -3633,19 +3815,21 @@ const G_App = {
         // "attendance-status" is sent only when an employee is actually timed
         // in or out (never by plain heartbeats), so it's shown almost at once:
         // a short debounce, then at most one refresh per STATUS_MIN_INTERVAL_MS.
-        MIN_INTERVAL_MS: 5000,
+        MIN_INTERVAL_MS: 1000,
         ATTENDANCE_MIN_INTERVAL_MS: 15000,
         STATUS_MIN_INTERVAL_MS: 1000,
         STATUS_DEBOUNCE_MS: 150,
         refreshDueAt: 0,
+        pendingTopics: new Set(), // what changed since the last refresh
         scheduleRefresh: (topic) => {
             const live = G_App.live;
+            if (topic) live.pendingTopics.add(topic);
             if (document.hidden) { live.missedWhileHidden = true; return; }
             const isStatus = topic === 'attendance-status';
             const minInterval = isStatus ? live.STATUS_MIN_INTERVAL_MS
                 : topic === 'attendance' ? live.ATTENDANCE_MIN_INTERVAL_MS : live.MIN_INTERVAL_MS;
             const sinceLast = Date.now() - G_App.ui.lastRefreshAt;
-            const wait = Math.max(isStatus ? live.STATUS_DEBOUNCE_MS : live.DEBOUNCE_MS, minInterval - sinceLast);
+            const wait = Math.max(topic === 'attendance' ? live.DEBOUNCE_MS : live.STATUS_DEBOUNCE_MS, minInterval - sinceLast);
             if (live.refreshTimer) {
                 if (Date.now() + wait >= live.refreshDueAt) return; // the queued one comes soon enough
                 clearTimeout(live.refreshTimer);
@@ -3653,7 +3837,9 @@ const G_App = {
             live.refreshDueAt = Date.now() + wait;
             live.refreshTimer = setTimeout(() => {
                 live.refreshTimer = null;
-                G_App.ui.refreshActiveView();
+                const topics = live.pendingTopics;
+                live.pendingTopics = new Set();
+                G_App.ui.refreshActiveView(topics);
             }, wait);
         }
     },

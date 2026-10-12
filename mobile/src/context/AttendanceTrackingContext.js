@@ -19,6 +19,7 @@ import {
   stopBackgroundAttendance,
   ensureBackgroundPermission
 } from '../tasks/backgroundAttendance';
+import { noteServerHeard, noteReading, offlineInsideSeconds, forgetTrail, clearTrails } from '../utils/presenceTrail';
 
 // When the employee actually crossed the boundary, between the last reading
 // inside (prev) and the first one outside (now): assuming a steady walk, the
@@ -50,7 +51,10 @@ const CHECK_IN_RETRY_MS = 2000;
 // employee" check -- which compares against positions from the last 30s and
 // asks again every 30s (anomalyWindowSeconds / anomalyRecheckSeconds) --
 // always has a fresh position for this phone.
-const HEARTBEAT_INTERVAL_MS = 15000;
+// Also well inside the server's 30 s silence window
+// (silentSessionSeconds), so a phone that goes quiet -- Location switched
+// off with the app closed -- is timed out within about half a minute.
+const HEARTBEAT_INTERVAL_MS = 12000;
 // Between heartbeats, a GPS reading this far (meters) from the last position
 // sent is pushed to the server right away, at most once per LIVE_POSITION_MIN_MS,
 // so the admin sees the employee's latitude/longitude move as they move.
@@ -227,10 +231,13 @@ export function AttendanceTrackingProvider({ children }) {
           {
             accuracy: coords?.accuracy,
             mocked: usingPending ? pending.mocked : mockedRef.current,
-            locationOff: usingPending && pending.locationOff
+            locationOff: usingPending && pending.locationOff,
+            offlineInsideSeconds: await offlineInsideSeconds(attendanceId, usingPending ? Date.parse(pending.observedAt) : Date.now())
           }
         );
+        if (result?.data && !result.data.ended && !result.data.ignored) noteServerHeard(attendanceId);
         if (result?.data?.ended) {
+          forgetTrail(attendanceId);
           if (usingPending) delete pendingExitRef.current[eventId];
           stopHeartbeat(attendanceId);
           // Closed locally right away (ref too, since the state -> ref sync
@@ -317,8 +324,44 @@ export function AttendanceTrackingProvider({ children }) {
   // previous app session.
   const refreshSessionsFromHistory = useCallback(async () => {
     try {
-      const history = await getMyHistory();
+      let history = await getMyHistory();
       const today = localDateString();
+      // Timed out by the server while this phone was offline but stayed
+      // inside (see utils/presenceTrail.js): ask for it back before taking
+      // the time-out as final, or the next reading inside would just time in
+      // afresh and lose the offline stretch.
+      const heldExitFor = (a) => {
+        const p = pendingExitRef.current[a.event_id];
+        return p && p.attendanceId === a.id ? p : null;
+      };
+      const resumable = [];
+      for (const a of (history.data || []).filter((r) => r.attendance_date === today && r.time_out)) {
+        const p = heldExitFor(a);
+        const claim = await offlineInsideSeconds(a.id, p ? Date.parse(p.observedAt) : Date.now());
+        if (claim) resumable.push({ a, p, claim });
+      }
+      if (resumable.length) {
+        await Promise.all(resumable.map(async ({ a, p, claim }) => {
+          const coords = p || locationRef.current;
+          try {
+            const result = await sendHeartbeat(a.id, coords?.latitude, coords?.longitude, p?.observedAt, {
+              accuracy: coords?.accuracy,
+              mocked: p ? p.mocked : mockedRef.current,
+              locationOff: !!p?.locationOff,
+              offlineInsideSeconds: claim
+            });
+            if (result?.data?.ended) {
+              forgetTrail(a.id);
+              if (p) delete pendingExitRef.current[a.event_id];
+            } else if (result?.data && !result.data.ignored) {
+              noteServerHeard(a.id);
+            }
+          } catch (e) {
+            // Still offline -- tried again on the next refresh or heartbeat.
+          }
+        }));
+        history = await getMyHistory();
+      }
       const todays = (history.data || []).filter((a) => a.attendance_date === today);
       const map = {};
       todays.forEach((a) => {
@@ -359,12 +402,15 @@ export function AttendanceTrackingProvider({ children }) {
       // goToFaceVerification's own promptedVerificationRef guards against
       // this firing again for a record already shown this session, so it
       // only actually re-navigates on a fresh mount (app open/resume).
-      const stillFlagged = todays.find((a) => a.requires_face_verification);
+      // Once the event has ended, verification is closed server-side
+      // (faceVerify answers 410), so an ended event never brings the screen up.
+      const eventEnded = (a) => !!a.event_end && new Date(a.event_end) <= new Date();
+      const stillFlagged = todays.find((a) => a.requires_face_verification && !eventEnded(a));
       if (stillFlagged) {
         goToFaceVerification(stillFlagged.id, stillFlagged.event_title);
       }
       todays.forEach((a) => {
-        if (!a.requires_face_verification) {
+        if (!a.requires_face_verification || eventEnded(a)) {
           clearFaceVerificationAlert(a.id);
           delete promptedVerificationRef.current[a.id];
         }
@@ -417,6 +463,7 @@ export function AttendanceTrackingProvider({ children }) {
       delete lastCheckInFailureRef.current[eventId];
       setCheckInErrors((prev) => ({ ...prev, [eventId]: null }));
       if (result?.data?.id) {
+        noteServerHeard(result.data.id);
         const nowIso = new Date().toISOString();
         // A flagged time-in has its clock stopped server-side until face
         // verification passes, so it must not start ticking here either.
@@ -618,6 +665,7 @@ export function AttendanceTrackingProvider({ children }) {
             setLocation(loc.coords);
             locationRef.current = loc.coords;
             mockedRef.current = !!loc.mocked;
+            noteReading({ at: loc.timestamp || Date.now(), mocked: !!loc.mocked });
             setAccuracy(loc.coords.accuracy);
             // loc.timestamp is when the GPS chip actually took this reading —
             // works fine offline (no WiFi/data needed) and is what lets a
@@ -730,9 +778,11 @@ export function AttendanceTrackingProvider({ children }) {
           const result = await sendHeartbeat(pending.attendanceId, pending.latitude, pending.longitude, pending.observedAt, {
             accuracy: pending.accuracy,
             mocked: pending.mocked,
-            locationOff: true
+            locationOff: true,
+            offlineInsideSeconds: await offlineInsideSeconds(pending.attendanceId, Date.parse(pending.observedAt))
           });
           if (result?.data?.ended) {
+            forgetTrail(pending.attendanceId);
             delete pendingExitRef.current[eventId];
             anyEnded = true;
           }
@@ -787,6 +837,7 @@ export function AttendanceTrackingProvider({ children }) {
     if (!employee || deviceStatus !== 'approved') {
       stopBackgroundAttendance();
       clearBackgroundState();
+      clearTrails();
       return;
     }
     if (!trackingEnabled) return; // Location off: left as is, it resumes when Location is back

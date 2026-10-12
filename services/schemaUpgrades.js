@@ -94,6 +94,14 @@ async function addAttendanceStatusFinalized() {
   console.log(`[schema] Added attendance.status_finalized (${result.affectedRows} existing record(s) kept as-is).`);
 }
 
+// mobile_devices.push_token: the phone's Expo push token, so a new event can
+// be announced even while the app is closed (services/pushService.js).
+async function addDevicePushToken() {
+  if (await columnExists('mobile_devices', 'push_token')) return;
+  await pool.query('ALTER TABLE mobile_devices ADD COLUMN push_token VARCHAR(255) NULL');
+  console.log('[schema] Added mobile_devices.push_token.');
+}
+
 async function indexExists(table, index) {
   const [rows] = await pool.query(
     `SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
@@ -138,6 +146,7 @@ async function run() {
   await addAdminEmailOtps();
   await addAdminNotifications();
   await addAttendanceStatusFinalized();
+  await addDevicePushToken();
   await dropUnusedSchema();
 }
 

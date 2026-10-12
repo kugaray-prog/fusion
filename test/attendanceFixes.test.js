@@ -345,16 +345,17 @@ const metersNorth = (m) => m / 111320;
     faceService.findBestMatch = origMatch;
   }
 
-  // ---- geo-anomaly: phones within 0.5 m, flagged at once, again every 30 s --
+  // ---- geo-anomaly: phones at the same spot, flagged at once, again every 30 s --
   {
+    const MAX_M = require('../config/config').attendance.anomalyDistanceMeters;
     const HERE = { lat: 13.4059, lng: 123.3758 };
     // other: { meters north of HERE, verified_ago_s, ping_fresh }
-    const anomalyPing = async ({ selfVerifiedAgo = null, selfFlagged = 0, other, lostRace = false }) => {
+    const anomalyPing = async ({ selfVerifiedAgo = null, selfFlagged = 0, other, lostRace = false, self = { id: 5, emp: 7 } }) => {
       log.length = 0;
       handler = (sql) => {
         if (/SET requires_face_verification = 1/.test(sql)) return [{ affectedRows: lostRace ? 0 : 1 }];
         if (/FROM attendance WHERE id = \? AND employee_id/.test(sql)) {
-          return [[{ id: 5, employee_id: 7, event_id: 3, geofence_id: 9, device_id: 1, time_out: null, outside_streak: 0, last_ping_at: null, requires_face_verification: selfFlagged }]];
+          return [[{ id: self.id, employee_id: self.emp, event_id: 3, geofence_id: 9, device_id: 1, time_out: null, outside_streak: 0, last_ping_at: null, requires_face_verification: selfFlagged }]];
         }
         if (/SELECT end_datetime FROM events/.test(sql)) return [[{ end_datetime: '2099-01-01 00:00:00' }]];
         if (/FROM geofences WHERE id/.test(sql)) return [[{ id: 9, shape_type: 'polygon' }]];
@@ -365,7 +366,7 @@ const metersNorth = (m) => m / 111320;
         }
         if (/LEFT JOIN mobile_devices md/.test(sql)) {
           return [[{
-            id: 6, employee_id: 8, requires_face_verification: 0, verified_ago_s: other.verifiedAgo ?? null,
+            id: self.id === 6 ? 5 : 6, employee_id: self.id === 6 ? 7 : 8, requires_face_verification: 0, verified_ago_s: other.verifiedAgo ?? null,
             last_lat: HERE.lat + metersNorth(other.meters), last_lng: HERE.lng, latitude: HERE.lat, longitude: HERE.lng,
             ping_fresh: other.fresh === false ? 0 : 1, time_in_fresh: 0, ping_is_newest: 1, device_uid: 'dev-B'
           }]];
@@ -374,7 +375,7 @@ const metersNorth = (m) => m / 111320;
         return [[]];
       };
       const r = await call(attendanceController.heartbeat, {
-        params: { id: 5 }, body: { latitude: HERE.lat, longitude: HERE.lng }, employee: { id: 7 }
+        params: { id: self.id }, body: { latitude: HERE.lat, longitude: HERE.lng }, employee: { id: self.emp }
       });
       const flagged = log.filter((q) => /INSERT INTO geo_anomalies/.test(q.sql)).map((q) => q.params[0]);
       return { r, flagged };
@@ -383,8 +384,8 @@ const metersNorth = (m) => m / 111320;
     let a = await anomalyPing({ other: { meters: 0.3 } });
     check(a.r.data.data.requiresFaceVerification === true && a.flagged.includes(5) && a.flagged.includes(6),
       'phones 0.3 m apart: both flagged on the first ping', a);
-    a = await anomalyPing({ other: { meters: 0.8 } });
-    check(a.r.data.data.requiresFaceVerification === false && a.flagged.length === 0, 'phones 0.8 m apart: not flagged', a);
+    a = await anomalyPing({ other: { meters: MAX_M + 0.5 } });
+    check(a.r.data.data.requiresFaceVerification === false && a.flagged.length === 0, `phones ${MAX_M + 0.5} m apart: not flagged`, a);
     a = await anomalyPing({ other: { meters: 0.3, fresh: false } });
     check(a.r.data.data.requiresFaceVerification === false && a.flagged.length === 0, "other phone's position older than 30 s: not flagged", a);
     a = await anomalyPing({ selfVerifiedAgo: 10, other: { meters: 0.3 } });
@@ -398,6 +399,13 @@ const metersNorth = (m) => m / 111320;
       'both phones pinging at once: the second flag is not logged or notified twice', a);
     a = await anomalyPing({ selfFlagged: 1, other: { meters: 0.3 } });
     check(a.r.data.data.requiresFaceVerification === true && a.flagged.length === 0, 'already flagged: reported again, not re-logged', a);
+    // Phone B (#6) pings at HERE; seconds later phone A (#5) pings at HERE
+    // while B's newest fix has drifted away -- they were still at the same
+    // spot within 30 s, so A is flagged right away.
+    await anomalyPing({ self: { id: 6, emp: 8 }, other: { meters: 50 } });
+    a = await anomalyPing({ other: { meters: MAX_M * 4 } });
+    check(a.r.data.data.requiresFaceVerification === true && a.flagged.includes(5) && a.flagged.includes(6),
+      'same spot within the last 30 s (newest fixes drifted apart): both flagged', a);
   }
 
   console.log(failures ? `\n${failures} failure(s)` : '\nAll checks passed.');

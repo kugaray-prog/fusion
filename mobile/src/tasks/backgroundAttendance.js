@@ -7,6 +7,7 @@ import { getDeviceUid } from '../utils/device';
 import { isInsideGeofence, isEventActiveNow, localDateString } from '../utils/geofence';
 import { alertFaceVerificationRequired } from '../utils/faceVerificationAlert';
 import Notifications from '../utils/notificationsModule';
+import { noteServerHeard, noteReading, offlineInsideSeconds, forgetTrail } from '../utils/presenceTrail';
 
 // Keeps attendance running while the app is in the background or has been
 // swiped closed. On Android, Location keeps delivering readings to this task
@@ -18,8 +19,14 @@ import Notifications from '../utils/notificationsModule';
 //     the server knows the phone is still there
 //   - an open session, reading outside the area -> time out right away, at
 //     that reading's own time (retried with the same reading if offline)
-// If Location is turned off while the app is closed, readings simply stop:
-// the server notices the silence and times the session out at the last ping
+// With no internet (Wi-Fi off, no mobile data) readings keep coming, so the
+// phone keeps track of itself: once back online, the server reopens a
+// session it timed out for silence if the phone stayed inside meanwhile
+// (utils/presenceTrail.js), and a held exit reading closes it at the moment
+// they actually left.
+// If Location is turned off while the app is closed, readings simply stop
+// (there's no "Location off" event to react to here): the server notices the
+// silence within ~30 s and times the session out at the last ping
 // (attendanceController.closeSilentSessions).
 //
 // While the app is open (AppState 'active') this task does nothing -- the
@@ -29,9 +36,9 @@ import Notifications from '../utils/notificationsModule';
 export const BACKGROUND_ATTENDANCE_TASK = 'geoattend-background-attendance';
 
 const STATE_KEY = 'bg_attendance_state';
-// Matches the in-app tracker's HEARTBEAT_INTERVAL_MS; well inside the
-// server's 60 s silence window.
-const KEEPALIVE_MS = 15000;
+// Matches the in-app tracker's HEARTBEAT_INTERVAL_MS: above the server's
+// 10 s ping debounce, well inside its 30 s silence window.
+const KEEPALIVE_MS = 12000;
 const CHECK_IN_RETRY_MS = 5000;
 // How often the event list is re-fetched while the app is closed, so an
 // event added or started meanwhile is still picked up.
@@ -175,6 +182,7 @@ async function handleReading(loc) {
   const { latitude, longitude, accuracy } = loc.coords;
   const observedAt = new Date(loc.timestamp || now).toISOString();
   const mocked = !!loc.mocked;
+  await noteReading({ at: loc.timestamp || now, mocked });
 
   for (const g of state.geofences) {
     if (!g.points || g.points.length < 3 || !isEventActiveNow(g, now)) continue;
@@ -196,9 +204,11 @@ async function handleReading(loc) {
         try {
           const result = await sendHeartbeat(exit.attendanceId, exit.latitude, exit.longitude, exit.observedAt, {
             accuracy: exit.accuracy,
-            mocked: exit.mocked
+            mocked: exit.mocked,
+            offlineInsideSeconds: await offlineInsideSeconds(exit.attendanceId, Date.parse(exit.observedAt))
           });
           if (result?.data?.ended) {
+            forgetTrail(exit.attendanceId);
             delete state.pendingExits[eventId];
             state.sessions[eventId] = { ...session, open: false };
           }
@@ -208,10 +218,16 @@ async function handleReading(loc) {
       } else if (now - (state.lastSentAt[session.id] || 0) >= KEEPALIVE_MS) {
         state.lastSentAt[session.id] = now;
         try {
-          const result = await sendHeartbeat(session.id, latitude, longitude, undefined, { accuracy, mocked });
-          // Closed server-side (e.g. it heard nothing for a while): the next
-          // reading inside times in again.
-          if (result?.data?.ended) state.sessions[eventId] = { ...session, open: false };
+          const result = await sendHeartbeat(session.id, latitude, longitude, undefined, {
+            accuracy, mocked, offlineInsideSeconds: await offlineInsideSeconds(session.id)
+          });
+          if (result?.data && !result.data.ended && !result.data.ignored) noteServerHeard(session.id);
+          // Closed server-side and not reopened (e.g. Location was off while
+          // it heard nothing): the next reading inside times in again.
+          if (result?.data?.ended) {
+            forgetTrail(session.id);
+            state.sessions[eventId] = { ...session, open: false };
+          }
           else if (result?.data?.requiresFaceVerification) alertFaceVerificationRequired(session.id, g.title);
         } catch (e) {
           // Offline -- the next keep-alive tries again.
@@ -233,6 +249,7 @@ async function handleReading(loc) {
         if (result?.data?.id) {
           state.sessions[eventId] = { id: result.data.id, open: true };
           state.lastSentAt[result.data.id] = now;
+          noteServerHeard(result.data.id);
           await postNotification(
             'Time-In Recorded',
             result.data.action === 're_time_in' || session?.id

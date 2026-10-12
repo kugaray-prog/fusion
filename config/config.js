@@ -101,23 +101,26 @@ module.exports = {
     heartbeatMinIntervalSeconds: Number(process.env.ATTENDANCE_HEARTBEAT_MIN_SECONDS) || 10,
     // An open session whose phone hasn't been heard from (no heartbeat or
     // time-in) for this many seconds is timed out at the last moment it was
-    // heard from. The app pings every ~15 s while a session is open, also in
+    // heard from. The app pings every ~12 s while a session is open, also in
     // the background with the app closed, so silence means Location was
     // turned off or the app/phone stopped with no screen open to report it.
+    // Kept short so that case is timed out within about half a minute;
+    // still over two pings' worth, so one late ping doesn't end a session.
     // 0 turns this off.
     silentSessionSeconds: process.env.ATTENDANCE_SILENT_SESSION_SECONDS !== undefined
       ? Number(process.env.ATTENDANCE_SILENT_SESSION_SECONDS)
-      : 60,
+      : 30,
     // Geo-anomaly ("one person carrying another's phone") detection, see
     // detectGeoAnomaly. Two different employees' phones for the same event
     // reporting positions within anomalyDistanceMeters of each other
     // (straight-line distance, default 0.5 m -- about a handspan or two) are
-    // flagged for face verification right away. anomalyWindowSeconds is how
-    // fresh the OTHER phone's last reported position must be to count.
+    // flagged for face verification right away. anomalyWindowSeconds: two
+    // phones that reported the same spot at any point within this many
+    // seconds of each other count, not only their newest positions.
     // anomalyRecheckSeconds: after passing face verification, a record is
     // left alone for this long; if the phones are still together after
     // that, it's flagged again -- so every 30 seconds by default.
-    anomalyDistanceMeters: Number(process.env.ANOMALY_DISTANCE_METERS) || 1,
+    anomalyDistanceMeters: Number(process.env.ANOMALY_DISTANCE_METERS) || 5,
     anomalyWindowSeconds: Number(process.env.ANOMALY_WINDOW_SECONDS) || 30,
     anomalyRecheckSeconds: Number(process.env.ANOMALY_RECHECK_SECONDS) || 30
   },

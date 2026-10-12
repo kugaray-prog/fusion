@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const config = require('../config/config');
 const { logAction } = require('../services/auditService');
+const pushService = require('../services/pushService');
 
 function centroidOf(points) {
   const sum = points.reduce((acc, p) => ({ lat: acc.lat + Number(p.lat), lng: acc.lng + Number(p.lng) }), { lat: 0, lng: 0 });
@@ -291,6 +292,11 @@ async function createGeofence(req, res, next) {
         ? `Event created (${occurrences.length} occurrences).`
         : 'Event created.',
       data: { id: firstGeofenceId, event_id: parentEventId, occurrence_count: occurrences.length, event_ids: createdEventIds }
+    });
+    // Tells every approved phone, including ones with the app closed. Not
+    // awaited: the admin's save shouldn't wait on Expo's push service.
+    pushService.notifyNewEvent({
+      eventId: parentEventId, title, venue, start: occurrences[0].start, occurrenceCount: occurrences.length
     });
   } catch (err) {
     await conn.rollback();

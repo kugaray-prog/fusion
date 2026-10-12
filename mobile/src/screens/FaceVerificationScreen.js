@@ -9,6 +9,7 @@ import { colors, radius, shadow } from '../theme';
 import { verifyAttendanceFace, getMyHistory } from '../api/client';
 import { useAttendanceTracking } from '../context/AttendanceTrackingContext';
 import AppHeader from '../components/AppHeader';
+import { clearFaceVerificationAlert } from '../utils/faceVerificationAlert';
 import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 // Automatic, on-device re-verification: AttendanceTrackingContext navigates
@@ -49,6 +50,20 @@ export default function FaceVerificationScreen({ route, navigation }) {
   // title the caller passed and is filled in from their attendance history.
   const [eventInfo, setEventInfo] = useState(eventTitle ? { title: eventTitle } : null);
 
+  // Verification is closed once the event ends (the server answers 410), so
+  // the screen closes itself instead of showing a capture that can't count.
+  const closedRef = useRef(false);
+  const closeScreen = () => {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    verifyingRef.current = false;
+    cameraRef.current?.cancel();
+    clearFaceVerificationAlert(attendanceId);
+    clearPendingVerification?.(attendanceId);
+    refreshAfterVerification?.();
+    navigation.replace('Dashboard');
+  };
+
   useEffect(() => {
     if (!attendanceId) return undefined;
     let cancelled = false;
@@ -56,6 +71,11 @@ export default function FaceVerificationScreen({ route, navigation }) {
       .then((history) => {
         const record = (history?.data || []).find((a) => String(a.id) === String(attendanceId));
         if (cancelled || !record) return;
+        if (!record.requires_face_verification
+          || (record.event_end && new Date(record.event_end) <= new Date())) {
+          closeScreen();
+          return;
+        }
         setEventInfo({
           title: record.event_title || eventTitle,
           venue: record.event_venue,
@@ -66,6 +86,16 @@ export default function FaceVerificationScreen({ route, navigation }) {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [attendanceId, eventTitle]);
+
+  // Event ends while this screen is open: close it right at the end time.
+  useEffect(() => {
+    if (!eventInfo?.end) return undefined;
+    const msLeft = new Date(eventInfo.end).getTime() - Date.now();
+    if (Number.isNaN(msLeft)) return undefined;
+    if (msLeft <= 0) { closeScreen(); return undefined; }
+    const timer = setTimeout(closeScreen, Math.min(msLeft, 2147483647));
+    return () => clearTimeout(timer);
+  }, [eventInfo?.end]);
 
   const scanPulse = useRef(new Animated.Value(0)).current;
 
@@ -181,6 +211,10 @@ export default function FaceVerificationScreen({ route, navigation }) {
       }
     } catch (err) {
       verifyingRef.current = false;
+      if (err?.response?.status === 410 || err?.response?.data?.result === 'expired') {
+        closeScreen();
+        return;
+      }
       setStage('failed');
       setErrorMsg(err?.response?.data?.message || "Couldn't verify your face. Please check your connection and try again.");
     } finally {

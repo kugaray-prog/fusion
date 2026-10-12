@@ -105,6 +105,7 @@ CREATE TABLE mobile_devices (
   brand VARCHAR(120) NULL,
   os VARCHAR(60) NULL,
   status ENUM('pending','approved','rejected','blacklisted') DEFAULT 'pending',
+  push_token VARCHAR(255) NULL, -- Expo push token (services/pushService.js)
   registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

@@ -219,6 +219,40 @@
         .ev-chip-count { font-size: 0.7rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--border); color: var(--text-muted); font-variant-numeric: tabular-nums; }
         .ev-chips button.active .ev-chip-count { background: var(--primary-light); color: var(--primary); }
         .ev-chip-count:empty { display: none; }
+        /* Geo-Fences: filters and event list */
+        .gf-filters { margin-bottom: 20px; padding: 18px 20px; }
+        .gf-filter-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .gf-filter-actions { display: flex; gap: 16px; align-items: center; }
+        .gf-range { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--text-muted); }
+        .gf-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+        .gf-dot-active { background: #05CD99; }
+        .gf-dot-upcoming { background: #0D00A5; }
+        .gf-dot-expired { background: #A3AED0; }
+        body.dark-mode .gf-dot-upcoming { background: #9CA3FF; }
+        .gf-list-card { margin-top: 20px; }
+        .gf-list-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
+        .gf-list-head h3 { font-weight: 800; margin: 0; }
+        .gf-list-count { font-size: 0.8rem; color: var(--text-muted); font-weight: 600; }
+        .gf-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+        .gf-item { display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: var(--radius-md, 16px); border: 1px solid var(--border); border-left: 4px solid var(--gf-accent, var(--border)); background: var(--bg-body); transition: var(--transition); }
+        .gf-item:hover { box-shadow: var(--shadow-sm); }
+        .gf-item.is-editing { box-shadow: var(--ring); }
+        .gf-item.status-active { --gf-accent: #05CD99; }
+        .gf-item.status-upcoming { --gf-accent: #0D00A5; }
+        .gf-item.status-expired { --gf-accent: #A3AED0; }
+        body.dark-mode .gf-item.status-upcoming { --gf-accent: #9CA3FF; }
+        .gf-item-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+        .gf-item-title { font-weight: 800; color: var(--text-main); font-size: 0.95rem; line-height: 1.3; word-break: break-word; }
+        .gf-item-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+        .gf-item-meta { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; color: var(--text-muted); }
+        .gf-item-meta span { display: inline-flex; align-items: center; gap: 6px; }
+        .gf-item-meta svg { width: 13px; height: 13px; flex: none; }
+        .gf-item-actions { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+        .gf-item-actions .dash-link { margin-right: auto; }
+        .gf-empty { grid-column: 1 / -1; padding: 28px; text-align: center; color: var(--text-muted); border: 1px dashed var(--border); border-radius: var(--radius-md, 16px); font-size: 0.9rem; }
+        .gf-list-more { display: flex; justify-content: center; margin-top: 16px; }
+        .gf-btn-ghost { background: var(--bg-body) !important; color: var(--text-main) !important; border: 1px solid var(--border) !important; padding: 10px 22px; font-size: 0.85rem; }
+        .gf-filters .dash-filters .geo-input[type="date"] { max-width: 150px; }
         .ev-table td { padding-top: 12px; padding-bottom: 12px; }
         .ev-title { font-weight: 700; color: var(--text-main); }
         .ev-sub { display: block; font-size: 0.78rem; color: var(--text-muted); font-weight: 500; margin-top: 2px; }
@@ -1640,6 +1674,52 @@
 
             <!-- GEO FENCES -->
             <div id="geofence" class="view">
+                <!-- Filters: narrow both the map and the event list -->
+                <div class="card gf-filters">
+                    <div class="ev-toolbar" style="margin-bottom: 12px;">
+                        <label class="ev-search">
+                            <i data-lucide="search"></i>
+                            <input type="search" id="gf-filter-search" class="geo-input" placeholder="Search event or venue" aria-label="Search events" oninput="G_App.geofence.onFilterChange()">
+                        </label>
+                        <div class="ev-chips" id="gf-status-chips" role="group" aria-label="Status">
+                            <button type="button" data-status="all" class="active" onclick="G_App.geofence.setStatus('all')">All <span class="ev-chip-count"></span></button>
+                            <button type="button" data-status="active" onclick="G_App.geofence.setStatus('active')"><span class="gf-dot gf-dot-active"></span>Active <span class="ev-chip-count"></span></button>
+                            <button type="button" data-status="upcoming" onclick="G_App.geofence.setStatus('upcoming')"><span class="gf-dot gf-dot-upcoming"></span>Upcoming <span class="ev-chip-count"></span></button>
+                            <button type="button" data-status="expired" onclick="G_App.geofence.setStatus('expired')"><span class="gf-dot gf-dot-expired"></span>Expired <span class="ev-chip-count"></span></button>
+                        </div>
+                    </div>
+                    <div class="gf-filter-row">
+                        <div class="dash-filters">
+                            <select id="gf-filter-type" class="geo-input" aria-label="Schedule type" onchange="G_App.geofence.onFilterChange()">
+                                <option value="all">All schedules</option>
+                                <option value="none">One-time</option>
+                                <option value="weekly">Recurring</option>
+                            </select>
+                            <select id="gf-filter-date" class="geo-input" aria-label="Date" onchange="G_App.geofence.onFilterChange()">
+                                <option value="all">Any date</option>
+                                <option value="today">Today</option>
+                                <option value="week">This week</option>
+                                <option value="month">This month</option>
+                                <option value="custom">Custom range&hellip;</option>
+                            </select>
+                            <span id="gf-filter-range" class="gf-range hidden">
+                                <input type="date" id="gf-filter-from" class="geo-input" aria-label="From" onchange="G_App.geofence.onFilterChange()">
+                                <span>to</span>
+                                <input type="date" id="gf-filter-to" class="geo-input" aria-label="To" onchange="G_App.geofence.onFilterChange()">
+                            </span>
+                            <select id="gf-filter-sort" class="geo-input" aria-label="Sort" onchange="G_App.geofence.onFilterChange()">
+                                <option value="newest">Newest created</option>
+                                <option value="start-asc">Start date (soonest)</option>
+                                <option value="start-desc">Start date (latest)</option>
+                                <option value="title">Name (A&ndash;Z)</option>
+                            </select>
+                        </div>
+                        <div class="gf-filter-actions">
+                            <button type="button" class="dash-link hidden" id="gf-filter-clear" onclick="G_App.geofence.clearFilters()"><i data-lucide="x"></i> Clear filters</button>
+                            <button type="button" class="dash-link" onclick="G_App.geofence.fitToFiltered()" title="Zoom the map to the events shown"><i data-lucide="scan"></i> Fit map to results</button>
+                        </div>
+                    </div>
+                </div>
                 <div style="display: grid; grid-template-columns: 1fr 400px; gap: 25px; height: 720px;">
                     <div id="geo-map" style="border-radius: 24px; border: 1px solid var(--border); background: var(--bg-card);"></div>
                     <div class="card" style="overflow-y: auto;">
@@ -1720,16 +1800,21 @@
                                 </button>
                             </div>
                         </div>
-                        <div style="margin-top: 30px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 15px;">
-                                <h4 style="font-size: 0.8rem; font-weight: 800; color: var(--secondary);" id="geofence-list-title">Recent Events</h4>
-                                <a href="javascript:void(0)" style="font-size: 0.75rem; font-weight: 800; color: var(--primary);" onclick="G_App.geofence.toggleViewAll()" id="geofence-view-all-link">View All</a>
-                            </div>
-                            <div id="geofence-list" style="display: flex; flex-direction: column; gap: 12px;"></div>
-                        </div>
                     </div>
                 </div>
                 <div id="geofence-alerts" style="margin-top: 20px;"></div>
+
+                <!-- Event list: follows the filters above, like the map -->
+                <div class="card gf-list-card">
+                    <div class="gf-list-head">
+                        <h3>Events</h3>
+                        <span id="geofence-list-count" class="gf-list-count"></span>
+                    </div>
+                    <div id="geofence-list" class="gf-list"></div>
+                    <div id="geofence-list-more" class="gf-list-more hidden">
+                        <button type="button" class="btn-primary gf-btn-ghost" onclick="G_App.geofence.showMore()">Show more</button>
+                    </div>
+                </div>
             </div>
 
             <!-- VERIFICATION (OCR Verification + Face Verification) -->

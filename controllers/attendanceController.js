@@ -183,8 +183,57 @@ async function flagAttendanceForVerification({ attendanceId, employeeId, eventId
 // so for as long as the phones stay together, face verification is asked
 // for again every 30 seconds.
 //
+// Every position each open record reported in the last
+// config.attendance.anomalyWindowSeconds -- full heartbeats, live-position
+// pings and time-ins alike -- so two phones at the same spot at any moment
+// within that window are caught right away, even when their newest fixes
+// have since drifted apart a little (GPS jitter) or one reached the spot a
+// few seconds after the other.
+// attendanceId -> { eventId, employeeId, points: [{ lat, lng, at }] }
+const recentPositions = new Map();
+let recentPositionsSweptAt = 0;
+
+function rememberPosition({ attendanceId, eventId, employeeId, latitude, longitude }) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!attendanceId || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  const now = Date.now();
+  const cutoff = now - config.attendance.anomalyWindowSeconds * 1000;
+  const entry = recentPositions.get(String(attendanceId)) || { eventId, employeeId, points: [] };
+  entry.points = entry.points.filter((p) => p.at >= cutoff);
+  entry.points.push({ lat, lng, at: now });
+  recentPositions.set(String(attendanceId), entry);
+  if (now - recentPositionsSweptAt > 10000) {
+    recentPositionsSweptAt = now;
+    for (const [id, e] of recentPositions) {
+      if (!e.points.some((p) => p.at >= cutoff)) recentPositions.delete(id);
+    }
+  }
+}
+
+// Other employees' records for this event that were within maxMeters of
+// (latitude, longitude) at some point in the last anomalyWindowSeconds:
+// attendanceId -> { lat, lng } of the closest such position.
+function trailMatches({ attendanceId, employeeId, eventId, latitude, longitude, maxMeters }) {
+  const cutoff = Date.now() - config.attendance.anomalyWindowSeconds * 1000;
+  const matches = new Map();
+  for (const [id, e] of recentPositions) {
+    if (id === String(attendanceId) || String(e.eventId) !== String(eventId) || String(e.employeeId) === String(employeeId)) continue;
+    let best = null;
+    for (const p of e.points) {
+      if (p.at < cutoff) continue;
+      const d = geofenceService.distanceMeters(Number(latitude), Number(longitude), p.lat, p.lng);
+      if (d <= maxMeters && (!best || d < best.d)) best = { d, lat: p.lat, lng: p.lng };
+    }
+    if (best) matches.set(id, best);
+  }
+  return matches;
+}
+
 // Returns whether THIS record currently requires face verification.
 async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude }) {
+  rememberPosition({ attendanceId, eventId, employeeId, latitude, longitude });
+
   // Ages are worked out in SQL (TIMESTAMPDIFF against NOW()) rather than by
   // parsing the DATETIME strings in Node, so they stay right whatever
   // timezone the Node process and the database session happen to use.
@@ -207,6 +256,8 @@ async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, 
   const latTol = maxMeters / 111320;
   const lngTol = maxMeters / (111320 * Math.max(Math.cos(Number(latitude) * Math.PI / 180), 0.01));
   const windowSeconds = config.attendance.anomalyWindowSeconds;
+  const trail = trailMatches({ attendanceId, employeeId, eventId, latitude, longitude, maxMeters });
+  const trailIds = trail.size ? [...trail.keys()].map(Number) : [0];
   const [candidates] = await pool.query(
     `SELECT x.*, (x.last_ping_at >= NOW() - INTERVAL ? SECOND) AS ping_fresh,
             (x.latest_time_in >= NOW() - INTERVAL ? SECOND) AS time_in_fresh,
@@ -225,12 +276,14 @@ async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, 
      WHERE (x.last_ping_at >= NOW() - INTERVAL ? SECOND
              AND ABS(x.last_lat - ?) < ? AND ABS(x.last_lng - ?) < ?)
         OR (x.latest_time_in >= NOW() - INTERVAL ? SECOND
-             AND ABS(x.latitude - ?) < ? AND ABS(x.longitude - ?) < ?)`,
+             AND ABS(x.latitude - ?) < ? AND ABS(x.longitude - ?) < ?)
+        OR x.id IN (?)`,
     [
       windowSeconds, windowSeconds,
       eventId, employeeId, attendanceId,
       windowSeconds, latitude, latTol, longitude, lngTol,
-      windowSeconds, latitude, latTol, longitude, lngTol
+      windowSeconds, latitude, latTol, longitude, lngTol,
+      trailIds
     ]
   );
   const within = (lat, lng) => lat != null && lng != null &&
@@ -240,7 +293,10 @@ async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, 
   // walked away doesn't still count as "here" off its old check-in point.
   const rows = [];
   for (const c of candidates) {
-    if (Number(c.ping_is_newest)) {
+    const seen = trail.get(String(c.id));
+    if (seen) {
+      rows.push({ ...c, cur_lat: seen.lat, cur_lng: seen.lng });
+    } else if (Number(c.ping_is_newest)) {
       if (Number(c.ping_fresh) && within(c.last_lat, c.last_lng)) rows.push({ ...c, cur_lat: c.last_lat, cur_lng: c.last_lng });
     } else if (Number(c.time_in_fresh) && within(c.latitude, c.longitude)) {
       rows.push({ ...c, cur_lat: c.latitude, cur_lng: c.longitude });
@@ -450,6 +506,23 @@ async function settleEndedEvents() {
   await closeSessionsForEndedEvents();
   await finalizeEndedEventStatuses();
   await rejectUnverifiedFlaggedAttendance();
+  await expireEndedEventAnomalies();
+}
+
+// Resolves the anomaly alerts of events that have ended or were deleted
+// (event_id set to NULL), so they drop off the admin's alert panels. The
+// attendance itself was already settled by rejectUnverifiedFlaggedAttendance.
+// Also run every 30 s from server.js, so alerts clear soon after an event
+// ends even if nobody opens an attendance page.
+async function expireEndedEventAnomalies() {
+  const [result] = await pool.query(
+    `UPDATE geo_anomalies ga
+     LEFT JOIN events ev ON ga.event_id = ev.id
+     SET ga.resolved = 1, ga.resolved_at = NOW()
+     WHERE ga.resolved = 0 AND (ev.id IS NULL OR ev.end_datetime < NOW())`
+  );
+  if (result.affectedRows) realtime.broadcastNow('attendance');
+  return result.affectedRows;
 }
 
 // The status to show for an attendance row (needs `events ev` joined):
@@ -1274,12 +1347,16 @@ async function faceVerify(req, res, next) {
 async function getAnomalies(req, res, next) {
   try {
     const { resolved = '0' } = req.query;
+    // Open alerts only matter while their event runs: once it ends (or is
+    // deleted) the flagged attendance is settled by rejectUnverifiedFlaggedAttendance
+    // and expireEndedEventAnomalies resolves the alert, so it's never shown.
     const [rows] = await pool.query(
       `SELECT ga.*, e.full_name, e.employee_code, ev.title AS event_title
        FROM geo_anomalies ga
        JOIN employees e ON ga.employee_id = e.id
        LEFT JOIN events ev ON ga.event_id = ev.id
        WHERE ga.resolved = ?
+         ${resolved === '1' ? '' : 'AND ev.end_datetime >= NOW()'}
        ORDER BY ga.created_at DESC
        LIMIT 100`,
       [resolved === '1' ? 1 : 0]
@@ -1584,11 +1661,13 @@ async function autoTimeOut({ record, openSession, endTime, latitude, longitude, 
 
 // Times out every open session whose phone has gone silent: no heartbeat (or
 // time-in) for config.attendance.silentSessionSeconds. The app keeps pinging
-// every ~15 s while a session is open -- in the background too, even with
+// every ~12 s while a session is open -- in the background too, even with
 // the app closed (see mobile/src/tasks/backgroundAttendance.js) -- so silence
 // means its Location was turned off, or the app or phone stopped, with no
 // screen open to report it. The time-out is set at the last moment the phone
-// was heard from, not now. Run on a timer from server.js.
+// was heard from, not now. Run on a timer from server.js. A phone that was
+// only offline (no internet) but stayed inside gets it undone once it's back
+// online -- see resumeAfterOffline.
 //
 // Right after this server starts, phones haven't had a chance to reach it
 // yet (it may have been down a while), so nothing is closed until it has
@@ -1643,6 +1722,75 @@ async function closeSilentSessions() {
   }
 }
 
+// A phone with no internet (Wi-Fi off, no mobile data) still tracks itself:
+// it keeps taking GPS readings and remembers exactly when it left the area.
+// But the server hears nothing, so closeSilentSessions times it out at its
+// last ping. Once it's back online it sends `offline_inside_seconds`: how
+// long ago the server last heard from it, all of which it spent inside the
+// area with Location on (an unbroken run of real, non-mock GPS readings --
+// mobile/src/utils/presenceTrail.js). If that run reaches back to the
+// silence time-out, the time-out is undone and the same session reopened,
+// so the duration carries on as if the phone had never gone quiet.
+//
+// Only a no_signal time-out with nothing recorded since (no later log entry,
+// no newer session) is reopened, only while the event is still running and
+// the record isn't awaiting face verification. Returns the reopened record,
+// or null if it stays closed.
+const OFFLINE_RESUME_SLACK_SECONDS = 20; // request latency between the server's last ping and the phone's receipt of it
+async function resumeAfterOffline(record, claimRaw) {
+  const claimSeconds = Number(claimRaw);
+  if (!(claimSeconds > 0) || record.requires_face_verification) return null;
+
+  const [[[check]], [[lastLog]], [[lastSession]]] = await Promise.all([
+    pool.query(
+      `SELECT (NOW() - INTERVAL ? SECOND) <= (a.time_out + INTERVAL ? SECOND) AS covered, e.end_datetime > NOW() AS running
+       FROM attendance a JOIN events e ON e.id = a.event_id WHERE a.id = ?`,
+      [Math.ceil(claimSeconds), OFFLINE_RESUME_SLACK_SECONDS, record.id]
+    ),
+    pool.query('SELECT action, details FROM attendance_logs WHERE attendance_id = ? ORDER BY id DESC LIMIT 1', [record.id]),
+    pool.query('SELECT * FROM attendance_sessions WHERE attendance_id = ? ORDER BY time_in DESC, id DESC LIMIT 1', [record.id])
+  ]);
+  if (!check?.covered || !check.running) return null;
+  let reason = null;
+  try { reason = JSON.parse(lastLog?.details || '{}').reason; } catch (e) { /* not JSON */ }
+  if (lastLog?.action !== 'auto_time_out' || reason !== 'no_signal') return null;
+  if (!lastSession || !lastSession.auto_ended || lastSession.time_out !== record.time_out) return null;
+
+  const sessionSeconds = Number(lastSession.duration_seconds) || 0;
+  const [reopened] = await pool.query(
+    `UPDATE attendance SET time_out = NULL,
+       total_duration_seconds = GREATEST(0, COALESCE(total_duration_seconds, 0) - ?),
+       work_hours = ROUND(total_duration_seconds / 3600, 2), last_ping_at = NOW(), outside_streak = 0
+     WHERE id = ? AND time_out = ?`,
+    [sessionSeconds, record.id, record.time_out]
+  );
+  if (!reopened.affectedRows) {
+    // Another ping from the same phone may have just reopened it.
+    const [[fresh]] = await pool.query('SELECT * FROM attendance WHERE id = ?', [record.id]);
+    return fresh && !fresh.time_out ? fresh : null;
+  }
+  await pool.query(
+    `UPDATE attendance_sessions SET time_out = NULL, duration_seconds = NULL, out_latitude = NULL, out_longitude = NULL, auto_ended = 0
+     WHERE id = ?`,
+    [lastSession.id]
+  );
+  realtime.broadcastNow('attendance-status');
+  realtime.notifyEmployee(record.employee_id, 'attendance');
+  console.log(`[attendance] Resumed attendance #${record.id}: the phone was offline but stayed inside (${Math.round(claimSeconds)} s).`);
+  afterResponse('offline resume follow-up', () => Promise.all([
+    pool.query(
+      `INSERT INTO attendance_logs (attendance_id, employee_id, action, details) VALUES (?, ?, 'resumed_after_offline', ?)`,
+      [record.id, record.employee_id, JSON.stringify({ previousTimeOut: record.time_out, offlineInsideSeconds: Math.round(claimSeconds) })]
+    ),
+    pool.query(
+      `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Attendance Continued', ?, 'attendance_auto_end')`,
+      [record.employee_id, 'Your phone lost its internet connection, but it stayed inside the event area, so your attendance kept counting.']
+    )
+  ]));
+  const [[fresh]] = await pool.query('SELECT * FROM attendance WHERE id = ?', [record.id]);
+  return fresh;
+}
+
 async function heartbeat(req, res, next) {
   try {
     const { id } = req.params;
@@ -1654,8 +1802,12 @@ async function heartbeat(req, res, next) {
     }
 
     const [rows] = await pool.query('SELECT * FROM attendance WHERE id = ? AND employee_id = ?', [id, req.employee.id]);
-    const record = rows[0];
+    let record = rows[0];
     if (!record) return res.status(404).json({ success: false, message: 'Attendance record not found.' });
+    // Timed out for silence while the phone was offline but still inside:
+    // reopened, and this ping is then handled like any other (an exit
+    // reading closes it again at the moment they left).
+    if (record.time_out) record = (await resumeAfterOffline(record, req.body.offline_inside_seconds)) || record;
     if (locationOff) {
       // The phone may never have had a fix to send -- fall back to the last
       // position the server already has for this session.
@@ -1715,10 +1867,26 @@ async function heartbeat(req, res, next) {
         // these the moment the employee moves, so the admin's attendance view
         // follows their live position. last_ping_at stays put so the
         // debounce timing is unchanged.
+        let requiresFaceVerification = !!record.requires_face_verification;
         if (!observed_at && latitude != null && longitude != null) {
           await pool.query('UPDATE attendance SET last_lat = ?, last_lng = ? WHERE id = ?', [latitude, longitude, id]);
+          // Still checked for another phone at the same spot, so a match
+          // is flagged on this very ping rather than on the next full one.
+          const [deviceRows] = record.device_id
+            ? await pool.query('SELECT device_uid FROM mobile_devices WHERE id = ?', [record.device_id])
+            : [[]];
+          requiresFaceVerification = await detectGeoAnomaly({
+            attendanceId: record.id,
+            employeeId: record.employee_id,
+            eventId: record.event_id,
+            deviceUid: deviceRows[0]?.device_uid,
+            latitude: parseFloat(latitude),
+            longitude: parseFloat(longitude)
+          });
         }
-        return res.json({ success: true, message: 'Ping ignored (too soon).', data: { ended: false, inside } });
+        // `ignored`: last_ping_at wasn't moved, so the app doesn't count this
+        // as the server having heard from it (see presenceTrail.js).
+        return res.json({ success: true, message: 'Ping ignored (too soon).', data: { ended: false, inside, ignored: true, requiresFaceVerification } });
       }
     }
 
@@ -1790,5 +1958,6 @@ module.exports = {
   // Used by reportController/ratingController to settle ended events'
   // attendance before counting it, and to show Ongoing for running events.
   settleEndedEvents,
+  expireEndedEventAnomalies,
   DISPLAY_STATUS_SQL
 };

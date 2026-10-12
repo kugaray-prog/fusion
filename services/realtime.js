@@ -145,8 +145,12 @@ function broadcastMutations(req, res, next) {
   const segment = req.path.split('/')[1];
   if (!segment || IGNORED_SEGMENTS.has(segment)) return next();
   // A handler that only reads (e.g. a POST preview) sets res.locals.noBroadcast.
+  // Goes out at once, except employees' attendance writes: heartbeats arrive
+  // many per second while an event runs, so those are coalesced.
   res.on('finish', () => {
-    if (res.statusCode < 400 && !res.locals.noBroadcast) broadcast(segment);
+    if (res.statusCode >= 400 || res.locals.noBroadcast) return;
+    if (segment === 'attendance' && !req.admin) broadcast(segment);
+    else broadcastNow(segment);
   });
   next();
 }

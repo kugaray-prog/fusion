@@ -125,7 +125,9 @@ export async function submitAttendance(payload) {
 // `accuracy` (meters) and `mocked` (Android's mock-location flag) belong to
 // that same reading. `locationOff` tells the server the phone's Location was
 // switched off, so it closes the session immediately at `observedAt`.
-export async function sendHeartbeat(attendanceId, latitude, longitude, observedAt, { accuracy, mocked, locationOff } = {}) {
+// `offlineInsideSeconds` (utils/presenceTrail.js) lets the server reopen a
+// session it timed out while this phone had no internet but stayed inside.
+export async function sendHeartbeat(attendanceId, latitude, longitude, observedAt, { accuracy, mocked, locationOff, offlineInsideSeconds } = {}) {
   const body = {};
   if (latitude != null) body.latitude = latitude;
   if (longitude != null) body.longitude = longitude;
@@ -133,6 +135,7 @@ export async function sendHeartbeat(attendanceId, latitude, longitude, observedA
   if (accuracy != null) body.accuracy = accuracy;
   if (mocked) body.mocked = true;
   if (locationOff) body.location_off = true;
+  if (offlineInsideSeconds) body.offline_inside_seconds = offlineInsideSeconds;
   const { data } = await api.post(`/attendance/${attendanceId}/heartbeat`, body);
   return data;
 }
@@ -182,6 +185,13 @@ export async function getGeofences() {
 // line). Returns { ip, enforced, allowed }.
 export async function checkOfficeNetwork() {
   const { data } = await api.get('/network/check');
+  return data;
+}
+
+// PUT /api/devices/push-token — saves this phone's Expo push token so the
+// server can announce new events while the app is closed; null clears it.
+export async function savePushToken(token) {
+  const { data } = await api.put('/devices/push-token', { token });
   return data;
 }
 

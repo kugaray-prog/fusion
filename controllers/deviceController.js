@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const { logAction } = require('../services/auditService');
 const { isBlockedStatus, blockedMessage, cleanDeviceInfo } = require('../services/deviceAccess');
 const realtime = require('../services/realtime');
+const { isExpoToken } = require('../services/pushService');
 
 // GET /api/devices
 // Each device row is paired with the employee_faces row whose created_at is
@@ -92,6 +93,29 @@ async function registerDevice(req, res, next) {
     );
 
     res.status(201).json({ success: true, message: 'Device registered and pending admin approval.', data: { id: result.insertId } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PUT /api/devices/push-token { token } -- saves this phone's Expo push token
+// (the phone is identified by X-Device-Uid, and must belong to the signed-in
+// employee). A token moves with the phone, so it's cleared from any other row
+// first. { token: null } clears it, e.g. on sign-out.
+async function savePushToken(req, res, next) {
+  try {
+    const deviceUid = req.headers['x-device-uid'];
+    const token = req.body.token || null;
+    if (!deviceUid) return res.status(400).json({ success: false, message: 'Device id is required.' });
+    if (token && !isExpoToken(token)) return res.status(400).json({ success: false, message: 'Invalid push token.' });
+
+    if (token) await pool.query('UPDATE mobile_devices SET push_token = NULL WHERE push_token = ? AND device_uid <> ?', [token, deviceUid]);
+    const [result] = await pool.query(
+      'UPDATE mobile_devices SET push_token = ? WHERE device_uid = ? AND employee_id = ?',
+      [token, deviceUid, req.employee.id]
+    );
+    if (!result.affectedRows) return res.status(404).json({ success: false, message: 'This device is not registered to your account.' });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -237,4 +261,4 @@ async function bulkDeviceAction(req, res, next) {
   }
 }
 
-module.exports = { getDevices, registerDevice, updateDeviceStatus, deleteDevice, bulkDeviceAction };
+module.exports = { getDevices, registerDevice, savePushToken, updateDeviceStatus, deleteDevice, bulkDeviceAction };
