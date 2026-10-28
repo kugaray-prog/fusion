@@ -6,6 +6,7 @@ import { useLocationStatus } from './LocationStatusContext';
 import { getGeofences, registerDevice, submitAttendance, sendHeartbeat, getMyHistory } from '../api/client';
 import { navigationRef } from '../navigation/navigationRef';
 import { notify } from '../utils/notify';
+import { IS_EXPO_GO } from '../utils/expoGo';
 import { getDeviceUid, getDeviceInfo } from '../utils/device';
 import { liveDurationSeconds } from '../utils/duration';
 import { useLiveUpdates } from '../api/realtime';
@@ -848,6 +849,15 @@ export function AttendanceTrackingProvider({ children }) {
       if (await startBackgroundAttendance()) return;
       if (cancelled || askedBackgroundRef.current || Platform.OS === 'web') return;
       askedBackgroundRef.current = true;
+      // Expo Go has no background location on Android, so there's nothing
+      // to grant: say so, rather than let a silence time-out come as a surprise.
+      if (IS_EXPO_GO) {
+        notify(
+          'Attendance stops when you leave the app',
+          "Expo Go can't track your location in the background, so your attendance only runs while GeoAttend is on screen. Install the GeoAttend app to keep it running while you stay inside the event area."
+        );
+        return;
+      }
       notify(
         'Keep attendance running when the app is closed',
         'To keep your attendance running after you close GeoAttend -- and time you out as soon as you leave the event area -- set Location to "Allow all the time" on the next screen.',
