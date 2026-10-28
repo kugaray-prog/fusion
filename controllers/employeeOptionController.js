@@ -1,9 +1,7 @@
 const pool = require('../config/db');
 const { logAction } = require('../services/auditService');
 
-// Position and Classification dropdown lists, stored as JSON arrays in
-// settings. Defaults are used until a list is first changed and match
-// RegistrationScreen.js.
+// Position/Classification lists stored as JSON in settings (defaults match RegistrationScreen).
 const KINDS = {
   position: 'employee_positions',
   classification: 'employee_classifications'

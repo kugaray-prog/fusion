@@ -34,12 +34,6 @@ const uploadPhoto = multer({
   limits: { fileSize: 4 * 1024 * 1024 }
 });
 
-const uploadSelfie = multer({
-  storage: makeStorage('selfies'),
-  fileFilter: imageFilter,
-  limits: { fileSize: 6 * 1024 * 1024 }
-});
-
 const uploadFace = multer({
   storage: makeStorage('faces'),
   fileFilter: imageFilter,
@@ -105,7 +99,6 @@ function withDurableCopy(uploader) {
 module.exports = {
   uploadOcr: withDurableCopy(uploadOcr),
   uploadPhoto: withDurableCopy(uploadPhoto),
-  uploadSelfie: withDurableCopy(uploadSelfie),
   uploadFace: withDurableCopy(uploadFace),
   uploadRegistration: withDurableCopy(uploadRegistration),
   uploadImportFile

@@ -4,17 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../config';
 import { getDeviceUid } from '../utils/device';
 
-// Live updates from the server's WebSocket (/ws, services/realtime.js). The
-// server only says "something changed" ({ type: 'change', topic }); screens
-// subscribe with useLiveUpdates and re-fetch through the normal API.
-// Topics an employee receives:
-//   events, geofences - an admin changed the schedule or event areas
-//   attendance        - an admin edited/recorded this employee's attendance,
-//                       or an ended event settled its final status
-//   device            - this phone was approved, blocked or removed
-// After a reconnect every listener is called with '*' to catch up on
-// anything missed while disconnected.
-// AuthContext starts this when an employee signs in and stops it on sign-out.
+// WebSocket change signals from the server ({ type: 'change', topic }).
+// Topics: events, geofences, attendance, device. Listeners get '*' after a reconnect.
 
 const WS_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api\/?$/, '/ws');
 const MAX_RETRY_MS = 30000;
@@ -25,9 +16,7 @@ let running = false;
 let retryMs = 1000;
 let retryTimer = null;
 let missedWhileDisconnected = false;
-// True while open() awaits the token, so a second caller (the retry timer
-// and the AppState listener can fire together on resume) can't open a
-// second, orphaned socket that would double-deliver every change.
+// Prevents opening two sockets at once.
 let connecting = false;
 
 function emit(topic) {

@@ -14,17 +14,11 @@ import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
 WebBrowser.maybeCompleteAuthSession();
 
-// Google rejects the native OAuth redirect in Expo Go (its bundle/package isn't
-// ours) and on a platform with no client ID of its own -- iOS showed "Access
-// blocked: Authorization Error ... invalid_request". Those sign in through the
-// server's /mobile/google-signin page instead, which hands the ID token back
-// through the app's redirect URL.
+// Expo Go and platforms without their own client ID sign in through the
+// server's /mobile/google-signin page instead of native OAuth.
 const NATIVE_CLIENT_ID = Platform.OS === 'ios' ? GOOGLE_IOS_CLIENT_ID : Platform.OS === 'android' ? GOOGLE_ANDROID_CLIENT_ID : GOOGLE_WEB_CLIENT_ID;
 const USE_WEB_BRIDGE = IS_EXPO_GO || !NATIVE_CLIENT_ID;
 
-// Mirrors the #screen-login → #screen-choice flow from the CSPC GeoAttend web
-// prototype, but using real Google Sign-In (expo-auth-session) instead of the
-// browser-only Google Identity Services script.
 export default function LoginScreen({ navigation }) {
   const { loginWithGoogle, staleSession, deviceBlockedNotice } = useAuth();
   const [authenticating, setAuthenticating] = useState(false);

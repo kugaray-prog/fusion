@@ -1,24 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Proof that the phone stayed inside while it couldn't reach the server
-// (Wi-Fi off, no mobile data). With no internet the server hears nothing and
-// times the session out at the last ping (closeSilentSessions), even though
-// GPS -- which needs no internet -- shows the employee never left. So for
-// each open session this keeps:
-//   ackAt   -- when the server last heard from the phone (a counted ping or
-//              the time-in)
-//   lastAt  -- the latest GPS reading since then
-//   broken  -- whether that run of readings had a gap (Location off, app or
-//              phone stopped) or a mock (Fake GPS) reading
-// Leaving the area doesn't need tracking here: the exit reading itself is
-// held and resent until the server takes it (pendingExits). Once back online,
-// each ping carries offlineInsideSeconds() and the server reopens a session it
-// timed out for silence if the run reaches back to that time-out
-// (attendanceController.resumeAfterOffline).
-//
-// Shared by the open app's tracker and the background task, which run in the
-// same JS runtime while the app is alive; saved to storage so a background
-// task restarted after the app was closed carries on from it.
+// Per-session record of GPS readings since the server last heard from the phone,
+// so a session timed out while offline can be reopened if the phone stayed inside.
+// ackAt: last server contact; lastAt: latest reading; broken: gap or mock reading.
 
 const STORAGE_KEY = 'presence_trail';
 // Readings come every 1-3 s; a longer silence means Location went off or
@@ -71,10 +55,7 @@ export async function noteReading({ at = Date.now(), mocked = false } = {}) {
   save(false);
 }
 
-// Seconds since the server last heard from this phone, all spent inside
-// with an unbroken run of readings up to `untilMs` (the exit / Location-off
-// moment for a held reading, otherwise now) -- or undefined if that can't be
-// vouched for.
+// Seconds since the last server contact spent inside with no gaps, or undefined.
 export async function offlineInsideSeconds(attendanceId, untilMs = Date.now()) {
   if (!attendanceId) return undefined;
   const t = (await load())[attendanceId];

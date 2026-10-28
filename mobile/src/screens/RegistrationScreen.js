@@ -16,13 +16,7 @@ import { useResponsive, MAX_WIDTH, MODAL_ORIENTATIONS } from '../utils/responsiv
 // '' (displayed as "None") is the default -- the field is optional.
 const SUFFIX_OPTIONS = ['None', 'Jr.', 'Sr.', 'II', 'III', 'IV', 'V'];
 
-// The Classification and Position lists are managed by the admin from the
-// dashboard's employee form and loaded from /employee-auth/employee-options
-// when this screen opens. These two are only the fallback for when that
-// request fails, and match the server's defaults (employeeOptionController.js).
-// Both are rendered with 'Others' appended (see DropdownFieldWithOthers
-// below), which lets the employee type any value not on the list; the
-// backend stores it as free text rather than enforcing this exact set.
+// Fallbacks for /employee-auth/employee-options (match employeeOptionController.js).
 const CLASSIFICATION_OPTIONS = [
   'Permanent Administrative', 'Permanent Academic', 'Casual Administrative',
   'COS Administrative', 'COS Academic', 'Job Order'
@@ -39,24 +33,13 @@ const POSITION_OPTIONS = [
 
 const GENDER_OPTIONS = ['Male', 'Female'];
 
-// Resolves a value already on file (e.g. a returning employee's existing
-// position/gender/classification, pre-filled from the backend) against one
-// of the dropdown lists above. If it matches one of the listed options
-// exactly, that option is selected outright. Otherwise -- a legacy value,
-// or something previously typed into "Others" -- 'Others' is selected and
-// the raw value is preserved in that field's free-text override, so
-// nothing already on file is ever silently dropped or misrepresented just
-// because the picker's fixed list doesn't happen to include it.
+// Maps a stored value to a list option, or to 'Others' with the raw text.
 function resolveDropdownValue(raw, options) {
   if (!raw) return { selected: '', other: '' };
   return options.includes(raw) ? { selected: raw, other: '' } : { selected: 'Others', other: raw };
 }
 
-// A labeled dropdown field with a built-in "Others" option: picking it
-// reveals a free-text input right below the field for anything not on the
-// list. Shared by the Position, Gender, and Classification fields below
-// (each otherwise needing near-identical label + touchable + modal-picker
-// + conditional-text-input markup).
+// Dropdown with an "Others" free-text option.
 function DropdownFieldWithOthers({
   label, options, value, onSelect, otherValue, onOtherChange,
   pickerOpen, setPickerOpen, placeholder, otherPlaceholder, required
@@ -104,30 +87,10 @@ function DropdownFieldWithOthers({
   );
 }
 
-// Simplified face capture: a single "hold still and look at the camera" step
-// instead of a multi-action nod/turn-left/turn-right sequence. This used to be
-// a 3-step guided challenge (nod, then turn head left/right, each individually
-// verified) -- that was accurate but fiddly in practice (easy to fumble the
-// order, easy to end up pointing the phone somewhere with no face in frame at
-// all and get a confusing "couldn't confirm" error). This single-step version
-// keeps the same underlying protection (a live face must be sustained in
-// frame for several consecutive on-device ML Kit reads before anything
-// is captured -- a photo of a photo or an empty frame never passes) while
-// cutting the number of things that can go wrong for the person registering.
-//
-// A mandatory blink is layered on top of the hold: once a face is held
-// steady, the employee is prompted to blink, and a real eyes-open ->
-// eyes-closed -> eyes-open cycle must be observed via ML Kit's per-eye "open
-// probability" classification before capture continues. A still photo or a
-// paused video frame held up to the camera can satisfy the "hold still"
-// step, but can't blink on command. The algorithm itself is shared with
-// FaceVerificationScreen.js -- see utils/faceCapture.js.
+// Face capture: hold steady, then blink (see utils/faceCapture.js).
 const DETECTION_ATTEMPTS = 3; // retries allowed before aborting the whole capture
 
-// Slim 2-step progress indicator (Details -> Face Scan) shown at the top of
-// both screens in the wizard -- the same "you are here" pattern GCash and
-// similar KYC flows use so the person always knows how much is left.
-// `dark` swaps the palette for use over the camera's dark background.
+// Details -> Face Scan progress bar. `dark` for use over the camera.
 function StepProgress({ current, labels, dark }) {
   const dotIdleBorder = dark ? 'rgba(255,255,255,0.4)' : colors.border;
   const dotIdleText = dark ? 'rgba(255,255,255,0.7)' : colors.textSub;
@@ -163,22 +126,11 @@ function StepProgress({ current, labels, dark }) {
   );
 }
 
-// Registration sequence: Continue with Google (LoginScreen) -> employee details
-// (step 1 below) -> guided, real-time-verified face registration (step 2
-// below) -> submitted together to /api/employee-auth/link-device, which
-// links the device AND enrolls the face in one request. Mirrors
-// #screen-register in the CSPC GeoAttend web prototype, extended with a
-// mandatory liveness check -- hold a face steady, then blink on command --
-// instead of a single still selfie. Both are confirmed on-device via ML Kit
-// (detectFaceHold(), then detectBlink()) before the flow automatically
-// advances to capture.
+// Google sign-in -> details (step 1) -> live face capture (step 2) ->
+// POST /api/employee-auth/link-device.
 export default function RegistrationScreen({ navigation }) {
   const { employee, pendingGoogle, completeRegistration, cancelRegistration } = useAuth();
-  // Set once registration succeeds: from then on AuthContext has an
-  // `employee`, and RootNavigator (App.js) swaps this whole stack out for
-  // WaitingApproval/WifiCheck. This screen must not navigate or set state
-  // after that -- a late navigation.replace('Login') sent while the stack
-  // was being swapped is what left the app on a blank white screen.
+  // Set on success: RootNavigator replaces this stack, so don't navigate or set state after.
   const registeredRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
@@ -239,10 +191,7 @@ export default function RegistrationScreen({ navigation }) {
     }
     const existing = pendingGoogle.existingEmployee;
     if (existing) {
-      // Returning employee, unrecognized device (see AuthContext.loginWithGoogle /
-      // controllers/employeeAuthController.js googleLogin()) -- pre-fill everything
-      // already on file instead of asking them to retype an account they already
-      // have. They can still edit any field before continuing.
+      // Returning employee on a new device: pre-fill from their record.
       setEmployeeCode(existing.employee_code || '');
       setSurname(existing.surname || pendingGoogle.google?.family_name || '');
       setGivenName(existing.given_name || pendingGoogle.google?.given_name || '');
@@ -259,9 +208,7 @@ export default function RegistrationScreen({ navigation }) {
       setClassification(classResolved.selected);
       setClassificationOther(classResolved.other);
     } else {
-      // Pre-fill the Google-verified name so the employee usually just has to
-      // fill in the Employee ID, splitting Google's given/family name into the
-      // Surname / Given Name fields the admin record uses.
+      // Pre-fill the name from Google.
       setSurname(pendingGoogle.google?.family_name || '');
       setGivenName(pendingGoogle.google?.given_name || '');
     }
@@ -326,10 +273,7 @@ export default function RegistrationScreen({ navigation }) {
       setErrorMsg('Please select a Classification.');
       return;
     }
-    // "Others" is a deliberate choice to specify something not on the list --
-    // leaving its free-text field blank after picking it is almost certainly
-    // a mistake, not an intentional empty value, so it's caught here rather
-    // than silently submitting "Others" itself or an empty string.
+    // "Others" requires a value.
     if (position === 'Others' && !positionOther.trim()) {
       setErrorMsg('Please specify your Position, or choose one from the list.');
       return;
@@ -372,9 +316,7 @@ export default function RegistrationScreen({ navigation }) {
     }
   }, [stepStatus, resultPop]);
 
-  // The scan starts by itself as soon as the camera is live (and again after
-  // Retake, which remounts the camera) -- Start Face Scan is only needed to
-  // try again after a failed attempt.
+  // Auto-start the scan when the camera is ready.
   const handleCameraReady = () => {
     if (!mountedRef.current) return;
     setCameraReady(true);
@@ -387,10 +329,7 @@ export default function RegistrationScreen({ navigation }) {
     setStepStatus(status.phase === 'blink' ? 'blink' : 'scanning');
   };
 
-  // Runs the live hold-then-blink check on the video selfie (retrying on a
-  // missed attempt before giving up). The selfie still used for the face
-  // embedding is grabbed the instant the blink completes, and the video
-  // covering the whole check comes back with it -- no button to press.
+  // Hold-then-blink check with retries; returns the selfie and video.
   const handleStartGuidedCapture = async () => {
     setErrorMsg('');
     if (!cameraRef.current || verifyingRef.current) return;
@@ -475,9 +414,7 @@ export default function RegistrationScreen({ navigation }) {
       if (middleName.trim()) formData.append('middle_name', middleName.trim());
       if (suffix !== 'None') formData.append('suffix', suffix);
       if (department) formData.append('department', department);
-      // Each of these resolves to the typed free-text value when 'Others'
-      // was picked, or the selected option otherwise -- the backend never
-      // sees the literal string "Others" itself.
+      // Send the typed value instead of "Others".
       const positionValue = position === 'Others' ? positionOther.trim() : position;
       if (positionValue) formData.append('position', positionValue);
       const genderValue = gender === 'Others' ? genderOther.trim() : gender;
@@ -501,18 +438,11 @@ export default function RegistrationScreen({ navigation }) {
       }
       registeredRef.current = true;
       await completeRegistration(formData);
-      // RootNavigator (App.js) reacts to `employee` + `deviceStatus` automatically:
-      // a 'pending' device is routed to the WaitingApproval screen, which will in
-      // turn redirect to Home the moment an admin approves it.
+      // RootNavigator moves to WaitingApproval on its own.
     } catch (err) {
       registeredRef.current = false;
       if (!mountedRef.current) return;
-      // DoubleSafe checkpoint (see employeeAuthController.linkDevice): registering a
-      // new device for an identity that already has a face on file requires the live
-      // selfie to match it. A 423 means too many failed attempts have locked the
-      // account out for a cooldown -- that's not a "just try again" error, so it gets
-      // its own persistent panel instead of the normal retry flow (see the reviewing
-      // stage render below).
+      // 423: DoubleSafe lockout, shown in its own panel.
       if (err.response?.status === 423) {
         setLockInfo({ message: err.response?.data?.message || 'Too many failed identity checks. Please try again later or contact your administrator.' });
       } else {
@@ -539,24 +469,14 @@ export default function RegistrationScreen({ navigation }) {
     else if (stepStatus === 'failed') challengeCaption = "Didn't catch that \u2014 let's try again";
     else if (stepStatus === 'finishing') challengeCaption = 'Hold still \u2014 capturing\u2026';
 
-    // The guide ring's color IS the primary feedback signal (GCash-style: a
-    // neutral ring while searching, green ONLY the instant the correct
-    // action is actually confirmed, red on a miss). Merely detecting a face
-    // is never enough to turn it green -- that would read as "you got it
-    // right" before the prompted action has actually been verified.
+    // Ring: neutral while scanning, green on success, red on failure.
     let ringVariant = styles.guideFrameSearching;
     if (captureStage === 'recording') {
       if (stepStatus === 'confirmed' || stepStatus === 'finishing') ringVariant = styles.guideFrameFound;
       else if (stepStatus === 'failed') ringVariant = styles.guideFrameFailed;
-      // else (scanning): stays neutral regardless of liveFaceDetected --
-      // "a face is visible" and "the correct action was confirmed" are
-      // different facts, and only the badge/caption text conveys the former.
     }
 
-    // Portrait: the action sheet sits under the camera, its contents capped
-    // to a readable width on tablets. Landscape: it becomes a scrollable
-    // panel on the right so the camera keeps the full height, and the face
-    // guide shrinks to fit a phone's short landscape height.
+    // Landscape: controls move to a side panel.
     const sidePanel = isLandscape;
     const SheetContainer = sidePanel ? ScrollView : View;
     const sheetProps = sidePanel
@@ -949,19 +869,12 @@ const styles = StyleSheet.create({
   camera: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   previewWrap: { flex: 1 },
   preview: { flex: 1, resizeMode: 'cover' },
-  // Soft dark gradient-like scrim behind the top status chrome (step
-  // progress, REC/scanning badge) so it reads clearly over any background,
-  // without needing to mask/punch a hole in the camera preview.
   topScrim: {
     position: 'absolute', top: 0, left: 0, right: 0, height: 130,
     backgroundColor: 'rgba(11,15,26,0.55)',
   },
   topBar: { position: 'absolute', top: 14, left: 0, right: 0, paddingHorizontal: 20 },
   guideFrameWrap: { alignItems: 'center', justifyContent: 'center' },
-  // Face-shaped (tall oval, not a circle) -- taller than it is wide, like an
-  // actual face outline. The ring color IS the main real-time feedback
-  // signal: neutral while searching, green ONLY the instant the correct
-  // action is actually confirmed, red on a miss.
   guideFrame: {
     width: 226, height: 296, borderRadius: 148, borderWidth: 3,
     borderColor: 'rgba(255,255,255,0.55)', alignSelf: 'center',
@@ -980,9 +893,7 @@ const styles = StyleSheet.create({
     textAlign: 'center', color: '#fff', fontSize: 14, fontWeight: '700',
     textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 8,
   },
-  // Full-screen overlay while capturing -- status badge + progress dots
-  // pinned near the top, the current instruction/result pinned near the
-  // bottom, leaving the guideFrame clear in the middle.
+  // Capture overlay: status at the top, instruction at the bottom.
   challengeOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     alignItems: 'center', justifyContent: 'space-between', paddingVertical: 56, paddingHorizontal: 24,
@@ -995,14 +906,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(238,93,80,0.85)', paddingVertical: 6, paddingHorizontal: 12,
     borderRadius: 20, marginBottom: 14,
   },
-  // Badge shown while actively polling for the current action (as opposed to
-  // the red "CAPTURING" badge, only shown for the brief moment the final
-  // photo is being taken at the very end).
   scanBadge: { backgroundColor: 'rgba(15,23,42,0.65)' },
   recDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#fff' },
-  // "A face is visible" is a different, lower-stakes fact than "the correct
-  // action was confirmed" -- deliberately never green, to avoid reading as
-  // a success signal before the prompted action is actually verified.
+  // Face visible is not success, so never green.
   scanDotFound: { backgroundColor: colors.info },
   scanDotSearching: { backgroundColor: '#FFB547' },
   recBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
@@ -1014,9 +920,6 @@ const styles = StyleSheet.create({
   // Icon + its looping "scanning" indicator sit in a fixed-size box so
   // nothing nudges surrounding layout as it expands/fades.
   challengeIconWrap: { width: 72, height: 72, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  // Translucent "detecting" backdrop plate -- a soft, semi-see-through disc
-  // rather than a solid one, so the loading indicator reads as active
-  // without ever looking like an opaque, finished state.
   scanBackdrop: {
     position: 'absolute', width: 68, height: 68, borderRadius: 34,
     backgroundColor: 'rgba(255,255,255,0.12)',
@@ -1029,9 +932,6 @@ const styles = StyleSheet.create({
     color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center',
     textShadowColor: 'rgba(0,0,0,0.4)', textShadowRadius: 6,
   },
-  // GCash-style bottom action sheet: a light, rounded-top card fixed to the
-  // bottom of the dark camera view -- the light/dark contrast is the single
-  // biggest visual signature of this style of verification screen.
   bottomSheet: {
     backgroundColor: colors.white, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     paddingTop: 10, paddingBottom: 28, paddingHorizontal: 24, alignItems: 'center', ...shadow,
@@ -1061,10 +961,7 @@ const styles = StyleSheet.create({
   },
   videoBadgeTitle: { color: '#fff', fontWeight: '800', fontSize: 13 },
   videoBadgeSubtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 11, marginTop: 3 },
-  // DoubleSafe lockout panel -- shown instead of the normal Complete/Retake
-  // buttons when the server reports too many failed identity-match attempts
-  // (see employeeAuthController.linkDevice's 423 response). Stays on the
-  // light sheet now, so it uses a softer tint than a dark-background alert would.
+  // DoubleSafe lockout panel (423).
   lockPanel: {
     backgroundColor: colors.dangerBg, borderWidth: 1, borderColor: 'rgba(238,93,80,0.35)',
     borderRadius: radius.md, padding: 18, alignItems: 'center', marginBottom: 16, width: '100%',

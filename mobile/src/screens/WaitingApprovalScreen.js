@@ -6,11 +6,7 @@ import FadeIn from '../components/FadeIn';
 
 const POLL_INTERVAL_MS = 8000;
 
-// Shown right after registration (or on relaunch, if the device is still
-// pending). Polls GET /employee-auth/device-status in the background; the
-// moment an admin approves the device, AuthContext's `deviceStatus` flips to
-// 'approved' and RootNavigator (App.js) automatically swaps this screen out
-// for the WifiCheck → Dashboard stack. Nothing here navigates directly.
+// Polls device status; RootNavigator leaves this screen once approved.
 export default function WaitingApprovalScreen() {
   const { employee, refreshDeviceStatus, logout } = useAuth();
   const [checking, setChecking] = useState(false);

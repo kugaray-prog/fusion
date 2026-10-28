@@ -7,45 +7,27 @@ const { logAction } = require('../services/auditService');
 const { notifyAdmins, employeeLabel, deviceLabel } = require('../services/adminNotificationService');
 const realtime = require('../services/realtime');
 const eventAudience = require('../services/eventAudience');
-// NOTE: employee_ratings (the Ratings module) is no longer fed from here.
-// It's now generated on-demand, per actual EVENT, by
-// ratingController.generateRatingsForRange — run automatically every time
-// the admin dashboard's Ratings tab is loaded (self-healing on read, same
-// pattern as settleEndedEvents below) once an event's schedule has
-// ended, from whatever attendance_status ended up on each employee's row for
-// that event. That covers every weekday an event is scheduled on (not just
-// Mondays) and also correctly rates a true no-show (nobody ever timed in for
-// that event) as Absent, which a time-in-triggered hook here never could.
 
 // `mocked` as sent by the mobile app (Android's mock-location flag).
 function isMockedLocation(mocked) {
   return config.attendance.rejectMockLocations && (mocked === true || mocked === 'true');
 }
 
-// Boundary allowance for a GPS reading: its reported accuracy, capped at
-// config.attendance.edgeToleranceMeters so a client can't claim a huge
-// accuracy to stretch the geofence.
+// Accuracy allowance at the geofence edge, capped at edgeToleranceMeters.
 function edgeTolerance(accuracy) {
   const acc = Number(accuracy);
   if (!Number.isFinite(acc) || acc <= 0) return 0;
   return Math.min(acc, config.attendance.edgeToleranceMeters);
 }
 
-// Runs bookkeeping that the reply doesn't depend on (logs, notifications,
-// rating recalculation) after the response has been sent: the database is
-// remote, so every round trip left in the request path delays the time-in or
-// time-out the employee is waiting on. A failure here is logged, never sent.
+// Runs non-critical work after the response is sent; errors are only logged.
 function afterResponse(label, work) {
   Promise.resolve()
     .then(work)
     .catch((err) => console.error(`[attendance] ${label} failed:`, err.message));
 }
 
-// The duration clock is stopped while a record awaits face verification:
-// its open session is closed right now and folded into the running total,
-// but the attendance row itself stays open (time_out NULL) so the app keeps
-// pinging and doesn't try to time in again. resumeSessionAfterVerification
-// opens a fresh session once the employee passes verification.
+// Stops the duration clock while a record awaits face verification; the row stays open.
 async function pauseOpenSession(attendanceId) {
   const [openRows] = await pool.query(
     'SELECT id FROM attendance_sessions WHERE attendance_id = ? AND time_out IS NULL ORDER BY time_in DESC LIMIT 1',
@@ -53,9 +35,7 @@ async function pauseOpenSession(attendanceId) {
   );
   const openSession = openRows[0];
   if (!openSession) return;
-  // `time_out IS NULL` makes the close atomic: two pings flagging the same
-  // record at once (or this and the heartbeat's auto time-out) would
-  // otherwise both close the session and both add its duration to the total.
+  // `time_out IS NULL` keeps concurrent closes from double-counting duration.
   const [closed] = await pool.query(
     `UPDATE attendance_sessions
      SET time_out = NOW(), duration_seconds = GREATEST(0, TIMESTAMPDIFF(SECOND, time_in, NOW()))
@@ -77,14 +57,9 @@ async function pauseOpenSession(attendanceId) {
   );
 }
 
-// Restarts the duration clock after a paused record is verified, as long as
-// the employee is still timed in (not auto-ended while waiting) and the
-// event is still running. If they left in the meantime, their next re-entry
-// time-in opens the session instead.
+// Reopens a session after verification if the employee is still in and the event is running.
 async function resumeSessionAfterVerification(attendanceId, latitude, longitude) {
-  // The attendance row is locked for the check-then-insert, so two
-  // verifications landing together (a double submit, or the employee's own
-  // and an admin-assisted one) can't both see "no open session" and open two.
+  // Row lock prevents two concurrent verifications from opening two sessions.
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -121,14 +96,9 @@ async function resumeSessionAfterVerification(attendanceId, latitude, longitude)
   }
 }
 
-// Logs a geo_anomalies row for one attendance record, flags it for face
-// verification, stops its duration clock, and notifies its employee --
-// including a live push so their app opens Face Verification right away
-// instead of waiting for its next heartbeat.
+// Logs a geo_anomalies row, flags the record, pauses its clock and notifies the employee.
 async function flagAttendanceForVerification({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude, details }) {
-  // Only the first of two pings flagging the same record at once (each
-  // phone's own ping sees the other) logs and notifies; the second finds it
-  // already flagged.
+  // Only the first of two concurrent flags logs and notifies.
   const [flagged] = await pool.query(
     'UPDATE attendance SET requires_face_verification = 1, verification_status = ? WHERE id = ? AND COALESCE(requires_face_verification, 0) = 0',
     ['Pending', attendanceId]
@@ -159,37 +129,10 @@ async function flagAttendanceForVerification({ attendanceId, employeeId, eventId
   });
 }
 
-// Looks for OTHER employees' attendance for the same event whose phone has
-// been staying with this one — the signature of one person carrying a
-// colleague's phone in to record attendance for them. Called on every
-// time-in and every inside ping (full heartbeats and live-position pings).
-//
-// Both sides of a match are flagged: the server can't tell which phone is
-// the "real" one, and only the employee actually present can pass the face
-// verification on their own phone. A record that's already flagged just
-// reports true again (so its app keeps being prompted).
-//
-// Phone GPS is only good to a few meters, so two honest employees standing
-// a few meters apart regularly get single readings that land on top of each
-// other. A match therefore needs all of the following (see colocatedRecords):
-//   - readings compared only with the other phone's reading from the same
-//     moment (at most anomalyPairSeconds apart) -- never with where the
-//     other phone was earlier, so walking past a colleague's spot isn't a
-//     match;
-//   - only readings precise enough to tell (accuracy no worse than
-//     anomalyMaxAccuracyMeters); coarse Wi-Fi/network fixes, which give
-//     every phone in a room the same coordinates, are ignored;
-//   - together (within anomalyDistanceMeters) on at least anomalyMinMatches
-//     paired readings in a row, spanning at least anomalySustainSeconds,
-//     with no paired reading in between showing them apart, and still
-//     together within the last anomalyWindowSeconds.
-//
-// Passing face verification does NOT exempt a record: it's only left alone
-// for config.attendance.anomalyRecheckSeconds after it was verified, so for
-// as long as the phones stay together, face verification is asked for again.
-//
+// Geo-anomaly detection: flags both records when two employees' phones stay
+// together (see colocatedRecords). Verified records are re-checked after
+// anomalyRecheckSeconds.
 // attendanceId -> { eventId, employeeId, points: [{ lat, lng, accuracy, at }] }
-// (points in the order received, i.e. oldest first)
 const recentPositions = new Map();
 let recentPositionsSweptAt = 0;
 
@@ -224,12 +167,7 @@ function preciseEnough(p) {
   return p.accuracy == null || p.accuracy <= config.attendance.anomalyMaxAccuracyMeters;
 }
 
-// Walks two phones' readings in time order, pairing each of `mine` with the
-// reading of `theirs` closest in time (if within anomalyPairSeconds), and
-// returns the latest unbroken run of "together" pairs -- { count, firstAt,
-// lastAt, other: their reading in the last pair } -- or null. A pair showing
-// the phones apart ends the run; a reading with no comparable partner is
-// skipped.
+// Latest unbroken run of paired readings within anomalyDistanceMeters, or null.
 function togetherRun(mine, theirs, cutoff) {
   const pairMs = config.attendance.anomalyPairSeconds * 1000;
   const maxMeters = config.attendance.anomalyDistanceMeters;
@@ -256,9 +194,7 @@ function togetherRun(mine, theirs, cutoff) {
   return run;
 }
 
-// Other employees' records for the same event whose phone has stayed with
-// this record's phone (the rules above): attendanceId -> { lat, lng } of the
-// other phone's latest reading in that run.
+// attendanceId -> { lat, lng } of other records whose phone stayed with this one.
 function colocatedRecords(attendanceId) {
   const matches = new Map();
   const self = recentPositions.get(String(attendanceId));
@@ -283,9 +219,7 @@ function colocatedRecords(attendanceId) {
 async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude, accuracy }) {
   rememberPosition({ attendanceId, eventId, employeeId, latitude, longitude, accuracy });
 
-  // Ages are worked out in SQL (TIMESTAMPDIFF against NOW()) rather than by
-  // parsing the DATETIME strings in Node, so they stay right whatever
-  // timezone the Node process and the database session happen to use.
+  // Ages computed in SQL so they're timezone-independent.
   const [selfRows] = await pool.query(
     'SELECT requires_face_verification, TIMESTAMPDIFF(SECOND, face_verified_at, NOW()) AS verified_ago_s FROM attendance WHERE id = ?',
     [attendanceId]
@@ -352,10 +286,7 @@ function presenceRulePercent() {
   return Math.round(config.attendance.minAttendanceRatioForPresence * 100);
 }
 
-// Recomputes an employee's attendance_score from their real attendance history —
-// Present counts full credit, Late counts half credit, out of all recorded days.
-// Keeps the Ratings leaderboard on the admin dashboard reflecting actual behavior
-// instead of the static 100.00 default every employee starts with.
+// attendance_score: Present = 1, Late = 0.5, over all recorded days.
 async function recalculateAttendanceScore(employeeId) {
   const [rows] = await pool.query(
     `SELECT
@@ -371,13 +302,7 @@ async function recalculateAttendanceScore(employeeId) {
   await pool.query('UPDATE employees SET attendance_score = ? WHERE id = ?', [score.toFixed(2), employeeId]);
 }
 
-// Literal "5 Attended = 1 Rating Point, 1 No Attendance = deduction" rule
-// requested for the employee/dashboard/report Rating displays. This is kept
-// separate from recalculateAttendanceScore's percentage score and from the
-// Monday employee_ratings leaderboard — each already has call sites elsewhere
-// that depend on their current behavior, so this adds the literal counter
-// alongside them rather than replacing either.
-// Present/Late count as "Attended"; Absent counts as "No Attendance".
+// rating_points: every 5 attended (Present/Late) = +1, each Absent = -1.
 async function recalculateRatingPoints(employeeId) {
   const [rows] = await pool.query(
     `SELECT
@@ -392,39 +317,20 @@ async function recalculateRatingPoints(employeeId) {
   await pool.query('UPDATE employees SET rating_points = ? WHERE id = ?', [points, employeeId]);
 }
 
-// Runs both rating recalculations together — call this after ANY insert,
-// update, or delete of an attendance row so ratings never drift from the
-// real attendance history (added / updated / removed / status flips all funnel here).
+// Call after any insert/update/delete of an attendance row.
 async function recalculateAllRatings(employeeId) {
   await recalculateAttendanceScore(employeeId);
   await recalculateRatingPoints(employeeId);
 }
 
-// Appended to attendance SELECTs so callers can render a "Duration" column
-// and know whether a session is still ticking. open_session_time_in is the
-// time_in of the currently-open attendance_sessions row (NULL once nothing
-// is open); the client adds "now - open_session_time_in" to
-// total_duration_seconds to show a live, still-accumulating duration while
-// attendance_status stays "on-going". session_count is how many separate
-// time-in/time-out dips make up that total, for a "×3 sessions" style hint.
+// Adds total duration, open session start and session count to attendance SELECTs.
 const ATTENDANCE_DURATION_SUBQUERIES = `,
        (SELECT s.time_in FROM attendance_sessions s
          WHERE s.attendance_id = a.id AND s.time_out IS NULL
          ORDER BY s.time_in DESC LIMIT 1) AS open_session_time_in,
        (SELECT COUNT(*) FROM attendance_sessions s WHERE s.attendance_id = a.id) AS session_count`;
 
-// Self-healing safety net: closes any attendance session left open past its
-// event's end time. Normally the mobile app's heartbeat auto-closes a
-// session once the device has been outside the geofence for a couple of
-// pings — but that only works while the app is open and pinging. If the
-// event simply ends while the employee is still standing inside the
-// boundary, or the app gets closed/backgrounded before the outside-streak
-// trips, nothing ever closes the session and its duration keeps climbing
-// forever every time it's viewed. This runs (via settleEndedEvents) before
-// any attendance read (both the mobile "my history" and the admin attendance
-// table) so a stale session
-// gets closed and its total finalized before anyone sees it, capped at the
-// event's own end_datetime rather than "now" so no extra time leaks in.
+// Closes sessions still open after their event ended, capped at end_datetime.
 async function closeSessionsForEndedEvents() {
   const [staleRows] = await pool.query(
     `SELECT a.id, a.employee_id, a.total_duration_seconds, e.end_datetime
@@ -466,15 +372,8 @@ async function closeSessionsForEndedEvents() {
   }
 }
 
-// Settles the final status of every attendance row whose event has ended
-// (its sessions already closed by closeSessionsForEndedEvents above). Until
-// then the status is shown as Ongoing (see DISPLAY_STATUS_SQL). A GPS-tracked
-// employee who was inside the geofence for less than
-// minAttendanceRatioForPresence (80%) of the event's scheduled duration is
-// marked Absent, whether they stayed until the end or left early; otherwise
-// they keep the Present/Late decided at their first time-in. Kiosk (OCR/face)
-// roll-call rows have no duration to measure and keep their status, as does
-// anything an admin already set by hand (status_finalized = 1).
+// Final status for ended events: GPS rows inside < minAttendanceRatioForPresence
+// become Absent. Kiosk rows and admin-finalized rows are left as is.
 async function finalizeEndedEventStatuses() {
   const [rows] = await pool.query(
     `SELECT a.id, a.employee_id, a.attendance_status, a.total_duration_seconds, a.verification_method,
@@ -521,11 +420,7 @@ async function settleEndedEvents() {
   await expireEndedEventAnomalies();
 }
 
-// Resolves the anomaly alerts of events that have ended or were deleted
-// (event_id set to NULL), so they drop off the admin's alert panels. The
-// attendance itself was already settled by rejectUnverifiedFlaggedAttendance.
-// Also run every 30 s from server.js, so alerts clear soon after an event
-// ends even if nobody opens an attendance page.
+// Resolves anomaly alerts of ended or deleted events (also run every 30 s).
 async function expireEndedEventAnomalies() {
   const [result] = await pool.query(
     `UPDATE geo_anomalies ga
@@ -537,17 +432,10 @@ async function expireEndedEventAnomalies() {
   return result.affectedRows;
 }
 
-// The status to show for an attendance row (needs `events ev` joined):
-// Ongoing while its event is still running, since Present/Late/Absent is only
-// decided once the event ends.
+// Shows Ongoing until the event ends (needs `events ev` joined).
 const DISPLAY_STATUS_SQL = "CASE WHEN ev.end_datetime >= NOW() THEN 'Ongoing' ELSE a.attendance_status END";
 
-// A geo-anomaly-flagged attendance (see detectGeoAnomaly) only counts once
-// the employee passes face verification. If the event ends with the flag
-// still unresolved, the attendance is not recorded: status becomes Absent
-// and verification_status Rejected. Runs as part of
-// settleEndedEvents, so it self-heals on every attendance/report/
-// rating read like the rest of the end-of-event settling.
+// Flagged records still unverified when the event ends become Absent / Rejected.
 async function rejectUnverifiedFlaggedAttendance() {
   const [rows] = await pool.query(
     `SELECT a.id, a.employee_id, a.attendance_status
@@ -596,29 +484,7 @@ async function getMyHistory(req, res, next) {
   }
 }
 
-// GET /api/attendance/:id/sessions  (employee JWT required — session-level
-// breakdown behind the summary row, e.g. "9:03 AM–9:41 AM", "10:15 AM–…")
-async function getSessions(req, res, next) {
-  try {
-    const [attendanceRows] = await pool.query(
-      'SELECT id FROM attendance WHERE id = ? AND employee_id = ?',
-      [req.params.id, req.employee.id]
-    );
-    if (!attendanceRows[0]) return res.status(404).json({ success: false, message: 'Attendance record not found.' });
-
-    const [rows] = await pool.query(
-      'SELECT * FROM attendance_sessions WHERE attendance_id = ? ORDER BY time_in ASC',
-      [req.params.id]
-    );
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    next(err);
-  }
-}
-
-// GET /api/attendance/:id/sessions/admin  (admin JWT required — same
-// session-level breakdown as getSessions, but for the admin's attendance
-// table dropdown, so it isn't scoped to a single employee's own token.)
+// GET /api/attendance/:id/sessions/admin
 async function getSessionsAdmin(req, res, next) {
   try {
     const [attendanceRows] = await pool.query('SELECT id FROM attendance WHERE id = ?', [req.params.id]);
@@ -684,12 +550,7 @@ async function getAttendance(req, res, next) {
   }
 }
 
-// Employees expected at an event who have no attendance record for it, as
-// placeholder "Absent" rows (is_placeholder, no id) so the admin sees who
-// didn't show up. Expected = approved Active employees in the event's
-// attendee list (services/eventAudience.js) — the same rule the reports use.
-// Only once the event has started, and shown as Ongoing (not yet Absent)
-// until it ends.
+// Placeholder Absent rows for expected employees with no record (Ongoing until the event ends).
 async function absentRowsForEvent(eventId, department) {
   const [[ev]] = await pool.query(
     'SELECT id, title, department_id, start_datetime, end_datetime FROM events WHERE id = ?',
@@ -736,32 +597,8 @@ async function absentRowsForEvent(eventId, department) {
   }));
 }
 
-// GET /api/attendance/by-department  (folder counts for the admin UI)
-async function getAttendanceByDepartment(req, res, next) {
-  try {
-    const [rows] = await pool.query(
-      `SELECT d.id, d.name, COUNT(e.id) AS member_count,
-              (SELECT COUNT(*) FROM attendance a JOIN employees e2 ON a.employee_id = e2.id WHERE e2.department_id = d.id) AS log_count
-       FROM departments d
-       LEFT JOIN employees e ON e.department_id = d.id
-       GROUP BY d.id ORDER BY d.name`
-    );
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * POST /api/attendance/submit
- * Core mobile attendance flow. Validates, in order:
- *   1. Employee + device authorization
- *   2. GPS accuracy
- *   3. Event schedule window
- *   4. Geofence containment
- *   5. Session continuation (multi-session time-in/time-out, same day)
- * Body: { employee_id, device_uid, event_id, latitude, longitude, accuracy, ocr_record_id }
- */
+// POST /api/attendance/submit
+// Checks: employee/device, GPS accuracy, schedule, geofence, then opens or continues a session.
 async function submitAttendance(req, res, next) {
   try {
     const { employee_id, device_uid, event_id, latitude, longitude, accuracy, ocr_record_id, mocked } = req.body;
@@ -813,9 +650,7 @@ async function submitAttendance(req, res, next) {
       eventAudience.loadAudiences([event_id])
     ]);
 
-    // Same stale-local-session guard as deviceController.registerDevice —
-    // fail with a clear, specific message instead of an FK constraint crash
-    // if this device's cached employee_id no longer exists.
+    // Device cached a deleted employee_id.
     if (!employeeExists[0]) {
       return res.status(404).json({
         success: false,
@@ -872,18 +707,13 @@ async function submitAttendance(req, res, next) {
     const geofence = geofenceRows[0];
     if (!geofence) return res.status(404).json({ success: false, message: 'No active geofence configured for this event.' });
     if (geofenceRows.length > 1) {
-      // Shouldn't normally happen (createGeofence makes one event -> one geofence),
-      // but if test data ended up with duplicates, flag it — the row picked here
-      // (geofenceRows[0]) may not be the one the mobile app's own /mobile/active
-      // fetch resolved to, which would explain an inside/outside mismatch.
+      // Duplicate geofences for one event can cause inside/outside mismatches.
       console.warn(`[geofence check] event_id ${event_id} has ${geofenceRows.length} active geofences — using id ${geofence.id}. Duplicate geofences can cause client/server mismatches.`);
     }
 
     let points = [];
     if (geofence.shape_type !== 'circle') {
-      // mysql2 returns DECIMAL columns as strings by default — convert to Number
-      // here (mirroring geofenceController.js's own conversion) so this array is
-      // safe to hand to geofenceService regardless of that service's internals.
+      // DECIMAL columns come back as strings.
       points = eventPointRows
         .filter((p) => Number(p.geofence_id) === Number(geofence.id))
         .map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }));
@@ -896,10 +726,6 @@ async function submitAttendance(req, res, next) {
       edgeTolerance(accuracy)
     );
 
-    // Debug logging — compares the submitted GPS point against the exact polygon
-    // the server used for this decision. If the mobile app's live "inside" check
-    // disagrees with this, the printed points/coords make it obvious whether it's
-    // GPS drift near a small polygon's edge vs a genuine data mismatch.
     console.log('[geofence check]', {
       event_id,
       geofence_id: geofence.id,
@@ -921,11 +747,7 @@ async function submitAttendance(req, res, next) {
       });
     }
 
-    // 5. Session continuation — an employee may time in and out of the SAME
-    // event any number of times while it hasn't ended yet, and every dip
-    // accumulates into that day's total_duration_seconds. `attendance` stays
-    // one row per employee/event/day (status, ratings, running total);
-    // `attendance_sessions` holds one row per individual time-in/time-out.
+    // One attendance row per employee/event/day; each time-in/out is an attendance_sessions row.
     const existing = existingRows[0];
 
     const lateGraceMs = config.attendance.lateGraceMinutes * 60 * 1000;
@@ -934,16 +756,12 @@ async function submitAttendance(req, res, next) {
     const lateMinutes = isLate ? Math.round((now - new Date(event.start_datetime)) / 60000) : 0;
 
     if (existing) {
-      // A session is already open (time_out not yet set) — nothing to do;
-      // time-out is handled automatically by heartbeat() once the device
-      // actually leaves the geofence, not by a second call to this endpoint.
+      // Already timed in; time-out comes from heartbeat().
       if (!existing.time_out) {
         return res.status(409).json({ success: false, message: 'Attendance session already in progress for this event.' });
       }
 
-      // Still awaiting face verification: the employee is timed back in, but
-      // the clock stays stopped (no session) until they verify -- see
-      // pauseOpenSession / resumeSessionAfterVerification.
+      // Awaiting face verification: timed in, but no session until verified.
       if (existing.requires_face_verification) {
         await pool.query(
           `UPDATE attendance SET time_out = NULL, outside_streak = 0, latitude = ?, longitude = ?, last_lat = ?, last_lng = ?, accuracy_meters = ? WHERE id = ?`,
@@ -962,10 +780,7 @@ async function submitAttendance(req, res, next) {
         return;
       }
 
-      // The employee left and has now re-entered the geofence while the
-      // event is still running: open a brand-new session, and flip the
-      // parent row back to "on-going" (time_out = NULL) without touching
-      // its original time_in or accumulated total_duration_seconds.
+      // Re-entry: open a new session and reopen the parent row.
       const [[sessionResult]] = await Promise.all([
         pool.query(
           `INSERT INTO attendance_sessions (attendance_id, employee_id, time_in, in_latitude, in_longitude)
@@ -1073,40 +888,10 @@ async function submitAttendance(req, res, next) {
   }
 }
 
-// Records (or closes) attendance from the admin dashboard's Verification
-// kiosk — used as an ALTERNATIVE to the mobile app's GPS-based check-in for
-// an employee who doesn't have their phone with them (no GPS) or doesn't
-// have a physical ID on hand: an admin instead confirms identity via an
-// ID-card OCR scan or a live selfie match, and that successful verification
-// itself records the attendance, exactly the way tapping in/out at a kiosk
-// would. Called directly from ocrController.verifyId / faceController.verifyFace
-// after a successful identity match — not its own HTTP route — so it's
-// Records attendance from the admin dashboard's Verification kiosk — used as
-// an ALTERNATIVE to the mobile app's GPS-based check-in for an employee who
-// doesn't have their phone with them (no GPS) or doesn't have a physical ID
-// on hand: an admin instead confirms identity via an ID-card OCR scan or a
-// live selfie match. Called directly from ocrController.verifyId /
-// faceController.verifyFace after a successful identity match — not its own
-// HTTP route — so it's naturally scoped to whichever admin role can already
-// reach those two tools (see routes/ocrRoutes.js, routes/faceRoutes.js)
-// without needing separate attendance permissions.
-//
-// No GPS/geofence check runs here at all — the admin is physically present
-// confirming identity in person, which is the whole point of this fallback.
-//
-// Unlike the mobile GPS flow, this is a ONE-TIME roll-call confirmation, not
-// a time-in/time-out cycle: there's no ongoing physical presence to measure
-// (the admin's scan is a single instant, not a geofence someone can stay
-// inside or step out of), so no attendance_sessions rows or duration/work_hours
-// tracking are recorded — `time_in` and `time_out` are both set to the
-// verification instant (duration 0); finalizeEndedEventStatuses skips
-// non-GPS rows when applying its "Absent if attended-ratio is too low" rule.
-// attendance_status is decided immediately, once, by
-// comparing the verification instant against the event's scheduled
-// start_datetime (+ the configured late-grace window): on time = Present,
-// past the grace window = Late. If this employee already has an attendance
-// record for the event today (e.g. the admin re-scanned by mistake), it's
-// simply reported back as-is instead of creating a duplicate row.
+// Admin kiosk attendance after a successful OCR/face match (called from
+// ocrController.verifyId and faceController.verifyFace). No geofence and no
+// sessions: time_in = time_out = now, Present or Late by the grace window.
+// An existing record for the same event/day is returned unchanged.
 async function recordVerificationAttendance({ employeeId, eventId, method, ocrRecordId, faceRecordId, adminId }) {
   if (!['ocr', 'face'].includes(method)) {
     throw new Error(`recordVerificationAttendance: unsupported method "${method}"`);
@@ -1129,14 +914,7 @@ async function recordVerificationAttendance({ employeeId, eventId, method, ocrRe
   const existing = existingRows[0];
 
   if (existing) {
-    // An anomaly-flagged record (geo_anomalies logged it and set
-    // requires_face_verification = 1 -- see detectGeoAnomaly above) sitting
-    // here unresolved is exactly what this admin-assisted OCR/Face
-    // verification is meant to clear: the admin has just independently
-    // confirmed, in person, that this employee is who they say they are.
-    // Mirrors the employee's own self-service resolution path
-    // (faceVerify() below) but attributes it to the admin who did the
-    // verifying, since here there is one.
+    // The admin's in-person verification clears a pending geo-anomaly flag.
     if (existing.requires_face_verification) {
       await pool.query(
         `UPDATE attendance SET requires_face_verification = 0, face_verified_at = NOW(), verification_status = 'Verified' WHERE id = ?`,
@@ -1214,25 +992,9 @@ async function recordVerificationAttendance({ employeeId, eventId, method, ocrRe
   };
 }
 
-// POST /api/attendance/:id/face-verify  (employee JWT required)
-// Body (multipart): selfie (file), video (optional mp4/mov liveness clip),
-// latitude, longitude, liveness_verified, liveness_actions
-//
-// This is the automatic, on-device self-verification an employee's app
-// triggers the moment a geo-anomaly flags their attendance (see
-// detectGeoAnomaly above and AttendanceTrackingContext.js on the mobile
-// side) -- NOT an admin-performed check. It has to be a REAL verification,
-// not a rubber stamp: the submitted selfie's face embedding is matched
-// against this employee's OWN enrolled photo(s) (an employee can have more
-// than one from re-registering — every one of them is a legitimate
-// reference, so all are compared and the best match wins), the same
-// liveness bar and matching threshold used everywhere else face
-// recognition happens in this app (services/faceService.js,
-// config.face.matchThreshold). Anything short of a genuine match — no
-// liveness completed, no face detected in the photo, or a face that
-// doesn't match closely enough — returns failure and leaves the
-// attendance record exactly as flagged as it was; nothing here marks it
-// Verified except an actual successful match.
+// POST /api/attendance/:id/face-verify (employee JWT)
+// Multipart: selfie, video?, latitude, longitude, liveness_verified, liveness_actions
+// Clears a geo-anomaly flag only if the selfie matches one of the employee's enrolled faces.
 async function faceVerify(req, res, next) {
   try {
     const { id } = req.params;
@@ -1248,9 +1010,7 @@ async function faceVerify(req, res, next) {
     const selfiePath = `/uploads/selfies/${selfieFile.filename}`;
     const videoPath = videoFile ? `/uploads/face_videos/${videoFile.filename}` : null;
     const livenessActions = typeof req.body.liveness_actions === 'string' ? req.body.liveness_actions.slice(0, 120) : null;
-    // Every attempt's photo is kept on record (face_records, source
-    // 'mobile_anomaly') and shown with the admin's Face Verification
-    // records, whether it matched or not.
+    // Every attempt is saved to face_records (source 'mobile_anomaly').
     const recordAttempt = (result, similarity = null) => pool.query(
       `INSERT INTO face_records (employee_id, image_path, similarity, result, liveness_verified, liveness_actions, source)
        VALUES (?, ?, ?, ?, ?, ?, 'mobile_anomaly')`,
@@ -1258,9 +1018,7 @@ async function faceVerify(req, res, next) {
         req.body.liveness_verified === 'true' || req.body.liveness_verified === true ? 1 : 0, livenessActions]
     );
 
-    // Face verification is only accepted while the event is still running —
-    // once it ends, an unverified flagged record is settled as not recorded
-    // (see rejectUnverifiedFlaggedAttendance).
+    // Only accepted while the event is still running.
     if (record.event_id) {
       const [eventRows] = await pool.query('SELECT end_datetime FROM events WHERE id = ?', [record.event_id]);
       if (eventRows[0] && new Date(eventRows[0].end_datetime) <= new Date()) {
@@ -1274,9 +1032,7 @@ async function faceVerify(req, res, next) {
       }
     }
 
-    // Same rule as the admin's live-selfie tool (controllers/faceController.js
-    // verifyFace): a claimed-but-unverified liveness check is rejected before
-    // the comparatively expensive face-recognition model even runs.
+    // Reject before running the face model if liveness wasn't completed.
     const livenessVerified = req.body.liveness_verified === 'true' || req.body.liveness_verified === true;
     if (!livenessVerified) {
       return res.status(400).json({
@@ -1324,17 +1080,7 @@ async function faceVerify(req, res, next) {
       });
     }
 
-    // verification_method is deliberately left untouched here (still
-    // 'mobile_gps' for a normal GPS-tracked employee) -- this attendance is
-    // a real, ongoing GPS session with its own time-in/out, just
-    // additionally confirmed by this self-verification; overwriting it to
-    // 'face' would make the admin Attendance table's timeSessionCell()
-    // wrongly treat it as a single admin-roll-call instant with no
-    // duration, the same way an OCR/Face admin-assisted record correctly
-    // is. requires_face_verification flipping to 0, face_verified_at, and
-    // selfie_path/selfie_lat/selfie_lng below are what the admin's
-    // faceVerificationCell() already keys off of to show this was
-    // verified -- see views/dashboard.ejs / public/js/app.js.
+    // verification_method stays 'mobile_gps' so the record keeps its session durations.
     await pool.query(
       `UPDATE attendance SET selfie_path = ?, selfie_lat = ?, selfie_lng = ?, requires_face_verification = 0,
        face_verified_at = NOW(), verification_status = 'Verified' WHERE id = ?`,
@@ -1373,9 +1119,7 @@ async function faceVerify(req, res, next) {
 async function getAnomalies(req, res, next) {
   try {
     const { resolved = '0' } = req.query;
-    // Open alerts only matter while their event runs: once it ends (or is
-    // deleted) the flagged attendance is settled by rejectUnverifiedFlaggedAttendance
-    // and expireEndedEventAnomalies resolves the alert, so it's never shown.
+    // Only alerts of running events.
     const [rows] = await pool.query(
       `SELECT ga.*, e.full_name, e.employee_code, ev.title AS event_title
        FROM geo_anomalies ga
@@ -1393,13 +1137,9 @@ async function getAnomalies(req, res, next) {
   }
 }
 
-// GET /api/attendance/anomaly-rechecks  (admin — Verification page countdown)
-// Records that passed face verification less than anomalyRecheckSeconds ago
-// whose phone is STILL staying with another employee's phone for the same
-// event (the same test detectGeoAnomaly runs, colocatedRecords). Those will
-// be flagged again once the recheck window runs out, so the admin page shows
-// a countdown for each. seconds_left is computed in SQL time, the client
-// just ticks it down.
+// GET /api/attendance/anomaly-rechecks
+// Verified records whose phone is still with another employee's, with seconds_left
+// until they're flagged again.
 async function getAnomalyRechecks(req, res, next) {
   try {
     const recheckSeconds = config.attendance.anomalyRecheckSeconds;
@@ -1443,31 +1183,6 @@ async function getAnomalyRechecks(req, res, next) {
   }
 }
 
-// PATCH /api/attendance/anomalies/:id/resolve  (admin)
-// Not currently called from anywhere in the admin UI (see
-// public/js/app.js G_App.geofence / G_App.verification) -- resolving an
-// anomaly now only ever happens as a side effect of the flagged employee's
-// own successful on-device Face Verification (faceVerify above, triggered
-// automatically by the mobile app; never an admin action). Left in place
-// for any direct API integration that still wants a manual override, but
-// note it only ever touches geo_anomalies.resolved -- it does NOT clear
-// attendance.requires_face_verification or set verification_status, so
-// using it alone would leave a record showing "resolved" here while still
-// showing "Awaiting Verification" everywhere else that reads the
-// attendance row directly (the admin Attendance table's
-// faceVerificationCell, for one).
-async function resolveAnomaly(req, res, next) {
-  try {
-    await pool.query(
-      'UPDATE geo_anomalies SET resolved = 1, resolved_by = ?, resolved_at = NOW() WHERE id = ?',
-      [req.admin.id, req.params.id]
-    );
-    res.json({ success: true, message: 'Alert marked as resolved.' });
-  } catch (err) {
-    next(err);
-  }
-}
-
 // GET /api/attendance/by-event  (folder counts for the "organized by Event" admin UI)
 async function getAttendanceByEvent(req, res, next) {
   try {
@@ -1496,9 +1211,7 @@ async function getAttendanceByEvent(req, res, next) {
   }
 }
 
-// PATCH /api/attendance/:id  (admin — manual correction, e.g. flipping a
-// record between Present/Late/Absent/Excused). Always re-recalculates the
-// affected employee's ratings afterward so nothing goes stale.
+// PATCH /api/attendance/:id (admin correction; recalculates ratings)
 async function updateAttendance(req, res, next) {
   try {
     const { id } = req.params;
@@ -1546,34 +1259,11 @@ async function deleteAttendance(req, res, next) {
   }
 }
 
-// POST /api/attendance/:id/heartbeat  (employee JWT required — mobile app)
-// Body: { latitude, longitude, observed_at? }
-// The mobile app calls this periodically (see config.attendance.heartbeatMinIntervalSeconds)
-// while an attendance session is open (time_in set, time_out not yet set).
-// When the employee's location falls outside the event's geofence for
-// config.attendance.autoEndOutsideStreakThreshold consecutive pings in a row
-// (1 by default: the first outside reading), the server automatically closes
-// the session (sets time_out + work_hours). The app sends that reading the
-// instant it's taken, so the time-out lands in real time.
-//
-// `observed_at` (optional, ISO datetime) is when the mobile app actually took
-// this GPS reading, which can be well before the ping reaches the server: GPS
-// itself doesn't need connectivity, so the app can keep detecting "I'm
-// outside the geofence" and locally freeze its displayed duration the moment
-// that happens, even with no signal/WiFi — it just can't tell the SERVER
-// until connectivity returns, at which point it retries this same reading
-// (same coordinates, same original observed_at) rather than a fresh "now"
-// one. Without this, a session left open across a connectivity gap would
-// only close once the ping finally lands, crediting the entire outage —
-// including time spent outside — as attendance. When present and sane
-// (not in the future, not implausibly old), observed_at is used as the
-// session's time_out instead of the moment this request was processed.
-//
-// `location_off: true` means the employee switched the phone's Location/GPS
-// off while the session was open. The app can no longer prove they're inside
-// the geofence, so the session is closed right away (no outside-streak, no
-// debounce), at observed_at = the moment Location went off. Duration only
-// resumes once Location is back on and a fresh time-in lands.
+// POST /api/attendance/:id/heartbeat (employee JWT)
+// Body: { latitude, longitude, accuracy?, observed_at?, location_off?, offline_inside_seconds? }
+// Closes the session on the first outside reading. observed_at (when the reading
+// was taken, possibly while offline) is used as time_out when plausible.
+// location_off closes the session immediately.
 const HEARTBEAT_OBSERVED_AT_FUTURE_SKEW_MS = 2 * 60 * 1000; // small clock-skew allowance
 const HEARTBEAT_OBSERVED_AT_MAX_AGE_MS = 24 * 60 * 60 * 1000; // ignore implausibly stale/garbage values
 
@@ -1594,12 +1284,7 @@ const TIME_OUT_MESSAGES = {
   no_signal: 'Your phone stopped reporting its location (Location turned off, or the app stopped), so your session was automatically timed out.'
 };
 
-// Times out an attendance row's open session at `endTime`: closes the
-// session, folds its duration into the running total and sets time_out. A
-// later re-entry (see submitAttendance) opens a new session and keeps adding
-// to this same total rather than overwriting it. Used by heartbeat() and by
-// the closeSilentSessions sweep. Admin views are told at once; the log and
-// the employee's notification are written afterwards, without being awaited.
+// Closes the open session at endTime and adds its duration to the record's total.
 async function autoTimeOut({ record, openSession, endTime, latitude, longitude, outsideStreak, reason }) {
   const id = record.id;
   // The closed session's own duration_seconds is added to the total in the
@@ -1618,13 +1303,8 @@ async function autoTimeOut({ record, openSession, endTime, latitude, longitude, 
     // and added its time to the total -- don't count it twice.
     if (closed.affectedRows !== 0) countedSessionId = openSession.id;
   } else {
-    // No open session while awaiting face verification is expected (the
-    // clock is paused -- see pauseOpenSession), so nothing to add then.
-    // Re-read the flag: another employee's ping may have flagged this
-    // record (and closed its session) after `record` was loaded.
-    // Otherwise it shouldn't normally happen (a session is opened every
-    // time time_out is cleared) — fall back to the parent row's own
-    // time_in so a duration is still recorded instead of silently dropping it.
+    // No open session: expected while paused for face verification (re-read the
+    // flag in case it was just set), otherwise fall back to the row's time_in.
     const [[fresh]] = await pool.query('SELECT requires_face_verification FROM attendance WHERE id = ?', [id]);
     if (!fresh?.requires_face_verification) {
       fallbackSeconds = Math.max(0, Math.round((endTime.getTime() - new Date(record.time_in).getTime()) / 1000));
@@ -1669,19 +1349,8 @@ async function autoTimeOut({ record, openSession, endTime, latitude, longitude, 
   });
 }
 
-// Times out every open session whose phone has gone silent: no heartbeat (or
-// time-in) for config.attendance.silentSessionSeconds. The app keeps pinging
-// every ~12 s while a session is open -- in the background too, even with
-// the app closed (see mobile/src/tasks/backgroundAttendance.js) -- so silence
-// means its Location was turned off, or the app or phone stopped, with no
-// screen open to report it. The time-out is set at the last moment the phone
-// was heard from, not now. Run on a timer from server.js. A phone that was
-// only offline (no internet) but stayed inside gets it undone once it's back
-// online -- see resumeAfterOffline.
-//
-// Right after this server starts, phones haven't had a chance to reach it
-// yet (it may have been down a while), so nothing is closed until it has
-// been up for one full silence window.
+// Times out sessions with no ping for silentSessionSeconds, at the last ping time.
+// Skipped until the server has been up for one silence window.
 const serverStartedAt = Date.now();
 let sweeping = false;
 async function closeSilentSessions() {
@@ -1732,20 +1401,9 @@ async function closeSilentSessions() {
   }
 }
 
-// A phone with no internet (Wi-Fi off, no mobile data) still tracks itself:
-// it keeps taking GPS readings and remembers exactly when it left the area.
-// But the server hears nothing, so closeSilentSessions times it out at its
-// last ping. Once it's back online it sends `offline_inside_seconds`: how
-// long ago the server last heard from it, all of which it spent inside the
-// area with Location on (an unbroken run of real, non-mock GPS readings --
-// mobile/src/utils/presenceTrail.js). If that run reaches back to the
-// silence time-out, the time-out is undone and the same session reopened,
-// so the duration carries on as if the phone had never gone quiet.
-//
-// Only a no_signal time-out with nothing recorded since (no later log entry,
-// no newer session) is reopened, only while the event is still running and
-// the record isn't awaiting face verification. Returns the reopened record,
-// or null if it stays closed.
+// Reopens a no_signal time-out when the phone reports it stayed inside the
+// whole time it was offline (offline_inside_seconds). Only while the event runs,
+// the record isn't flagged, and nothing was recorded since.
 const OFFLINE_RESUME_SLACK_SECONDS = 20; // request latency between the server's last ping and the phone's receipt of it
 async function resumeAfterOffline(record, claimRaw) {
   const claimSeconds = Number(claimRaw);
@@ -1814,9 +1472,7 @@ async function heartbeat(req, res, next) {
     const [rows] = await pool.query('SELECT * FROM attendance WHERE id = ? AND employee_id = ?', [id, req.employee.id]);
     let record = rows[0];
     if (!record) return res.status(404).json({ success: false, message: 'Attendance record not found.' });
-    // Timed out for silence while the phone was offline but still inside:
-    // reopened, and this ping is then handled like any other (an exit
-    // reading closes it again at the moment they left).
+    // Timed out while offline but stayed inside: reopen, then handle this ping normally.
     if (record.time_out) record = (await resumeAfterOffline(record, req.body.offline_inside_seconds)) || record;
     if (locationOff) {
       // The phone may never have had a fix to send -- fall back to the last
@@ -1825,18 +1481,11 @@ async function heartbeat(req, res, next) {
       if (longitude == null) longitude = record.last_lng ?? record.longitude;
     }
     if (record.time_out) {
-      // Nothing currently open — the employee already left. If they walk
-      // back into the geofence, submitAttendance() opens a fresh session
-      // automatically, so there's nothing for this ping to do right now.
+      // Already timed out; re-entry goes through submitAttendance().
       return res.json({ success: true, message: 'No session currently open.', data: { ended: true } });
     }
 
-    // The event may have simply ended while the employee was still standing
-    // inside the boundary — that's not a "left the geofence" case at all, so
-    // the outside-streak logic below would never catch it and the session
-    // (and its duration) would keep running forever. Close it immediately,
-    // capped at the event's own end time.
-    // Fetched together -- every round trip here delays the time-out.
+    // Event ended while still inside: close at the event's end time.
     const [[eventRows], [geofenceRows], [pointRows], [openSessionRows]] = await Promise.all([
       pool.query('SELECT end_datetime FROM events WHERE id = ?', [record.event_id]),
       pool.query('SELECT * FROM geofences WHERE id = ?', [record.geofence_id]),
@@ -1861,22 +1510,14 @@ async function heartbeat(req, res, next) {
         : [];
       ({ inside } = geofenceService.isInsideGeofence(parseFloat(latitude), parseFloat(longitude), { ...geofence, points }, edgeTolerance(accuracy)));
     }
-    // A mock (Fake GPS) reading proves nothing about where the phone is, so
-    // it counts toward leaving: turning on a spoofer after timing in can't
-    // keep a session open.
+    // Mock locations count as outside.
     if (isMockedLocation(mocked)) inside = false;
 
-    // Debounce: an inside ping that arrives faster than the configured
-    // minimum interval only updates the live position. An OUTSIDE ping is
-    // never debounced -- leaving the polygon must time the employee out the
-    // moment the app reports it, not on some later ping.
+    // Debounce inside pings only; outside pings are always handled.
     if (inside && record.last_ping_at && !locationOff) {
       const secondsSinceLast = (Date.now() - new Date(record.last_ping_at).getTime()) / 1000;
       if (secondsSinceLast < config.attendance.heartbeatMinIntervalSeconds) {
-        // Too soon to run the full check again, but the app also sends
-        // these the moment the employee moves, so the admin's attendance view
-        // follows their live position. last_ping_at stays put so the
-        // debounce timing is unchanged.
+        // Too soon for a full check: only update the live position.
         let requiresFaceVerification = !!record.requires_face_verification;
         if (!observed_at && latitude != null && longitude != null) {
           await pool.query('UPDATE attendance SET last_lat = ?, last_lng = ? WHERE id = ?', [latitude, longitude, id]);
@@ -1925,9 +1566,7 @@ async function heartbeat(req, res, next) {
       );
     }
 
-    // Keep checking for co-located devices for as long as the session is
-    // open, not just at time-in — two phones carried in by one person keep
-    // reporting the same position on every ping.
+    // Check for co-located phones on every ping, not just at time-in.
     let requiresFaceVerification = !!record.requires_face_verification;
     if (!shouldAutoEnd && inside) {
       const [deviceRows] = record.device_id
@@ -1952,16 +1591,13 @@ async function heartbeat(req, res, next) {
 
 module.exports = {
   getAttendance,
-  getAttendanceByDepartment,
   getAttendanceByEvent,
   submitAttendance,
   getMyHistory,
-  getSessions,
   getSessionsAdmin,
   faceVerify,
   getAnomalies,
   getAnomalyRechecks,
-  resolveAnomaly,
   updateAttendance,
   deleteAttendance,
   heartbeat,

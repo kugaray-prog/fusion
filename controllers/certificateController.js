@@ -18,8 +18,6 @@ function publicBaseUrl(req) {
 const wantsEmail = (body) => body.send_email !== false && body.send_email !== 'false';
 
 // POST /api/certificates/generate { employee_id, event_title, event_id?, award_date?, venue?, send_email? }
-// award_date defaults to today, venue to the event's venue. send_email
-// (default true) emails the PDF to the employee before responding.
 async function generateCertificate(req, res, next) {
   try {
     const { employee_id, event_title, event_id } = req.body;
@@ -76,9 +74,7 @@ async function generateCertificate(req, res, next) {
 
 // POST /api/certificates/generate-bulk
 // { scope: 'all' | 'department', department_id?, event_title, event_id?, award_date?, venue?, preview?, send_email? }
-// One certificate per active approved employee: each gets their own PDF
-// (the one emailed and verified), plus one combined PDF for printing.
-// Emails go out in the background after the response.
+// One PDF per employee plus a combined PDF for printing; emails are sent in the background.
 async function generateBulkCertificates(req, res, next) {
   try {
     const { scope, department_id, event_title, event_id } = req.body;
@@ -160,9 +156,7 @@ async function generateBulkCertificates(req, res, next) {
 
 const escapeHtml = (v) => String(v).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
-// Emails one certificate's own PDF to its employee and records the outcome
-// on the row. Never throws for delivery problems; returns
-// { status: 'sent' | 'printed' | 'no_email' | 'missing_file' | 'not_found' | 'failed', message? }.
+// Emails a certificate PDF and records the result. Never throws on delivery failure.
 async function emailCertificate(certificateId, verifyBaseUrl) {
   const [rows] = await pool.query(
     `SELECT c.id, c.certificate_number, c.event_title, c.pdf_path, c.verification_code, e.full_name, e.email
@@ -247,23 +241,7 @@ function emailBatchInBackground(ids, verifyBaseUrl, { batch, eventTitle }) {
   })().catch((err) => console.error('[certificates] Background emailing failed:', err.message));
 }
 
-// POST /api/certificates/:id/email -- (re)sends one certificate.
-async function resendCertificateEmail(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    const email = await emailCertificate(id, publicBaseUrl(req));
-    if (email.status === 'not_found') return res.status(404).json({ success: false, message: email.message });
-    await logAction({ adminId: req.admin.id, action: 'email', module: 'certificates', details: { id, status: email.status }, ip: req.ip });
-    const sent = email.status === 'sent';
-    res.status(sent ? 200 : 422).json({ success: sent, message: sent ? 'Certificate emailed.' : email.message, data: email });
-  } catch (err) {
-    next(err);
-  }
-}
-
-// POST /api/certificates/preview { employee_id?, event_title?, event_id?, award_date?, venue? }
-// Returns one page as a PDF for checking before generating: nothing is
-// saved, numbered or emailed. Without employee_id a sample name is used.
+// POST /api/certificates/preview — one-page PDF, nothing saved or emailed.
 async function previewCertificate(req, res, next) {
   try {
     res.locals.noBroadcast = true;
@@ -349,6 +327,10 @@ async function saveTemplate(req, res, next) {
 }
 
 module.exports = {
-  generateCertificate, generateBulkCertificates, previewCertificate, getCertificates, resendCertificateEmail,
-  getTemplate, saveTemplate
+  generateCertificate,
+  generateBulkCertificates,
+  previewCertificate,
+  getCertificates,
+  getTemplate,
+  saveTemplate
 };

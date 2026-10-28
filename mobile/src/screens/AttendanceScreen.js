@@ -8,15 +8,7 @@ import FadeIn from '../components/FadeIn';
 import AppHeader from '../components/AppHeader';
 import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
-// Attendance is fully automatic: AttendanceTrackingContext runs a background
-// location watch for the whole app and times the employee in the moment
-// they enter this event's geofence, then times them out automatically once
-// they've been outside it for a couple of consecutive location pings (see
-// the context + backend heartbeat for the actual thresholds). The employee
-// can walk in and out of the geofence as many times as they like while the
-// event is still running — every visit opens a new session and adds to the
-// same running total below. This screen is just a live window into that
-// state; there's nothing to tap.
+// Read-only view of automatic tracking (AttendanceTrackingContext).
 export default function AttendanceScreen({ route }) {
   const tracking = useAttendanceTracking();
   const geofenceId = route?.params?.geofenceId ?? null;
@@ -53,9 +45,7 @@ export default function AttendanceScreen({ route }) {
   // can be up to one geofence poll before computed_status catches up.
   const eventActive = geofence?.computed_status === 'active' || !!presence;
 
-  // presence is only computed for events the server reports as active, so
-  // "no presence" must not be shown as "outside" — it's either not started
-  // yet or still waiting on the first GPS fix.
+  // No presence data means not started or no GPS fix yet, not "outside".
   let statusLabel = 'Checking your location…';
   if (!geofence) statusLabel = 'This event is no longer available.';
   else if (isPaused) statusLabel = 'Time paused — complete face verification to resume recording.';

@@ -1,16 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# GeoAttend mobile -- one-shot Android APK builder (the Docker version of
-# BUILD-LOCAL.md). Not a long-running service: docker-compose.yml puts it
-# under the "apk" profile and it is started with
-#
-#   docker compose run --rm apk
-#
-# which runs docker/build-apk.sh and drops the APK in public/downloads/.
-#
-# Versions follow react-native 0.88's gradle/libs.versions.toml:
-# compileSdk 37, build-tools 37.0.0, NDK 27.1.12297006. AGP 9 needs JDK 17+;
-# JDK 21 matches what BUILD-LOCAL.md used on Windows.
+# One-shot release APK builder: docker compose run --rm apk
+# SDK versions follow react-native 0.88 (compileSdk 37, NDK 27.1.12297006, JDK 21).
 
 FROM node:22-bookworm
 
@@ -30,9 +21,7 @@ RUN mkdir -p $ANDROID_HOME/cmdline-tools \
     && mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest \
     && rm /tmp/cmdline-tools.zip
 
-# Licenses are accepted so Gradle can also fetch anything a native library
-# asks for beyond this list (the SDK folder stays writable).
-# (Android 37's platform package is named "android-37.0", not "android-37".)
+# Android 37's platform package is "android-37.0".
 RUN yes | sdkmanager --licenses > /dev/null \
     && sdkmanager --install \
        "platform-tools" \

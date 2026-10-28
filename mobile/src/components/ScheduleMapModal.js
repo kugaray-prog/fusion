@@ -5,31 +5,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, shadow } from '../theme';
 import { useResponsive, MODAL_ORIENTATIONS } from '../utils/responsive';
 
-// react-native-maps has no web implementation, and this app's dev/browser
-// preview runs on react-native-web — so only require it on native platforms
-// and fall back to a simple coordinates card on web.
-//
-// Native builds need a real Maps API key configured at mobile/app.json →
-// expo.android.config.googleMaps.apiKey (Android) / expo.ios.config.googleMapsApiKey
-// (iOS). Reuse the same key set as GOOGLE_MAPS_API_KEY on the server (see
-// server.js) if you'd like the admin dashboard and this map to share one
-// key/project.
-//
-// Without a valid key, Google's Maps SDK doesn't just render a blank map —
-// on Android it throws a fatal "API key not found" exception the moment a
-// MapView mounts, which crashes the whole screen. So we check the configured
-// key up front and only attempt to load react-native-maps when it looks like
-// a real key is present; otherwise we fall through to the coordinates-card
-// fallback below (same as the web preview) instead of crashing.
+// react-native-maps is native-only, and a missing Android Maps key crashes the
+// MapView, so fall back to a coordinates card on web or without a real key.
 function looksLikeRealKey(key) {
   return !!key && !key.startsWith('YOUR_');
 }
 
 const expoConfig = Constants.expoConfig || Constants.manifest || {};
 const androidMapsKey = expoConfig?.android?.config?.googleMaps?.apiKey;
-// iOS: no `provider` is passed to MapView below, so it renders Apple Maps,
-// which needs no key (and works in Expo Go). The Google key only matters if
-// a Google provider is ever switched on there.
+// iOS uses Apple Maps (no key needed).
 const hasValidMapsKey =
   Platform.OS === 'android' ? looksLikeRealKey(androidMapsKey) :
   Platform.OS === 'ios' ? true :
@@ -62,9 +46,7 @@ function fmtTime(dateStr) {
   return new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// Shown when an employee taps an item in the Upcoming Schedule list — surfaces
-// the venue on a map (with the geofence boundary, when available) alongside
-// the event's scheduled date and time.
+// Event venue map with its geofence and schedule.
 export default function ScheduleMapModal({ visible, schedule, onClose }) {
   const { isTablet, isCompactHeight, insets } = useResponsive();
   const [mapType, setMapType] = useState('standard'); // 'standard' | 'satellite'

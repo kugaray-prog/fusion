@@ -110,9 +110,7 @@ async function verifyAdminOtp(email, otp) {
   return null;
 }
 
-// POST /api/admin-accounts { full_name, email, role, otp }
-// role: 'super_admin' or 'admin' (Verification only). No password: the admin
-// signs in with their institutional Google account.
+// POST /api/admin-accounts { full_name, email, role, otp } (sign-in is via Google)
 async function createAdminAccount(req, res, next) {
   try {
     const { full_name, role, otp } = req.body;

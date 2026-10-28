@@ -3,36 +3,18 @@ import { AppState, Platform } from 'react-native';
 import { IS_EXPO_GO } from '../utils/expoGo';
 import * as Network from 'expo-network';
 
-// react-native-wifi-reborn is a custom native module that Expo Go doesn't
-// include, and only the Android branch below uses it -- so it's only loaded
-// there. Everywhere else (iOS, Expo Go) checkNow() falls back to expo-network.
+// react-native-wifi-reborn is Android-only and missing in Expo Go; others use expo-network.
 // eslint-disable-next-line global-require
 const WifiManager = Platform.OS === 'android' && !IS_EXPO_GO ? require('react-native-wifi-reborn').default : null;
 
-// Mirrors LocationStatusContext, but for Wi-Fi. Tracks whether the device's
-// Wi-Fi is actually turned on AND joined to a network, at the OS level --
-// distinct from Wi-Fi PERMISSION and from being joined to the specific
-// REQUIRED network (WifiCheckScreen already handles that one-time, at
-// sign-in). An employee can flip the Wi-Fi toggle off, or walk out of range
-// and get disconnected, at any point later in the day; this catches that
-// everywhere in the app, not just at the initial WifiCheckScreen gate.
-// Wi-Fi is a secondary location-verification signal alongside GPS (see
-// WifiCheckScreen's own top-of-file comment), so losing it gets the same
-// kind of app-wide, impossible-to-miss prompt GPS already gets via
-// LocationStatusContext + LocationGateOverlay.
-//
-// Polled periodically (there's no push/event API for either of these) plus
-// rechecked immediately whenever the app returns to the foreground, so
-// coming back from the OS Settings screen after flipping Wi-Fi back on
-// doesn't leave the employee waiting out a full poll interval.
+// Whether Wi-Fi is on and connected. Polled, and re-checked when the app
+// returns to the foreground.
 const CHECK_INTERVAL_MS = 4000;
 
 const WifiStatusContext = createContext(null);
 
 export function WifiStatusProvider({ children }) {
-  // Optimistic (true) until the first real check lands, so the app doesn't
-  // flash a false "Wi-Fi is off" gate for the split second before that
-  // check resolves -- same reasoning as LocationStatusContext.
+  // Assume on until the first check to avoid a flash of the gate.
   const [wifiOn, setWifiOn] = useState(true);
   const [checked, setChecked] = useState(false);
   const appState = useRef(AppState.currentState);
@@ -40,27 +22,18 @@ export function WifiStatusProvider({ children }) {
   const checkNow = useCallback(async () => {
     try {
       if (WifiManager) {
-        // Android exposes both the radio state ("naka-off") and whether
-        // it's actually joined to a network ("na-disconnect") -- either
-        // being false means Wi-Fi isn't usable right now.
         const [enabled, connected] = await Promise.all([
           WifiManager.isEnabled(),
           WifiManager.connectionStatus().catch(() => false),
         ]);
         setWifiOn(!!enabled && !!connected);
       } else {
-        // iOS has no public API for the Wi-Fi radio itself, but expo-network
-        // reports which connection the phone is using: anything but Wi-Fi
-        // (Wi-Fi switched off or disconnected, so it's on mobile data or
-        // nothing) counts as off.
+        // iOS: only the connection type is available; anything but Wi-Fi counts as off.
         const state = await Network.getNetworkStateAsync();
         setWifiOn(state.type === Network.NetworkStateType.WIFI && state.isConnected !== false);
       }
     } catch (e) {
-      // If the check itself can't run (e.g. unsupported in this preview
-      // environment) -- don't block the whole app
-      // on an unrelated failure. Any real Wi-Fi problem at sign-in still
-      // surfaces through WifiCheckScreen's own error handling.
+      // Don't block the app if the check itself fails.
       setWifiOn(true);
     } finally {
       setChecked(true);
@@ -89,9 +62,7 @@ export function WifiStatusProvider({ children }) {
   );
 }
 
-// Falls back to "enabled" if the provider isn't mounted somewhere in the
-// tree, so a screen rendered outside it (shouldn't normally happen) doesn't
-// crash -- it just won't get the gating behavior.
+// Defaults to enabled outside the provider.
 export function useWifiStatus() {
   const ctx = useContext(WifiStatusContext);
   return ctx || { wifiOn: true, checked: true, recheck: () => {} };

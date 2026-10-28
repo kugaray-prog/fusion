@@ -48,9 +48,7 @@ function toMysqlDatetime(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// Returns a 409 message, or null, when an occurrence duplicates an existing
-// event (same title and times) or books the same venue at an overlapping
-// time. Comparisons are trimmed and case-insensitive.
+// 409 message when an occurrence duplicates an event or double-books its venue, else null.
 async function findScheduleConflict(conn, { title, venue, occurrences, excludeEventId = null }) {
   const normTitle = String(title || '').trim().toLowerCase();
   const normVenue = String(venue || '').trim().toLowerCase();
@@ -176,10 +174,8 @@ async function getGeofences(req, res, next) {
   }
 }
 
-// POST /api/geofences (event + polygon geofence)
-// Recurrence: recurrence_type ('none'|'weekly'|'dates'), recurrence_days
-// ("1,3,5"), recurrence_end_date. Each occurrence gets its own row, linked via
-// parent_event_id.
+// POST /api/geofences — event + polygon. recurrence_type: 'none' | 'weekly' | 'dates';
+// each occurrence is its own event row linked by parent_event_id.
 async function createGeofence(req, res, next) {
   const conn = await pool.getConnection();
   let locked = false;
@@ -396,17 +392,6 @@ async function getAttendeeOptions(req, res, next) {
   }
 }
 
-// PATCH /api/geofences/:id/toggle  { enable: true|false }
-async function toggleGeofence(req, res, next) {
-  try {
-    const { enable } = req.body;
-    await pool.query('UPDATE geofences SET is_active = ? WHERE id = ?', [enable ? 1 : 0, req.params.id]);
-    res.json({ success: true, message: `Geofence ${enable ? 'enabled' : 'disabled'}.` });
-  } catch (err) {
-    next(err);
-  }
-}
-
 // GET /api/geofences/mobile/active (employee: active and upcoming events)
 async function getActiveForMobile(req, res, next) {
   try {
@@ -450,4 +435,4 @@ async function getActiveForMobile(req, res, next) {
   }
 }
 
-module.exports = { getGeofences, createGeofence, updateGeofence, deleteGeofence, toggleGeofence, getActiveForMobile, getDefaultLocation, saveDefaultLocation, getAttendeeOptions };
+module.exports = { getGeofences, createGeofence, updateGeofence, deleteGeofence, getActiveForMobile, getDefaultLocation, saveDefaultLocation, getAttendeeOptions };

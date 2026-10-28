@@ -16,7 +16,6 @@ const loginLimiter = rateLimit({
   message: { success: false, message: 'Too many login attempts. Please try again later.' }
 });
 
-router.post('/login', loginLimiter, employeeAuthController.login);
 router.post('/google', loginLimiter, employeeAuthController.googleLogin);
 router.get('/departments', employeeAuthController.listDepartments);
 router.get('/employee-options', employeeOptionController.getOptions);

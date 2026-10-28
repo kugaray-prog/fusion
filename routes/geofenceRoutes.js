@@ -13,6 +13,5 @@ router.get('/', geofenceController.getGeofences);
 router.post('/', geofenceController.createGeofence);
 router.put('/:id', geofenceController.updateGeofence);
 router.delete('/:id', geofenceController.deleteGeofence);
-router.patch('/:id/toggle', geofenceController.toggleGeofence);
 
 module.exports = router;

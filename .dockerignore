@@ -1,7 +1,6 @@
 node_modules
 mobile
 .git
-.github
 .env
 .env.*
 !.env.example
@@ -10,4 +9,3 @@ uploads
 .DS_Store
 .vscode
 .idea
-test

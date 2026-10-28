@@ -72,4 +72,4 @@ function isInsideGeofence(lat, lng, geofence, toleranceMeters = 0) {
   return { inside: outsideBy <= tol, distanceMeters: Math.round(outsideBy) };
 }
 
-module.exports = { distanceMeters, isInsidePolygon, distanceToPolygonEdgeMeters, isInsideGeofence };
+module.exports = { distanceMeters, isInsideGeofence };

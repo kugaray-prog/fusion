@@ -1,11 +1,5 @@
-// Development-only browser auto-refresh.
-//
-// Every rendered HTML page gets a small script that keeps an EventSource open
-// to /__livereload. The page reloads itself when:
-//   - a file in views/ or public/ changes (polled here, since Docker on
-//     Windows doesn't deliver file-change events from the host folder), or
-//   - the server restarts (nodemon, after a server-side code change) -- the
-//     reconnect sees a different boot id.
+// Dev-only browser reload via EventSource at /__livereload: on views/ or public/
+// changes (polled) and on server restart (new boot id).
 
 const fs = require('fs');
 const path = require('path');

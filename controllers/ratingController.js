@@ -6,9 +6,8 @@ const { audienceEmployeeIds } = require('../services/eventAudience');
 
 const expectedEmployeeIdsForEvent = (event) => audienceEmployeeIds(event);
 
-// Creates/refreshes employee_ratings for every event that ended within
-// [rangeStart, rangeEnd): Present/Late = 5, Absent/Excused/no row = 1.
-// Runs before each ratings read. Manual ratings (is_manual = 1) are kept.
+// Upserts employee_ratings for events ended in [rangeStart, rangeEnd):
+// Present/Late = 5, otherwise 1. Manual ratings are kept.
 async function generateRatingsForRange(rangeStart, rangeEnd) {
   // Settle ended events first so ratings use final statuses.
   await settleEndedEvents();
@@ -59,9 +58,7 @@ async function generateRatingsForRange(rangeStart, rangeEnd) {
 }
 
 // GET /api/ratings?month=&year=&employee_id=&department=
-// Total Rating = sum of the employee's event ratings in the month.
-// Rating Points = Total Rating / number of rated events.
-// Unrelated to the employees.rating_points column.
+// Rating Points = sum of event ratings / number of rated events.
 async function getRatings(req, res, next) {
   try {
     const now = new Date();
@@ -223,8 +220,7 @@ function performancePeriod(year, period) {
 }
 
 // GET /api/ratings/performance?year=&period=1|2|year&department=
-// IPCR = average of an employee's event ratings in the period.
-// OPCR = average of an office's IPCR scores.
+// IPCR = employee's average event rating; OPCR = office's average IPCR.
 async function getPerformance(req, res, next) {
   try {
     const now = new Date();
@@ -307,4 +303,4 @@ async function getPerformance(req, res, next) {
   }
 }
 
-module.exports = { getRatings, upsertRating, generateRatingsForRange, getPerformance };
+module.exports = { getRatings, upsertRating, getPerformance };

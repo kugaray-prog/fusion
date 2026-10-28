@@ -2,10 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, View, StyleSheet } from 'react-native';
 import { colors, radius } from '../theme';
 
-// A single shimmering placeholder block. Used to build skeleton loading
-// states (list rows, cards) that read as "content is on its way" rather
-// than a plain spinner — same effect as the admin dashboard's skeleton
-// rows, done with react-native's built-in Animated API only.
+// Shimmering placeholder block.
 export function SkeletonBlock({ width = '100%', height = 14, radius: r = 8, style }) {
   const shimmer = useRef(new Animated.Value(0)).current;
 
@@ -32,9 +29,7 @@ export function SkeletonBlock({ width = '100%', height = 14, radius: r = 8, styl
   );
 }
 
-// A skeleton card matching the shape of an event/history list row, so the
-// loading state occupies roughly the same space as the real content and
-// doesn't cause a layout jump once data arrives.
+// Placeholder shaped like an event/history row.
 export function SkeletonListCard({ style }) {
   return (
     <View style={[styles.card, style]}>

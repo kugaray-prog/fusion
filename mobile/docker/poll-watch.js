@@ -1,12 +1,5 @@
-// Makes Metro notice edits saved from Windows.
-//
-// Docker Desktop doesn't forward file-change events from a Windows folder
-// into the container, so Metro never sees an edit made in VS Code and the
-// phone keeps the old bundle. This polls the project for changed mtimes and
-// re-touches each changed file from inside the container, which does raise a
-// Linux event, so Metro rebuilds and Expo Go Fast Refreshes on its own.
-//
-//   node docker/poll-watch.js [interval ms, default 500]
+// Re-touches files changed from Windows so Metro sees them inside Docker.
+// Usage: node docker/poll-watch.js [intervalMs=500]
 
 const fs = require('fs');
 const path = require('path');

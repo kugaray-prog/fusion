@@ -1,20 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated } from 'react-native';
 
-// Lightweight entrance animation used to give screens and cards a polished
-// "settle into place" feel on mount, without pulling in a new animation
-// dependency (react-native's built-in Animated API only — no reanimated).
-// Wrap any block of content: <FadeIn><Card /></FadeIn>. `delay` lets a list
-// of cards stagger in one after another for a nicer cascading effect.
-//
-// The content starts at opacity 0, so it must never be left there. On some
-// Android phones (New Architecture, a screen mounted while the navigator is
-// swapping stacks -- e.g. right after face registration) a native-driven
-// animation can stay stuck at its first frame, which showed up as a blank
-// white screen. Once the animation should be over (finished callback or a
-// timer, whichever comes first) the animated style is dropped entirely, so
-// the content is plainly visible no matter what the animation did. The same
-// Animated.View stays mounted, so children keep their state.
+// Fade/slide-in on mount. The animated style is dropped once done so content
+// can't stay stuck invisible (seen on some Android phones).
 export default function FadeIn({ children, delay = 0, duration = 380, distance = 14, style }) {
   const progress = useRef(new Animated.Value(0)).current;
   const [done, setDone] = useState(false);

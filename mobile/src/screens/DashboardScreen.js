@@ -53,9 +53,7 @@ export default function DashboardScreen({ navigation }) {
   // An admin added or changed an event / event area.
   useLiveUpdates(['events', 'geofences'], load);
 
-  // Re-fetch whenever the Dashboard comes back into focus (e.g. returning from
-  // Attendance/History/Profile), and poll every 30s while it stays visible, so a
-  // newly admin-created event/geofence shows up without needing an app restart.
+  // Refresh on focus and every 30 s while visible.
   useFocusEffect(
     useCallback(() => {
       load();
@@ -68,9 +66,7 @@ export default function DashboardScreen({ navigation }) {
   const todaySchedule = geofences.filter((g) => g.computed_status !== 'expired' && isToday(g.start_datetime));
   const upcoming = geofences.filter((g) => g.computed_status === 'upcoming' && !isToday(g.start_datetime));
 
-  // Reminds the employee about today's event(s) — a "starting soon" local
-  // notification ahead of time, or a "happening now" nudge if it's already
-  // active — so they don't need to have the app open to be reminded.
+  // Local "starting soon" / "happening now" reminders for today's events.
   useEffect(() => {
     if (todaySchedule.length) scheduleTodayEventReminders(todaySchedule);
   }, [todaySchedule]); // eslint-disable-line react-hooks/exhaustive-deps

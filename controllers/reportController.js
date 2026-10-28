@@ -125,9 +125,7 @@ const toPercent = (part, whole) => (whole ? Math.round((part / whole) * 1000) / 
 const emptyBreakdown = () => ({ present: 0, late: 0, excused: 0, absent: 0, no_time_in: 0 });
 
 // GET /api/reports/insights?year=&month=&event_id=&order=most|least&rank_by=rate|count
-// Ranks offices by attendance at started events in scope. Expected = active
-// employees in the event's audience; attended = Present/Late; missed =
-// Excused/Absent/no row. Unexpected employees with a row are counted too.
+// Office attendance ranking: attended = Present/Late, expected = event audience.
 async function getInsights(req, res, next) {
   try {
     const order = req.query.order === 'least' ? 'least' : 'most';

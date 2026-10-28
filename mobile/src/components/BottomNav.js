@@ -10,11 +10,7 @@ const ITEMS = [
   { key: 'Profile', label: 'Profile', icon: 'person-outline', iconActive: 'person' },
 ];
 
-// Bottom tab bar rendered inside each main screen (Home / Logs / Profile).
-// The active tab gets a tinted pill behind a filled icon; the others stay
-// as quiet outline icons. The bar spans the screen, but its tabs stay in a
-// centered column so they don't drift to the far edges of a tablet, and it
-// pads past the home indicator / landscape notch.
+// Home / Logs / Profile tab bar.
 export default function BottomNav({ active, navigation }) {
   const { insets, isCompactHeight } = useResponsive();
   return (

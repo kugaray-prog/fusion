@@ -7,26 +7,10 @@ import {
   EYES_OPEN_THRESHOLD, EYES_CLOSED_THRESHOLD,
 } from '../utils/faceCapture';
 
-// Live video selfie camera with real-time liveness (hold still, then blink),
-// shared by RegistrationScreen.js and FaceVerificationScreen.js.
-//
-// Real builds (APK, dev client, TestFlight) use VisionCamera: the front
-// camera streams continuously and every preview frame goes straight to ML
-// Kit's face detector (react-native-vision-camera-face-detector), so a blink
-// is caught within a frame or two of happening instead of whenever the next
-// still photo happens to land. The whole attempt is also recorded as a short
-// video selfie that is uploaded with the selfie still.
-//
-// Expo Go can't load those native modules, so there it falls back to the
-// older expo-camera still-photo polling (utils/faceCapture.js) with no video.
-//
-// Usage (through a ref):
+// Selfie camera with liveness (hold still, then blink). Uses VisionCamera + ML Kit
+// in real builds, still-photo polling in Expo Go.
 //   const result = await cameraRef.current.runLiveness();
-//   // { ok: true, photoUri, video }  -- video: Promise<uri | null>, still finishing
-//   //   in the background when this resolves; the caller owns both files
-//   // { ok: false, reason: 'cancelled' | 'no-face' | 'far' | 'turned' | 'blink' | 'capture' }
-//   cameraRef.current.cancel();
-// Props: style, onReady() once frames are flowing, onStatus({ phase, faceDetected, hint, eyesClosed }).
+//   // { ok: true, photoUri, video } | { ok: false, reason }
 
 
 /* eslint-disable global-require */
@@ -221,9 +205,7 @@ const NativeLiveCamera = forwardRef(function NativeLiveCamera({ style, onReady, 
       resolve({ ok: true, photoUri, video: videoPromise.then(stopVideo) });
     };
 
-    // Watches for an open -> closed -> open blink on every frame where the
-    // face is usable -- including while it's still being "held", so a blink
-    // that happens the moment the face appears already counts.
+    // Detects open -> closed -> open eyes.
     const trackBlink = (face) => {
       const openness = eyeOpenness(face);
       if (openness == null) return false;

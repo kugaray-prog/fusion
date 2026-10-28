@@ -1,12 +1,6 @@
-# GeoAttend -- local/self-hosted stack: the Node app + MySQL 8.
-#
-#   docker compose up -d --build        # build and start
-#   docker compose exec app npm run seed  # first run only: admin + sample data
-#
-# The app reads everything else (JWT/session secrets, Google, mail) from .env.
-# The DB_* values below override .env so the app talks to the "db" container
-# over Docker's network (.env's localhost:3307 is for running `npm start` on
-# this PC instead).
+# GeoAttend dev stack. First run:
+#   docker compose up -d --build
+#   docker compose exec app npm run seed
 
 services:
   db:
@@ -44,27 +38,18 @@ services:
       TZ: Asia/Manila
     ports:
       - "3000:3000"
-    # Live-edit the code from Windows: nodemon polls (-L, since Docker doesn't
-    # pass Windows file events through) and restarts on server code changes;
-    # views/ and public/ edits just refresh the browser (services/devLiveReload.js).
+    # -L: poll for changes (Windows file events don't reach the container).
     command: ["nodemon", "-L", "server.js"]
     volumes:
       - .:/app
-      # Keep the image's Linux node_modules and models/ (w600k_r50.onnx is
-      # downloaded at build time) instead of the Windows copies.
+      # Keep the image's Linux node_modules instead of the Windows copy.
       - /app/node_modules
-      - /app/models
       - uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
 
-  # Expo dev server for the phone app (mobile/). Same as `npm run go` in
-  # mobile/: prints a QR code to scan with Expo Go. HOST_LAN_IP (set in .env)
-  # is this PC's Wi-Fi IPv4 from `ipconfig`; the phone uses it both to fetch
-  # the bundle (port 8081) and to reach the API container (port 3000).
-  #   docker compose logs -f expo     # shows the QR code
-  #   docker compose attach expo      # interactive Expo keys (r = reload)
+  # Expo dev server for Expo Go. QR code: docker compose logs -f expo
   expo:
     build: ./mobile
     restart: unless-stopped
@@ -74,9 +59,7 @@ services:
       # with redirect_uri_mismatch), so prefer the HTTPS tunnel when set.
       API_BASE_URL: ${MOBILE_API_BASE_URL:-http://${HOST_LAN_IP}:3000/api}
       EXPO_NO_TELEMETRY: "1"
-      # Optional: an Expo access token (expo.dev > Account settings > Access
-      # tokens) skips the "Log in / Proceed anonymously" prompt Expo shows
-      # when a phone first connects, which otherwise blocks until answered.
+      # Optional: skips Expo's login prompt.
       EXPO_TOKEN: ${EXPO_TOKEN:-}
     ports:
       - "8081:8081"
@@ -93,10 +76,7 @@ services:
     depends_on:
       - app
 
-  # HTTPS tunnel for MOBILE_API_BASE_URL (Google Sign-In on the phone), hosted
-  # here instead of VS Code's Ports panel. Shares the app container's network,
-  # so the tunnel's port 3000 is the app. One-time login (saved in a volume):
-  #   docker compose run --rm tunnel login
+  # HTTPS tunnel for MOBILE_API_BASE_URL. One-time: docker compose run --rm tunnel login
   tunnel:
     build: ./docker/devtunnel
     restart: unless-stopped
@@ -108,10 +88,7 @@ services:
     depends_on:
       - app
 
-  # One-shot release APK builder (see mobile/Dockerfile.apk). Not started by
-  # `up`; run it with
-  #   docker compose run --rm apk
-  # and the APK lands in public/downloads/.
+  # Release APK builder -> public/downloads/. Run: docker compose run --rm apk
   apk:
     build:
       context: ./mobile

@@ -2,11 +2,7 @@ import Notifications from './notificationsModule';
 import { Platform } from 'react-native';
 import { ensureNotificationPermission } from './eventReminders';
 
-// A phone notification (banner + sound) when Location or Wi-Fi is switched
-// off, posted by LocationGateOverlay / WifiGateOverlay as they appear. On
-// iOS, turning either off from Control Center leaves the app running
-// underneath, so the banner is what the employee actually sees. Dismissed
-// again once the service is back on.
+// Notification when Location or Wi-Fi is turned off; dismissed when back on.
 const CHANNEL_ID = 'connectivity-alerts';
 
 const MESSAGES = {

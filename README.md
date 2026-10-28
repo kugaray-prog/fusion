@@ -1,208 +1,81 @@
-# GeoAttend 
-Paalala: Hangga't ganito ang setup, kailangang i-restart ang Expo tuwing may babaguhin sa code ng app:
+# GeoAttend — Paano Patakbuhin
+
+## A. Unang beses (bagong setup)
+
+1. Buksan ang Docker Desktop at hintaying "Running" na.
+
+2. Ihanda ang .env. Kung wala pa, kopyahin ang .env.example bilang .env. Siguraduhing tama ang:
+   - HOST_LAN_IP: ang Wi-Fi IPv4 ng PC mo (makikita sa ipconfig). Kailangan ito, kasi hindi magsisimula ang expo kapag wala nito.
+   - MOBILE_API_BASE_URL at DEVTUNNEL_ID: kailangan lang kung gagamit ng Google Sign-In sa phone.
+
+3. I-build at simulan lahat:
+
+   docker compose up -d --build
+
+   Ganito ang pagkakasunod ng pag-start: db (MySQL) → app (Node server, magsisimula lang kapag healthy na ang db) → expo at tunnel.
+
+4. I-seed ang database (isang beses lang ito):
+
+   docker compose exec app npm run seed
+
+   Gagawa ito ng admin account: admin@my.cspc.edu.ph / password, maliban kung iba ang nakalagay sa DEFAULT_ADMIN_EMAIL / DEFAULT_ADMIN_PASSWORD sa .env.
+
+5. (Opsyonal) Mag-login sa tunnel, isang beses lang, kung kailangan ang HTTPS para sa Google Sign-In:
+
+   docker compose run --rm tunnel login
+
+6. Buksan ang website: http://localhost:3000
+
+7. Mobile app: ipakita ang QR code at i-scan ito gamit ang Expo Go. Dapat nasa iisang Wi-Fi ang phone at ang PC.
+
+   docker compose logs expo --tail 60
+
+## B. Sa mga susunod na araw (hal. pagka-restart ng PC)
+
+1. Buksan ang Docker Desktop.
+2. docker compose up -d
+3. Buksan ang http://localhost:3000. Para sa phone, i-scan ulit ang QR (docker compose logs expo --tail 60).
+
+Hindi na kailangang mag-seed o mag-build ulit.
+
+## C. Habang nagde-develop
+
+Automatic na ang reload. Basta naka-on ang Docker (docker compose up -d), i-save mo lang ang file sa VS Code at kusa na itong mag-a-update. Hindi mo na kailangang mag-rebuild, mag-restart, o pindutin ang Reload.
+
+1. Website o server
+
+- views/ o public/ (HTML, CSS, JS ng browser): kusang magre-refresh ang browser pagka-save.
+- controllers/, routes/, services/, server.js atbp.: kusang magre-restart ang server (nodemon), tapos kusang magre-refresh ang browser pagbalik ng server (mga 2-3 segundo).
+
+Tingnan sa docker compose logs -f app ang "[nodemon] restarting" o "[livereload]" para makita na nakita ang binago mo.
+
+2. Mobile app (mobile/src/, mobile/App.js)
+
+Kusang mag-a-update ang app sa Expo Go (Fast Refresh) pagka-save. Makikita sa docker compose logs -f expo ang "[poll-watch] changed: ...".
+
+Kung minsan hindi nag-update (hal. may error dati sa code), iling ang phone → Reload, o i-restart ang Expo:
 
 docker compose restart expo
 
-**GeoAttend** is a geofenced attendance monitoring system built for
-institutional use (CSPC — Camarines Sur Polytechnic Colleges). It combines
-GPS geofencing, OCR ID verification, and live face verification to record
-attendance for scheduled events (e.g. flag ceremonies, meetings), with a
-full admin dashboard for managing employees, departments, events, and
-reports.
+3. .env o docker-compose.yml
 
-The system has two front-ends served by the same Node/Express backend:
+docker compose up -d
 
-- **Admin Dashboard** (`/`) — desktop web app for super admins and
-  verification-only admins.
-- **Mobile Web App** (`/mobile`) — the employee-facing portal (Google
-  Sign-In, device binding, geofenced check-in/out, attendance history).
+Kusa nitong ire-recreate ang mga container na naapektuhan.
 
-A native Expo mobile app also lives under [`mobile/`](mobile) for
-on-device face registration and push-style attendance flows.
+4. Kung nag-install ka ng bagong package (binago ang package.json)
 
----
+Server: docker compose up -d --build -V app
+Mobile: docker compose build expo, tapos docker compose up -d expo
 
-## Features
+(Ang -V sa server ay para palitan ang lumang node_modules sa loob ng container ng bago.)
 
-- **Geofenced attendance** — draw a geofence per event on Google Maps;
-  employees can only check in/out from inside it. Live GPS containment
-  checks run client-side and are re-validated server-side.
-- **Recurring events** — weekly recurring schedules (e.g. every Monday
-  flag ceremony) expand into individual dated occurrences automatically.
-- **OCR ID Verification** — scan an employee ID card with the device
-  camera; Tesseract OCR extracts the name/employee code/position and
-  cross-checks it against the employee record.
-- **Live Face Verification** — selfie-based identity verification with an
-  in-browser **liveness challenge** (blink / turn head / nod) that must be
-  completed before the captured frame is matched against enrolled faces
-  via an ONNX face-recognition model.
-- **Mobile self-registration** — Google Sign-In → device details (Employee
-  ID, Department, Position, Classification) → **Face Registration**, which
-  runs the exact same liveness challenge as Face Verification above before
-  enrolling the selfie as that employee's permanent face record.
-- **Reports** — filterable by department, year, month, employee, event,
-  and duty status, with CSV/Excel export and an on-screen summary.
-- **Role-based admin accounts** — `super_admin` (full access) vs. `admin`
-  (restricted to the Verification section only).
-- **Device management** — bind an employee's phone to their account and
-  approve/blacklist devices from the dashboard.
-- **Ratings & certificates, batch employee import, audit logging**.
+## D. Mga madalas gamitin
 
----
-
-## Tech stack
-
-| Layer      | Technology |
-|------------|------------|
-| Backend    | Node.js, Express, MySQL (`mysql2`) |
-| Views      | EJS (server-rendered dashboard/mobile shell) + vanilla JS frontend |
-| Auth       | JWT (admin + employee sessions), Google Sign-In (employee login) |
-| OCR        | `tesseract.js` |
-| Face ID    | `onnxruntime-node` + `sharp` (ONNX face-recognition model) |
-| Exports    | `json2csv`, `exceljs` |
-| Mobile app | Expo / React Native (see `mobile/`) |
-
----
-
-## Getting started
-
-### 1. Prerequisites
-- Node.js 18+
-- A MySQL 8+ server
-- (Optional, for Face Verification) a compatible ONNX face-recognition
-  model — see [`models/README.md`](models/README.md)
-
-### 2. Install dependencies
-```bash
-npm install
-```
-
-### 3. Configure environment
-Copy `.env` and fill in your own values (a template with every recognized
-variable already exists at the project root):
-
-```
-# Server
-PORT=3000
-NODE_ENV=development
-
-# Database (MySQL)
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=yourpassword
-DB_NAME=geoattend_pro
-
-# Auth
-JWT_SECRET=change_me
-JWT_EXPIRES_IN=8h
-SESSION_SECRET=change_me
-
-# Default admin seeded by database/seed.js
-DEFAULT_ADMIN_EMAIL=admin@my.cspc.edu.ph
-DEFAULT_ADMIN_PASSWORD=password
-
-# Google Maps (admin dashboard map rendering)
-GOOGLE_MAPS_API_KEY=
-
-# Google Sign-In (mobile web app "Continue with Google")
-GOOGLE_CLIENT_ID=
-GOOGLE_ANDROID_CLIENT_ID=
-
-# Face Verification (optional — see models/README.md)
-# FACE_MODEL_PATH=
-# FACE_INPUT_SIZE=
-# FACE_MATCH_THRESHOLD=
-```
-
-### 4. Set up the database
-Run the base schema, then every migration in order (each migration file is
-safe to re-run — they all use `IF NOT EXISTS` guards):
-
-```bash
-mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS geoattend_pro"
-mysql -u root -p geoattend_pro < database/schema.sql
-mysql -u root -p geoattend_pro < database/migration_v2.sql
-mysql -u root -p geoattend_pro < database/migration_v3.sql
-mysql -u root -p geoattend_pro < database/migration_v4.sql
-mysql -u root -p geoattend_pro < database/migration_v5.sql
-mysql -u root -p geoattend_pro < database/migration_v6.sql
-mysql -u root -p geoattend_pro < database/migration_v7.sql
-mysql -u root -p geoattend_pro < database/migration_v8.sql
-mysql -u root -p geoattend_pro < database/migration_v9.sql
-mysql -u root -p geoattend_pro < database/migration_v10.sql
-mysql -u root -p geoattend_pro < database/migration_v11.sql
-mysql -u root -p geoattend_pro < database/migration_v15_cspc_email_domain.sql
-```
-
-> `schema.sql` already reflects the final shape of every table (including
-> the migrations), so a **brand-new** database only strictly needs
-> `schema.sql`. Run the migrations too if you're upgrading an existing
-> database that predates them.
-
-Seed a default admin account and a small set of sample employees/departments:
-```bash
-npm run seed
-```
-
-### 5. Run the server
-```bash
-npm start        # production
-npm run dev       # nodemon, auto-restart on file changes
-```
-
-The admin dashboard is now at `http://localhost:3000/`, and the mobile web
-app at `http://localhost:3000/mobile`. Log in with the `DEFAULT_ADMIN_EMAIL`
-/ `DEFAULT_ADMIN_PASSWORD` you set above (defaults to
-`admin@my.cspc.edu.ph` / `password` if left unset — **change this before any
-real deployment**).
-
----
-
-## Building the local (LAN) Android app
-
-To build **GeoAttend (Local)**, an APK that connects to the server on this
-PC over Wi-Fi instead of Render (and what to do when the PC's IP changes),
-see [`mobile/BUILD-LOCAL.md`](mobile/BUILD-LOCAL.md).
-
----
-
-## Project structure
-
-```
-controllers/     Route handlers (one per resource: employees, attendance, face, reports, ...)
-routes/          Express routers, mounted under /api/* in server.js
-services/        Business logic shared across controllers (geofencing, OCR, face, audit, certificates)
-middleware/      Auth (JWT), file upload (multer), error handling
-config/          Environment-driven configuration (config.js) + DB pool (db.js)
-database/        schema.sql + numbered migrations + database/seed.js
-models/          ONNX face-recognition model lives here (not committed — see models/README.md)
-views/           EJS shells for the admin dashboard (dashboard.ejs) and mobile web app (mobile.ejs)
-public/          Static assets — public/js/app.js (dashboard) and public/js/mobile-app.js (mobile)
-uploads/         Runtime-generated: OCR scans, face captures, employee photos, selfies
-mobile/          Separate Expo/React Native app (on-device registration + attendance)
-```
-
-### Key frontend modules
-- `public/js/app.js` → `G_App` — the entire admin dashboard's frontend
-  logic (one namespace per section: `employees`, `attendance`, `events`,
-  `reports`, `ocr`, `face`, `geofence`, `mobile`, `ratings`, `settings`, …).
-- `public/js/mobile-app.js` — the employee-facing mobile web app logic
-  (Google Sign-In, device registration, geofenced check-in/out).
-
----
-
-## Notes on the codebase
-
-- Every admin API route requires a valid JWT (`Authorization: Bearer <token>`
-  or the `token` cookie/query param) via `middleware/authMiddleware.js`.
-  Most routes also gate by role (`super_admin` vs. `admin`).
-- Employee-facing (mobile) routes use a separate employee JWT — see
-  `requireEmployeeAuth` in the same middleware file.
-
----
-
-## License
-
-Internal/institutional project — no license file included. Add one if you
-intend to distribute this codebase publicly.
+Gusto mong gawin	Command
+Tingnan ang error ng server	docker compose logs -f app
+Tingnan ang error ng mobile bundler	docker compose logs -f expo
+Ipakita ulit ang Expo QR	docker compose logs expo --tail 60
+I-restart ang Expo	docker compose restart expo
+Tingnan kung tumatakbo lahat	docker compose ps
+Simulan lahat (hal. pagkatapos mag-restart ng PC)	docker compose up -d

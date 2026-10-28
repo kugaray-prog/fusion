@@ -2,10 +2,8 @@
   "ignore": [
     "mobile/",
     "uploads/",
-    "loadtest/",
     "public/",
     "views/",
-    "docs/",
     "models/",
     "*.md",
     "*.log"

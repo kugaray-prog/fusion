@@ -32,9 +32,8 @@ module.exports = {
   ocr: {
     minConfidence: 70 // percent — below this, OCR result is rejected as low_confidence
   },
-  // InsightFace models (see models/README.md). Defaults to buffalo_s because
-  // buffalo_l ran a 512MB instance out of memory. Switching packs requires every
-  // employee to re-register their face.
+  // InsightFace models. buffalo_s by default (buffalo_l needs >512MB RAM).
+  // Changing packs requires every employee to re-register their face.
   face: {
     detectorModelPath: process.env.FACE_DETECTOR_MODEL_PATH || path.join(__dirname, '..', 'models', 'det_500m.onnx'),
     detectorInputSize: Number(process.env.FACE_DETECTOR_INPUT_SIZE) || 640, // SCRFD's standard square input size
@@ -68,10 +67,8 @@ module.exports = {
     silentSessionSeconds: process.env.ATTENDANCE_SILENT_SESSION_SECONDS !== undefined
       ? Number(process.env.ATTENDANCE_SILENT_SESSION_SECONDS)
       : 30,
-    // Geo-anomaly (one person carrying another's phone): two employees' readings
-    // within anomalyPairSeconds and anomalyDistanceMeters of each other, sustained
-    // for anomalyMinMatches readings over anomalySustainSeconds, flag both for face
-    // verification. After passing, a record is not re-flagged for anomalyRecheckSeconds.
+    // Geo-anomaly: two phones within anomalyDistanceMeters for anomalyMinMatches
+    // paired readings over anomalySustainSeconds are both flagged for face verification.
     anomalyDistanceMeters: Number(process.env.ANOMALY_DISTANCE_METERS) || 0.5,
     anomalyWindowSeconds: Number(process.env.ANOMALY_WINDOW_SECONDS) || 30,
     anomalyRecheckSeconds: Number(process.env.ANOMALY_RECHECK_SECONDS) || 30,

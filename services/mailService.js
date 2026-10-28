@@ -202,4 +202,4 @@ async function checkDeliverable(email) {
   return { ok: false, reason: `"${domain}" can't receive email. Check the address for typos.` };
 }
 
-module.exports = { sendMail, isConfigured, checkDeliverable };
+module.exports = { sendMail, checkDeliverable };

@@ -9,29 +9,11 @@ import { alertFaceVerificationRequired } from '../utils/faceVerificationAlert';
 import Notifications from '../utils/notificationsModule';
 import { noteServerHeard, noteReading, offlineInsideSeconds, forgetTrail } from '../utils/presenceTrail';
 
-// Keeps attendance running while the app is in the background or has been
-// swiped closed. On Android, Location keeps delivering readings to this task
-// through a foreground service (the ongoing "GeoAttend is tracking your
-// attendance" notification), which outlives the app's screen. Each reading
-// does what AttendanceTrackingContext does while the app is open:
-//   - inside an active event's area with no open session -> time in
-//   - an open session, still inside -> keep-alive ping every KEEPALIVE_MS, so
-//     the server knows the phone is still there
-//   - an open session, reading outside the area -> time out right away, at
-//     that reading's own time (retried with the same reading if offline)
-// With no internet (Wi-Fi off, no mobile data) readings keep coming, so the
-// phone keeps track of itself: once back online, the server reopens a
-// session it timed out for silence if the phone stayed inside meanwhile
-// (utils/presenceTrail.js), and a held exit reading closes it at the moment
-// they actually left.
-// If Location is turned off while the app is closed, readings simply stop
-// (there's no "Location off" event to react to here): the server notices the
-// silence within ~30 s and times the session out at the last ping
-// (attendanceController.closeSilentSessions).
-//
-// While the app is open (AppState 'active') this task does nothing -- the
-// in-app tracker is in charge, and it hands over by saving its state here
-// (saveBackgroundState).
+// Background attendance (app backgrounded or closed), via an Android foreground
+// service. Per reading: time in when inside with no session, keep-alive pings
+// while inside, time out on the first outside reading (retried if offline).
+// If Location is turned off, readings stop and the server times out the session
+// after ~30 s of silence. Does nothing while the app is in the foreground.
 
 export const BACKGROUND_ATTENDANCE_TASK = 'geoattend-background-attendance';
 
@@ -45,15 +27,8 @@ const CHECK_IN_RETRY_MS = 5000;
 const GEOFENCE_REFRESH_MS = 60000;
 const CHANNEL_ID = 'attendance-updates';
 
-// {
-//   employeeId,
-//   geofences: [{ event_id, title, start_datetime, end_datetime, points }],
-//   geofencesFetchedAt,             // ms
-//   sessions: { [eventId]: { id, open } },
-//   pendingExits: { [eventId]: { attendanceId, observedAt, latitude, longitude, accuracy, mocked } },
-//   lastSentAt: { [attendanceId]: ms },
-//   lastFailAt: { [eventId]: ms }
-// }
+// State: { employeeId, geofences, geofencesFetchedAt, sessions: { [eventId]: { id, open } },
+//   pendingExits: { [eventId]: reading }, lastSentAt: { [attendanceId]: ms }, lastFailAt: { [eventId]: ms } }
 async function readState() {
   try {
     const raw = await AsyncStorage.getItem(STATE_KEY);
@@ -80,9 +55,7 @@ async function writeState(state) {
   }
 }
 
-// Called by AttendanceTrackingContext whenever its own view changes, so the
-// task starts from exactly what the open app knew. An exit reading the task
-// is still trying to deliver is kept unless the app has its own for that event.
+// Called by the in-app tracker; keeps an undelivered exit unless the app has its own.
 export async function saveBackgroundState({ employeeId, geofences, sessions, pendingExits }) {
   const prev = await readState();
   const keptExits = {};
@@ -287,9 +260,7 @@ TaskManager.defineTask(BACKGROUND_ATTENDANCE_TASK, async ({ data, error }) => {
   }
 });
 
-// Background location needs "Allow all the time". Returns whether it's granted,
-// asking for it (on Android 11+ this opens the app's Location settings page)
-// only when `ask` is true.
+// Whether "Allow all the time" is granted; asks only when `ask` is true.
 export async function ensureBackgroundPermission(ask) {
   if (Platform.OS === 'web') return false;
   try {
@@ -301,9 +272,7 @@ export async function ensureBackgroundPermission(ask) {
   }
 }
 
-// Starts the background task if it isn't already running. Returns false
-// when it can't run here (permission not granted, or Expo Go, which has no
-// background location).
+// Returns false without permission or in Expo Go.
 export async function startBackgroundAttendance() {
   if (Platform.OS === 'web') return false;
   try {

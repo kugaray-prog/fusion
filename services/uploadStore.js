@@ -56,12 +56,6 @@ async function saveUpload(publicPath, input) {
   return data.length;
 }
 
-async function hasUpload(publicPath) {
-  await ensureTable();
-  const [rows] = await pool.query('SELECT 1 FROM stored_uploads WHERE path = ?', [publicPath]);
-  return rows.length > 0;
-}
-
 // Middleware after multer: stores every uploaded image. Failures are only logged.
 async function persistRequestUploads(req, res, next) {
   const files = [];
@@ -155,9 +149,7 @@ function wasDeletedLocally(publicPath) {
   return loadKnownPaths().has(publicPath) && !fs.existsSync(diskPathFor(publicPath));
 }
 
-// Writes stored photos missing from uploads/ (skipping ones deleted locally).
-// After the first full run, only rows added since the last run are checked.
-// Returns the number of files written.
+// Restores stored photos missing from uploads/; returns the count written.
 let syncing = false;
 let syncedUpTo = null; // newest created_at seen, as the DB returned it
 async function syncToDisk({ full = false } = {}) {
@@ -208,4 +200,4 @@ function startDiskSync(intervalMs = Number(process.env.UPLOAD_SYNC_INTERVAL_MS) 
   return setInterval(() => tick(false), intervalMs);
 }
 
-module.exports = { saveUpload, hasUpload, removeUpload, persistRequestUploads, serveStoredUpload, publicPathFor, ensureTable, syncToDisk, startDiskSync };
+module.exports = { removeUpload, persistRequestUploads, serveStoredUpload, startDiskSync };

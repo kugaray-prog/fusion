@@ -3,9 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 
-// Last line of defense: if any screen throws while rendering, show a way back
-// instead of a blank white screen. "Try again" re-mounts the app's screens;
-// the signed-in session (AsyncStorage) is untouched.
+// Shows a retry screen instead of a blank screen on a render error.
 export default class AppErrorBoundary extends React.Component {
   constructor(props) {
     super(props);

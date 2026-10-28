@@ -32,23 +32,15 @@ const Stack = createNativeStackNavigator();
 function RootNavigator() {
   const { employee, loading, deviceStatus, wifiVerified } = useAuth();
 
-  // A signed-in employee whose device hasn't been approved by an admin yet is
-  // held on WaitingApproval — it's the only screen in that stack, so there's
-  // nowhere else to navigate to until deviceStatus flips to 'approved' (or the
-  // employee signs out). The moment WaitingApprovalScreen's polling detects
-  // approval, this component re-renders into the Dashboard stack below.
+  // Unapproved device: only WaitingApproval until deviceStatus changes.
   const awaitingApproval = !!employee && deviceStatus === 'pending';
 
   // Each auth stage gets its own navigator instance (via `key`) instead of
   // one navigator swapping its whole screen list in place.
   const stage = !employee ? 'auth' : awaitingApproval ? 'pending' : !wifiVerified ? 'wifi' : 'app';
 
-  // ...and the old navigator is fully gone before the new one mounts: for a
-  // moment between stages only a plain spinner is rendered. On some Android
-  // phones (seen on Honor / Android 13, New Architecture) unmounting the
-  // Login/Registration stack and mounting the WaitingApproval stack in the
-  // same commit -- right after face registration -- left the new screen's
-  // native view never attached: a blank white screen.
+  // Render a spinner between stages so the old navigator fully unmounts first
+  // (avoids a blank screen on some Android phones).
   const [shownStage, setShownStage] = useState(stage);
   useEffect(() => {
     if (stage === shownStage) return undefined;
@@ -84,13 +76,6 @@ function RootNavigator() {
       ) : awaitingApproval ? (
         <Stack.Screen name="WaitingApproval" component={WaitingApprovalScreen} options={{ headerShown: false, animation: 'fade' }} />
       ) : !wifiVerified ? (
-        // WifiCheck is the ONLY screen in this branch — once it confirms the
-        // device is on the right network it calls markWifiVerified() (from
-        // AuthContext) instead of imperatively navigating anywhere. That
-        // state flip is what swaps this whole component into the branch
-        // below on the next render, the same state-driven pattern used for
-        // `awaitingApproval` above — not a cross-screen `navigation.replace()`
-        // that could fire after the screen list has already changed.
         <Stack.Screen name="WifiCheck" component={WifiCheckScreen} options={{ headerShown: false, title: 'Network Check', animation: 'fade' }} />
       ) : (
         <>

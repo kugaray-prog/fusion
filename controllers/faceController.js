@@ -4,9 +4,7 @@ const { logAction } = require('../services/auditService');
 const { removeUpload } = require('../services/uploadStore');
 const { recordVerificationAttendance } = require('./attendanceController');
 
-// POST /api/face/verify (multipart: image, optional event_id)
-// Admin kiosk check: matches the face against every enrolled employee. With
-// event_id, a match also records attendance.
+// POST /api/face/verify (multipart: image, event_id?) — kiosk match; records attendance with event_id.
 async function verifyFace(req, res, next) {
   try {
     if (!req.file) {
@@ -37,7 +35,7 @@ async function verifyFace(req, res, next) {
       return res.status(502).json({
         success: false,
         message: err.message.includes('model not found')
-          ? 'The face-recognition model is not installed on this server yet. See models/README.md.'
+          ? 'The face-recognition model is not installed on this server yet.'
           : 'Could not process the captured image. Please retake the photo.'
       });
     }
@@ -143,9 +141,7 @@ async function getFaceRecords(req, res, next) {
   }
 }
 
-// DELETE /api/face/records/:id
-// Kiosk photos are deleted; mobile anomaly selfies are kept as attendance
-// evidence. Linked attendance keeps its row.
+// DELETE /api/face/records/:id (mobile anomaly selfies are kept as evidence)
 async function deleteFaceRecord(req, res, next) {
   try {
     const [rows] = await pool.query('SELECT id, image_path, result, source FROM face_records WHERE id = ?', [req.params.id]);

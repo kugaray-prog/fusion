@@ -49,4 +49,4 @@ function cleanDeviceInfo({ model, brand, os }) {
   return { model: clip(model, 120), brand: clip(brand, 120), os: clip(os, 60) };
 }
 
-module.exports = { BLOCKED_STATUSES, isBlockedStatus, blockedMessage, sendDeviceBlocked, getBlockedStatus, cleanDeviceInfo };
+module.exports = { isBlockedStatus, blockedMessage, sendDeviceBlocked, getBlockedStatus, cleanDeviceInfo };

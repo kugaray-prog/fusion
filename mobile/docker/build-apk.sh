@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# Builds the GeoAttend release APK inside the "apk" container (see
-# Dockerfile.apk). Mounts, from docker-compose.yml:
-#   /src   mobile/ from Windows (read-only)
-#   /work  a Docker volume holding the build copy and its Linux node_modules
-#   /out   public/downloads/, where the finished APK is written
+# Builds the release APK. Mounts: /src (mobile/, read-only), /work (build volume), /out (public/downloads/).
 set -euo pipefail
 
 : "${API_BASE_URL:?API_BASE_URL is not set (set HOST_LAN_IP in .env)}"
@@ -27,9 +23,7 @@ if ! cmp -s package-lock.json node_modules/.build-apk-lock 2>/dev/null; then
   cp package-lock.json node_modules/.build-apk-lock
 fi
 
-# react-native-wifi-reborn (latest, 4.13.6) calls safeExtGet(compileSdkVersion, 31)
-# without quotes, passing null as the property name. Gradle 9 (Expo SDK 58)
-# rejects that, so quote the names. Safe to re-run.
+# react-native-wifi-reborn passes unquoted names to safeExtGet, which Gradle 9 rejects.
 sed -i -E "s/safeExtGet\((compileSdkVersion|minSdkVersion|targetSdkVersion),/safeExtGet('\1',/" \
   node_modules/react-native-wifi-reborn/android/build.gradle
 

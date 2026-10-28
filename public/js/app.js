@@ -1,8 +1,4 @@
-// ============================================================
-// GeoAttend — Admin Dashboard Frontend
-// Same UI/design as provided. All data now comes from the real
-// Node.js/Express/MySQL backend via fetch() calls.
-// ============================================================
+// GeoAttend admin dashboard.
 
 const API = '/api';
 
@@ -45,9 +41,7 @@ function normalizeSearchText(value) {
     return String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9@]+/g, ' ').trim();
 }
 
-// True when every word of the query appears somewhere in the text, in any
-// order -- "cruz juan", "Dela Cruz, Juan" and "juan dela" all find
-// "Juan Dela Cruz". An empty query matches everything.
+// Every word of the query appears in the text, in any order.
 function matchesSearch(text, query) {
     const words = normalizeSearchText(query).split(' ').filter(Boolean);
     if (!words.length) return true;
@@ -73,9 +67,7 @@ function toast(message, type = 'info') {
     setTimeout(() => el.remove(), 4000);
 }
 
-// Centered confirmation dialog (#confirm-modal) in place of the browser's
-// confirm(). Resolves true on confirm, false on Cancel / Esc / backdrop click.
-// message is plain text; **bold** spans are rendered bold.
+// Confirmation modal; resolves true/false. **bold** is supported.
 function confirmDialog({ title = 'Are you sure?', message = '', confirmText = 'Delete', danger = true, icon } = {}) {
     const modal = document.getElementById('confirm-modal');
     const okBtn = document.getElementById('confirm-ok');
@@ -193,9 +185,7 @@ const G_App = {
         }
     },
 
-    // Full-screen loading splash (#app-splash in dashboard.ejs): painted
-    // first on every load/reload, hidden once the page is ready. Stays up at
-    // least MIN_MS so it doesn't just flash, and never longer than MAX_MS.
+    // Loading splash shown for at least MIN_MS and at most MAX_MS.
     splash: {
         MIN_MS: 700,
         MAX_MS: 10000,
@@ -220,9 +210,7 @@ const G_App = {
     },
 
     ui: {
-        // localStorage key that remembers whichever nav section the admin was
-        // looking at, so a manual browser refresh (F5) reopens the same page
-        // instead of always snapping back to the Dashboard.
+        // Reopens the last viewed section after a reload.
         ACTIVE_VIEW_KEY: 'ga_active_view',
         // URL path for each sidebar section, e.g. /dashboard, /employees.
         // server.js serves the dashboard page at each of these paths.
@@ -260,9 +248,7 @@ const G_App = {
                 if (target) G_App.ui.switchView(target, null, { updateUrl: false });
             });
         },
-        // Shared by the click handler above and by the reload-restore logic in
-        // init() below, so both paths do exactly the same work (activate the
-        // nav item + view, run that section's loaders, and remember the choice).
+        // Shared by nav clicks and reload restore.
         switchView: (target, item, { updateUrl = true, replaceUrl = false } = {}) => {
             item = item || document.querySelector(`.nav-item[data-target="${target}"]`);
             const viewEl = document.getElementById(target);
@@ -302,11 +288,7 @@ const G_App = {
             document.body.classList.toggle('dark-mode');
             G_App.ui.redrawDashboardCharts();
         },
-        // Auto-refresh fallback: changes normally arrive instantly over the
-        // live WebSocket (G_App.live). This 30s tick only re-fetches when the
-        // socket is down, or every 2 min while it's up to pick up
-        // time-based changes nobody triggers (e.g. an event ending, Ongoing
-        // turning into Present/Absent).
+        // Fallback refresh: every 30 s while the WebSocket is down, every 2 min while up.
         autoRefreshTimer: null,
         lastRefreshAt: 0,
         LIVE_FALLBACK_MS: 120000,
@@ -316,12 +298,6 @@ const G_App = {
                 if (G_App.live.connected && Date.now() - G_App.ui.lastRefreshAt < G_App.ui.LIVE_FALLBACK_MS) return;
                 G_App.ui.refreshActiveView();
             }, 30000);
-        },
-        stopAutoRefresh: () => {
-            if (G_App.ui.autoRefreshTimer) {
-                clearInterval(G_App.ui.autoRefreshTimer);
-                G_App.ui.autoRefreshTimer = null;
-            }
         },
         // topics = what changed (from G_App.live); empty for the fallback tick.
         refreshActiveView: async (topics = new Set()) => {
@@ -862,10 +838,7 @@ const G_App = {
         }
     },
 
-    // The employee form's Position / Classification lists, kept server-side
-    // (see employeeOptionController.js). The options written in dashboard.ejs
-    // are only a fallback until they load. The "+ Add new" modal lists every
-    // entry with a delete button and adds new ones.
+    // Position/Classification lists from the server (dashboard.ejs options are fallbacks).
     employeeOptions: {
         lists: { position: [], classification: [] },
         kind: 'position',
@@ -967,13 +940,7 @@ const G_App = {
     },
 
     employees: {
-        // Position / Gender / Classification dropdowns each have an "Others"
-        // option that reveals a free-text `${selectId}-other` input, same as
-        // the mobile registration form (RegistrationScreen.js
-        // resolveDropdownValue). A value already on file that isn't one of
-        // the listed options -- e.g. something typed into "Others" on the
-        // phone -- selects "Others" with the raw value in the text field, so
-        // saving the form untouched never overwrites it.
+        // "Others" reveals `${selectId}-other`; unlisted stored values select "Others" with the raw text.
         toggleOther: (selectId) => {
             const other = document.getElementById(`${selectId}-other`);
             other.style.display = document.getElementById(selectId).value === 'Others' ? '' : 'none';
@@ -986,9 +953,7 @@ const G_App = {
             other.value = value && !listed ? value : '';
             G_App.employees.toggleOther(selectId);
         },
-        // Shows the employee's registered device(s) in the same
-        // MODEL / BRAND / OS / DEVICE ID layout as the mobile registration
-        // form's device card, from the values the app submitted.
+        // Registered device(s) of the employee.
         renderDeviceInfo: async (employeeId) => {
             const wrap = document.getElementById('inp-device-info-wrap');
             const box = document.getElementById('inp-device-info');
@@ -1160,9 +1125,7 @@ const G_App = {
         },
         statusBadgeClass: (status) => status === 'Full-time' ? 'success' : status === 'Part-time' ? 'warning' : status === 'COS' ? 'info' : 'danger',
         remarkBadgeClass: (remark) => remark === 'Active' ? 'success' : 'warning',
-        // Grouped by employment permanence tier: Permanent (green) is the
-        // most stable, COS (blue) is fixed-term, Casual/Job Order (amber)
-        // is the least permanent.
+        // Permanent = green, COS = blue, Casual/Job Order = amber.
         classificationBadgeClass: (c) => /^Permanent/.test(c || '') ? 'success' : /^COS/.test(c || '') ? 'info' : 'warning',
         render: () => {
             const tbody = document.getElementById('employee-table-body');
@@ -1382,14 +1345,7 @@ const G_App = {
                 // Non-fatal — the rest of the Geo-Fence module still works without alerts.
             }
         },
-        // Read-only: unusual location activity automatically triggers Face
-        // Verification on the EMPLOYEE'S OWN device the moment it's detected
-        // (see AttendanceTrackingContext.js on the mobile side and
-        // detectGeoAnomaly / faceVerify in controllers/attendanceController.js
-        // on the backend) -- there is no admin action here by design. This
-        // panel exists purely so an admin can see which attendance records
-        // are currently waiting on that self-verification and why; the
-        // employee's own successful match is what clears it, nothing here.
+        // Read-only list of records awaiting the employee's own face verification.
         renderAlerts: (alerts) => {
             const container = document.getElementById('geofence-alerts');
             if (!alerts.length) {
@@ -1418,17 +1374,6 @@ const G_App = {
             `;
             lucide.createIcons();
         },
-        // resolveAlert (a plain "mark resolved, no check performed" bypass)
-        // was intentionally removed from the UI: resolving an anomaly now
-        // only ever happens as a side effect of the employee's own
-        // successful Face Verification (controllers/attendanceController.js
-        // faceVerify) -- an admin dismissing the ALERT here never actually
-        // confirmed the underlying attendance either (that bypass endpoint,
-        // PATCH /attendance/anomalies/:id/resolve, only ever touched
-        // geo_anomalies.resolved, never attendance.requires_face_verification
-        // or verification_status), so it could leave a record silently
-        // marked "resolved" while still showing "Awaiting Verification"
-        // everywhere else -- exactly the kind of mismatch to avoid.
         init: async () => {
             if (G_App.geofence.initializing) return;
             if (!window.google || !window.google.maps) {
@@ -1474,9 +1419,7 @@ const G_App = {
             map.setCenter({ lat: Number(loc.lat), lng: Number(loc.lng) });
             map.setZoom(Number(loc.zoom) || 18);
         },
-        // Called each time the Geo-Fences page is opened. Leaves the map alone
-        // while a boundary is being drawn or an event edited, so switching away
-        // and back doesn't lose the admin's place.
+        // Leaves the map alone while drawing or editing.
         onPageOpen: () => {
             const map = G_App.geofence.map;
             if (!map) return;
@@ -1484,9 +1427,6 @@ const G_App = {
             const busy = (G_App.geofence.drawMarkers || []).length > 0 || !!document.getElementById('gf-id').value;
             if (!busy) G_App.geofence.showDefaultView();
         },
-        // "Use CSPC Default Location" button — fills the lat/lng fields with CSPC's
-        // coordinates (the system's configured default Geo-Fence location) and
-        // shows the CSPC default map view.
         useCspcDefault: () => {
             const loc = G_App.geofence.defaultLocation || { lat: 13.4059000, lng: 123.3758000, label: 'CSPC', zoom: 18 };
             document.getElementById('gf-lat').value = Number(loc.lat).toFixed(7);
@@ -1496,9 +1436,7 @@ const G_App = {
             if (!document.getElementById('gf-venue').value) document.getElementById('gf-venue').value = loc.label || 'CSPC';
             toast('CSPC default location applied.', 'success');
         },
-        // "Save Current Map View as Default" button — the map's current center
-        // and zoom become what this page opens at and what "Use CSPC Default
-        // Location" jumps to.
+        // Saves the current map center/zoom as the default view.
         saveDefaultView: async () => {
             const map = G_App.geofence.map;
             if (!map) return;
@@ -1516,9 +1454,7 @@ const G_App = {
             const type = document.getElementById('gf-recurrence-type').value;
             document.getElementById('gf-recurrence-fields').classList.toggle('hidden', type !== 'weekly');
         },
-        // ---- Required Attendees ----
-        // Offices and employees picked for the event being created/edited.
-        // Nothing picked = every employee is expected (the default).
+        // Required attendees; none selected = everyone.
         attendees: { departmentIds: new Set(), employeeIds: new Set() },
         attendeeOptions: null,    // { departments, employees }, fetched once
         ATTENDEE_LIST_LIMIT: 200, // employee rows shown before asking to search
@@ -1623,7 +1559,7 @@ const G_App = {
                 emps ? `${emps} employee${emps === 1 ? '' : 's'}` : null
             ].filter(Boolean).join(', ');
         },
-        // ---- Filters (search, status, schedule type, date, sort) ----
+        // Filters (search, status, schedule type, date, sort)
         // They narrow both the event list and the shapes drawn on the map.
         parseDate: (value) => new Date(String(value || '').replace(' ', 'T')),
         setStatus: (status) => {
@@ -1817,20 +1753,12 @@ const G_App = {
                 () => toast('Could not get your current location.', 'error')
             );
         },
-        // Formats "now" (or any Date) as a "YYYY-MM-DDTHH:MM" string in the
-        // browser's *local* time, matching what <input type="datetime-local">
-        // reads/writes. Used as the `min` attribute so the native picker
-        // simply won't offer past dates/times, and as a belated safety check
-        // in save() for browsers/paths that bypass the picker.
+        // Local "YYYY-MM-DDTHH:MM" for datetime-local inputs.
         localDatetimeString: (d = new Date()) => {
             const pad = (n) => String(n).padStart(2, '0');
             return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
         },
-        // Locks the "Start Date/Time" (and, for a brand-new event, the "Repeat
-        // Until" date) so the calendar/time picker can't select a moment
-        // that's already in the past. Called whenever the form is opened for
-        // a NEW event (clearForm / first load) — editing an existing event
-        // keeps whatever schedule it already has.
+        // New events can't start in the past.
         applyMinDate: () => {
             const nowStr = G_App.geofence.localDatetimeString();
             const startInput = document.getElementById('gf-start');
@@ -1860,9 +1788,6 @@ const G_App = {
             if (!payload.title || !payload.start || !payload.end) {
                 return toast('Complete the event name and schedule.', 'error');
             }
-            // Only brand-new events are blocked from starting in the past —
-            // editing an already-scheduled/past event shouldn't be forced to
-            // move its date just to save an unrelated change.
             if (!id && payload.start < G_App.geofence.localDatetimeString()) {
                 return toast('The event start date/time can\'t be in the past.', 'error');
             }
@@ -1899,11 +1824,7 @@ const G_App = {
                 G_App.geofence.clearForm();
                 await G_App.geofence.load();
                 toast('Event saved.', 'success');
-                // Only refresh the Dashboard's charts/stats if that page is
-                // actually the visible view — refreshing it while on the
-                // Geo-Fences page reaches into hidden canvases and can throw
-                // (e.g. Chart.js "destroy is not a function" if a chart on a
-                // display:none canvas wasn't fully constructed the first time).
+                // Refresh dashboard charts only when visible (hidden canvases break Chart.js).
                 const dashboardView = document.getElementById('dashboard');
                 if (dashboardView && dashboardView.classList.contains('active')) {
                     G_App.ui.updateDashboard();
@@ -2123,9 +2044,6 @@ const G_App = {
             if (sortSel) sortSel.value = 'default';
             await G_App.attendance.loadDetail();
         },
-        // Fills the Department filter with whatever departments exist, so
-        // an admin can narrow a single event's attendance down to just one
-        // department's employees.
         populateDepartmentFilter: () => {
             const deptSel = document.getElementById('attendance-detail-department');
             if (!deptSel) return;
@@ -2135,10 +2053,7 @@ const G_App = {
                 departments.map(d => `<option value="${d.name}">${d.name}</option>`).join('');
             deptSel.value = departments.some(d => d.name === previous) || previous === 'all' ? previous : 'all';
         },
-        // Re-fetches and re-renders the currently-open event's table in place —
-        // used both by openEvent and by the auto-refresh loop, so a live event's
-        // logs update on their own without the admin needing to reopen it.
-        // Also applied whenever the Department/Status/Sort filters change.
+        // Reloads the open event's table (also used by auto-refresh and filters).
         loadDetail: async () => {
             if (!G_App.attendance.currentEventId) return;
             try {
@@ -2189,15 +2104,8 @@ const G_App = {
             const rows = document.querySelectorAll('#attendance-dept-table > tr');
             rows.forEach(r => r.style.display = matchesSearch(r.innerText, q) ? '' : 'none');
         },
-        // Time Started / Time Ended, with a dropdown when the employee entered
-        // and left the geofence more than once — each boundary crossing (its
-        // own time-in/time-out pair) is a separate row in attendance_sessions,
-        // so a single "Time Started"/"Time Ended" pair can't represent all of
-        // them. With one session, the pair is shown directly; with more than
-        // one, a dropdown reveals every individual dip.
-        // OCR/Face-verified rows are a single roll-call instant, not a
-        // time-in/time-out cycle, so they just show when the verification
-        // happened instead of a (misleading, always-identical) in→out pair.
+        // Time in/out, with a dropdown when there are multiple sessions.
+        // OCR/Face rows show only the verification time.
         timeSessionCell: (log) => {
             if (log.verification_method === 'ocr' || log.verification_method === 'face') {
                 return `<span style="font-weight:700;">${log.time_in ? new Date(log.time_in).toLocaleTimeString() : '--'}</span>`;
@@ -2244,13 +2152,7 @@ const G_App = {
                 label.innerText = 'Failed to load sessions';
             }
         },
-        // Accumulated duration across every time-in/time-out session for the
-        // day (an employee can leave/re-enter the event's geofence multiple
-        // times while it's still running — see total_duration_seconds /
-        // open_session_time_in from the API). Keeps counting up live while
-        // still on-going instead of freezing at the last known total.
-        // OCR/Face verification is a one-time roll-call confirmation with no
-        // ongoing presence to measure, so it has no duration at all.
+        // Live total across sessions; none for OCR/Face rows.
         durationCell: (log) => {
             if (log.verification_method === 'ocr' || log.verification_method === 'face') {
                 return '<span style="color:var(--text-muted);">N/A</span>';
@@ -2268,10 +2170,7 @@ const G_App = {
             const color = log.time_out ? 'var(--text-main)' : 'var(--warning)';
             return `<span style="font-weight:700; color:${color};">${label}</span>${G_App.attendance.presencePercent(log, totalSeconds)}`;
         },
-        // Share of the event's whole scheduled duration spent inside the
-        // geofence so far — the same ratio the end-of-event rule checks
-        // (presence_required_percent, 80% by default) to decide Present vs
-        // Absent. Green once it reaches the requirement.
+        // Share of the event spent inside; green at presence_required_percent.
         presencePercent: (log, attendedSeconds) => {
             const start = new Date(log.event_start).getTime();
             const end = new Date(log.event_end).getTime();
@@ -2281,16 +2180,7 @@ const G_App = {
             const color = percent >= required ? 'var(--success)' : 'var(--text-muted)';
             return `<div style="font-size:0.75rem; font-weight:700; color:${color};" title="Time inside the event area out of the event's full duration (needs ${required}% to count as present)">${percent}% of event</div>`;
         },
-        // How this row's time-in was captured — the normal mobile app + GPS
-        // flow, or an admin-run alternative at the Verification kiosk (ID
-        // card OCR scan, or live selfie) for an employee without their
-        // phone/ID. See migration_v14 / controllers/attendanceController.js
-        // (recordVerificationAttendance). An employee's own automatic
-        // on-device re-verification after an anomaly flag (faceVerify())
-        // doesn't change this -- it's layered on top of whatever the
-        // attendance was already recorded as (almost always mobile_gps,
-        // still a real GPS session); see faceVerificationCell() below for
-        // how the admin sees THAT.
+        // mobile_gps, ocr or face (how the time-in was recorded).
         methodCell: (log) => {
             const methods = {
                 mobile_gps: { label: 'Mobile GPS', icon: 'smartphone', badge: 'info' },
@@ -2335,9 +2225,7 @@ const G_App = {
     },
 
     reports: {
-        // Attendance-insights state. The Most/Minimum choice and the expanded
-        // office rows survive a re-sort, so flipping the order doesn't collapse
-        // what the admin already opened.
+        // Kept across re-sorts.
         insightsOrder: 'most',
         insightsOpen: new Set(),
         insights: null,
@@ -2435,10 +2323,7 @@ const G_App = {
             window.open(`${API}/reports/export/${format}?${params.toString()}`, '_blank');
         },
 
-        // ---- Attendance insights: offices/colleges ranked by attendance ----
-        // Data: GET /api/reports/insights (controllers/reportController.js getInsights).
-        // "Most attendance" lists offices highest first, "Minimum attendance"
-        // lowest first; each office expands into the employees involved.
+        // Office attendance ranking (GET /api/reports/insights).
         setInsightsOrder: (order) => {
             if (G_App.reports.insightsOrder === order) return;
             G_App.reports.insightsOrder = order;
@@ -2692,15 +2577,9 @@ const G_App = {
     },
 
     ocr: {
-        // On phones, plain `{ video: true }` almost always opens the FRONT
-        // (selfie) camera. We explicitly ask for the rear/"environment"
-        // camera by default — `ideal` (not a hard `exact`) so it still just
-        // works on laptops/desktops with only one (front-facing) webcam.
+        // Prefer the rear camera; `ideal` still works with a single webcam.
         currentFacingMode: 'environment',
-        // Populates the "Record Attendance For" dropdown with events
-        // currently in their scheduled window — an empty selection just
-        // verifies identity (today's existing behavior); picking one turns a
-        // successful match into an attendance time-in/time-out (see process()).
+        // Events in their window; choosing one makes a match record attendance.
         loadOngoingEvents: async () => {
             const select = document.getElementById('ocr-event-select');
             if (!select) return;
@@ -2725,9 +2604,7 @@ const G_App = {
                 try {
                     s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facingMode } } });
                 } catch (e) {
-                    // Some browsers reject an unsatisfiable facingMode outright
-                    // instead of falling back — retry with no constraint at all
-                    // rather than leaving the camera dead.
+                    // Retry without facingMode if the browser rejects it.
                     s = await navigator.mediaDevices.getUserMedia({ video: true });
                 }
                 v.srcObject = s;
@@ -2824,26 +2701,13 @@ const G_App = {
         }
     },
 
-    // Tab switcher for the "Verification" section (formerly "OCR Verification"),
-    // which hosts two identity-verification methods: OCR and Face. These are
-    // for the pre-existing, separate "Verification kiosk" use case -- an
-    // admin recording attendance for an employee without their phone/ID on
-    // hand (see recordVerificationAttendance in
-    // controllers/attendanceController.js) -- NOT for resolving a flagged
-    // anomaly. An anomaly is resolved only by the flagged employee's own
-    // automatic, on-device Face Verification (faceVerify in the same
-    // controller, triggered by AttendanceTrackingContext.js on the mobile
-    // side the instant detectGeoAnomaly flags a time-in) -- there is no
-    // admin action for that by design.
+    // Verification kiosk (OCR / Face) for employees without their phone.
     verification: {
         activeTab: 'ocr',
         liveTimer: null,
         // Newest record id per table, so a new photo can be announced.
         lastSeen: { ocr: null, face: null },
-        // While the Verification page is open (and the browser tab visible),
-        // re-load the flagged list and both photo tables every few seconds so
-        // photos from the mobile app, OCR scans and kiosk checks show up in
-        // real time. Stops by itself once another page is opened.
+        // Polls the Verification page while it's open and visible.
         startLive: () => {
             clearInterval(G_App.verification.liveTimer);
             G_App.verification.liveTimer = setInterval(() => {
@@ -2860,8 +2724,6 @@ const G_App = {
                 G_App.face.loadRecords();
             }, 5000);
         },
-        // Called by loadRecords with the newest record; toasts when it's new
-        // since the last refresh (not on the first load).
         // Deletes one row from Recent ID Scans ('ocr') or Recent Face Checks ('face').
         deleteRecord: async (kind, id) => {
             const label = kind === 'ocr' ? 'ID scan' : 'face check';
@@ -2902,12 +2764,7 @@ const G_App = {
                 G_App.ocr.loadOngoingEvents();
             }
         },
-        // Read-only: lists attendance currently flagged by anomaly detection
-        // and still awaiting the employee's own on-device Face Verification
-        // -- "Sa Admin, dapat makita na ang attendance ay dumaan sa Face
-        // Verification dahil na-trigger ang anomaly." This list clears
-        // itself the moment that employee's own device completes a
-        // successful match; there is nothing to click here.
+        // Read-only list of records awaiting the employee's own face verification.
         loadAlerts: async () => {
             try {
                 const { data } = await apiFetch('/attendance/anomalies?resolved=0');
@@ -2916,10 +2773,7 @@ const G_App = {
                 // Non-fatal -- OCR/Face verification still works without this panel.
             }
         },
-        // Records that just passed face verification but whose phone is still
-        // within the anomaly distance of another employee's phone. Each gets a
-        // live countdown to when the server will ask for face verification
-        // again (config.attendance.anomalyRecheckSeconds).
+        // Verified records still near another phone, with a countdown to the next check.
         recheckTimer: null,
         loadRechecks: async () => {
             try {
@@ -3002,31 +2856,6 @@ const G_App = {
                 </div>
             `;
             lucide.createIcons();
-        },
-        // Turns a recordVerificationAttendance() result into a short text
-        // block appended under the OCR/Face verification output — blank when
-        // no event was selected (identity-only check) or the match failed,
-        // since there'd be nothing to report attendance-wise either way.
-        // OCR/Face attendance is a one-time roll-call confirmation (no
-        // time-in/time-out cycle), so this just reports whether it was
-        // freshly recorded or was already on file for today.
-        attendanceSummaryText: (attendance) => {
-            if (!attendance) return '';
-            if (!attendance.success) return `\n\nATTENDANCE: ${attendance.message || 'Could not be recorded.'}`;
-            const status = attendance.status_label ? ` (${attendance.status_label})` : '';
-            const actionLabel = attendance.action === 'anomaly_resolved' ? '\u26a0 FLAGGED ATTENDANCE VERIFIED & RESOLVED'
-                : attendance.action === 'already_recorded' ? 'ALREADY RECORDED TODAY'
-                : 'ATTENDANCE RECORDED';
-            // A resolved anomaly changes the read-only alert panel's count --
-            // refresh it rather than waiting for the admin to notice on their
-            // own. (This can only happen if this kiosk verification happened
-            // to match someone who separately also had a pending anomaly for
-            // the same event -- an incidental overlap of two different
-            // features, not the expected way anomalies get resolved.)
-            if (attendance.action === 'anomaly_resolved') {
-                G_App.verification.loadAlerts();
-            }
-            return `\n\n${actionLabel}${status}`;
         },
         // Result card under each camera (#ocr-output / #face-output).
         // tone: idle | busy | success | error. lines are plain text unless html.
@@ -3116,17 +2945,8 @@ const G_App = {
         // Faces are best captured front-on with the selfie camera, unlike the
         // OCR module (which defaults to the rear camera for scanning ID cards).
         currentFacingMode: 'user',
-        // Single-step capture, mirroring the mobile app's registration flow:
-        // just hold a live face steady in frame -- no blink/nod/turn-head
-        // sequence to fumble through. Still verified for real (see
-        // detectFaceHold below), just with one thing to get right instead of
-        // two random challenges picked from four.
         HOLD_STILL_INSTRUCTION: 'Hold still and look at the camera',
-        // Mirrors G_App.ocr.loadOngoingEvents — populates the "Record
-        // Attendance For" dropdown with events currently in their scheduled
-        // window. An empty selection just verifies identity (today's
-        // existing behavior); picking one turns a successful match into an
-        // attendance time-in/time-out (see captureAndVerify()).
+        // Same as G_App.ocr.loadOngoingEvents.
         loadOngoingEvents: async () => {
             const select = document.getElementById('face-event-select');
             if (!select) return;
@@ -3187,19 +3007,8 @@ const G_App = {
             }
         },
 
-        // ---- Liveness engine --------------------------------------------
-        // Pure canvas pixel-analysis (no external face-landmark library):
-        // 1) YCbCr skin-tone thresholding gives a rough face blob per frame,
-        //    from which we take a centroid + bounding box.
-        // 2) Head turns/nods are detected as a sustained shift of that
-        //    centroid away from a locked-in baseline position, normalized by
-        //    the face's own bounding-box size (scale-invariant — works the
-        //    same whether the camera is close or far away), and require 2
-        //    consecutive confirming frames so one noisy sample can't trigger it.
-        // 3) Blinks are detected as a dip-then-recovery in the local pixel
-        //    contrast ("std dev of luma") of the eye band inside that
-        //    bounding box — closed eyelids are visibly smoother/flatter
-        //    than open eyes — likewise debounced over 2 consecutive frames.
+        // Canvas-only liveness: skin-tone blob for the face box and position,
+        // eye-band contrast for blinks. Each signal needs 2 consecutive frames.
         sampleFaceMetrics: (video, workCanvas) => {
             const W = 120, H = 120;
             workCanvas.width = W; workCanvas.height = H;
@@ -3250,14 +3059,7 @@ const G_App = {
             // baseline size by the caller, not a fixed fraction of the canvas.
             return { cx: sumX / count, cy: sumY / count, bw, bh, eyeStd };
         },
-        // Resolves true once a live face is held steady in frame for several
-        // consecutive samples within timeoutMs, false on timeout. No head
-        // movement required -- just a sustained, real face (a photo held up
-        // to the camera or an empty frame won't hold the skin-tone blob
-        // check below across several consecutive samples the way a real,
-        // slightly-moving live face does).
-        // Big 3-2-1 inside the guide ring so the person has time to get into
-        // position before the timed liveness check starts.
+        // 3-2-1 countdown inside the guide ring.
         runCountdown: async (seconds = 3) => {
             const el = document.getElementById('face-countdown');
             const instructionEl = document.getElementById('face-liveness-instruction');
@@ -3318,7 +3120,7 @@ const G_App = {
             }, 150);
         }),
 
-        // ---- Orchestration: hold-still check -> capture -> /api/face/verify
+        // Orchestration: hold-still check -> capture -> /api/face/verify
         startVerification: async () => {
             const video = document.getElementById('face-video');
             if (!video.srcObject) return toast('Camera not available.', 'error');
@@ -3521,10 +3323,7 @@ const G_App = {
             try {
                 await apiFetch(`/devices/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
                 toast(`Device marked as ${status}.`, 'success');
-                // Awaited: openViewModal() below reads G_App.mobile.raw, which
-                // render() only refreshes once its own /devices fetch resolves.
-                // Without this await, the modal would reopen against the
-                // still-stale cached data and appear not to have updated.
+                // Await so openViewModal() reads fresh data.
                 await G_App.mobile.render();
                 // Keep the modal's own status/actions in sync if it's open on this device.
                 if (document.getElementById('device-view-modal').classList.contains('open') && G_App.mobile.viewingId === id) {
@@ -3547,12 +3346,7 @@ const G_App = {
                 await G_App.mobile.render();
             } catch (err) { toast(err.message, 'error'); }
         },
-        // Shows the employee's profile details plus the face photo captured
-        // during THIS device's registration (see deviceController.getDevices
-        // -- matched by closest timestamp, not just "their latest photo",
-        // so this is genuinely the photo from this device's registration
-        // even for an employee with more than one device on file), so the
-        // admin can clearly see who they're approving before doing so.
+        // Device approval modal with the photo from this device's registration.
         viewingId: null,
         openViewModal: (id) => {
             const d = (G_App.mobile.raw || []).find(x => x.id === id);
@@ -3566,10 +3360,7 @@ const G_App = {
                 photo.style.display = 'block';
                 caption.innerText = d.face_captured_at ? `Captured ${new Date(d.face_captured_at).toLocaleString()}` : 'Registration photo';
             } else {
-                // data: URI placeholder -- no external request, never broken-image icon.
-                // Colors are written as plain #hex here (not pre-escaped as %23) since
-                // encodeURIComponent() below does that escaping for the whole string;
-                // pre-escaping and then encoding again would double-encode the % itself.
+                // Inline SVG placeholder (encodeURIComponent handles the # escaping).
                 photo.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(
                     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#E9EDF7"/><text x="50" y="55" font-size="13" text-anchor="middle" fill="#A3AED0" font-family="sans-serif">No Photo</text></svg>'
                 );
@@ -3578,9 +3369,6 @@ const G_App = {
             }
 
             document.getElementById('device-view-name').innerText = d.full_name;
-            // Every piece of information below is its own clearly labeled
-            // field (not folded into unlabeled subtitle text), so this line
-            // only needs to say what the card as a whole is.
             document.getElementById('device-view-subtitle').innerText = 'Employee & device details';
 
             const field = (label, value, fullWidth) => `
@@ -3910,12 +3698,8 @@ const G_App = {
         }
     },
 
-    // Live updates: a WebSocket to /ws (services/realtime.js) that says
-    // "something changed" ({ type: 'change', topic }) whenever data is
-    // written -- an employee timing in, a heartbeat, an admin edit, a new
-    // alert. The open view then re-fetches through the normal API, so the
-    // page stays current without reloading. Reconnects with backoff; while
-    // disconnected the 30s auto-refresh and 20s bell polling take over.
+    // WebSocket change signals (services/realtime.js); views re-fetch on change.
+    // Reconnects with backoff; polling covers disconnects.
     live: {
         socket: null,
         connected: false,
@@ -3955,22 +3739,9 @@ const G_App = {
                 live.retryMs = Math.min(live.retryMs * 2, live.MAX_RETRY_MS);
             };
         },
-        // Several changes in a burst (e.g. many employees timing in at once)
-        // become one re-fetch, and re-fetches are throttled to one per
-        // MIN_INTERVAL_MS. "attendance" gets the longer
-        // ATTENDANCE_MIN_INTERVAL_MS: every employee's heartbeat announces
-        // it, so while an event runs it arrives continuously, and the
-        // Dashboard view makes ~5 API calls per refresh -- every 5s that
-        // alone is ~900 of the per-account limit of 1000 per 15 minutes
-        // (production only; see apiLimiter in server.js).
-        // A hidden tab refreshes when it's shown again.
-        // So the heavy views (Dashboard, Verification: 4-5 calls each) wait
-        // ATTENDANCE_MIN_INTERVAL_MS between heartbeat refreshes, and the
-        // light ones (Attendance, Events, Geofences: 1-2 calls) only
-        // ATTENDANCE_FAST_INTERVAL_MS, so presence there looks live.
-        // "attendance-status" is sent only when an employee is actually timed
-        // in or out (never by plain heartbeats), so it's shown almost at once:
-        // a short debounce, then at most one refresh per STATUS_MIN_INTERVAL_MS.
+        // Bursts are coalesced and throttled per view. Heartbeat-driven "attendance"
+        // refreshes are slower on heavy views (API rate limit); "attendance-status"
+        // (time in/out) is near-instant. Hidden tabs refresh when shown.
         MIN_INTERVAL_MS: 1000,
         ATTENDANCE_MIN_INTERVAL_MS: 10000,
         ATTENDANCE_FAST_INTERVAL_MS: 3000,
@@ -4008,9 +3779,7 @@ const G_App = {
         }
     },
 
-    // Notification bell (Notification & Alert module): device registrations,
-    // unregistered/blocked device attempts, geo anomalies, rejected
-    // attendance. Polled every 20s; new warnings also pop up as a toast.
+    // Notification bell; new warnings also show a toast.
     notifications: {
         POLL_MS: 20000,
         timer: null,
@@ -4030,10 +3799,7 @@ const G_App = {
             const n = G_App.notifications;
             if (n.timer) return;
             n.load();
-            // Polling is only the fallback; new alerts arrive over G_App.live.
-            // Still re-checked every LIVE_FALLBACK_MS while "connected", like
-            // the views, in case the socket is silently dead (laptop sleep,
-            // network switch) and the browser hasn't noticed yet.
+            // Fallback poll in case the socket died silently.
             n.timer = setInterval(() => {
                 if (!G_App.live.connected || Date.now() - n.lastLoadAt >= G_App.ui.LIVE_FALLBACK_MS) n.load();
             }, n.POLL_MS);
@@ -4272,9 +4038,7 @@ const G_App = {
             }
             G_App.ratings.refreshEmployeeOptions();
         },
-        // Rebuilds the Employee dropdown's options to only those in the currently
-        // selected Department, so the two filters can never contradict each other.
-        // Falls back to "All Personnel" if the previous selection drops out.
+        // Employee filter limited to the selected department.
         refreshEmployeeOptions: () => {
             const empSel = document.getElementById('ratings-employee');
             const deptSel = document.getElementById('ratings-department');
@@ -4310,12 +4074,8 @@ const G_App = {
         onSearch: () => {
             G_App.ratings.renderFiltered();
         },
-        // Applies the free-text search box (employee name/code/department,
-        // event title/venue, or attendance-status word like "present"/"absent")
-        // against the already-fetched month's data, then renders. Rows are
-        // narrowed to matching employees (falling back to all of them if none
-        // match, so a pure event-name search still works); columns are
-        // narrowed to matching events the same way.
+        // Filters the loaded month by employee, event or status text; falls back to
+        // all rows/columns when nothing matches on that axis.
         renderFiltered: () => {
             const { events, data } = G_App.ratings.raw;
             const term = (document.getElementById('ratings-search')?.value || '').trim().toLowerCase();
@@ -4359,10 +4119,7 @@ const G_App = {
             };
             const head = `<thead><tr><th>Employee</th>${events.map(ev => `<th style="text-align:center;" title="${ev.title}${ev.venue ? ' · ' + ev.venue : ''}">${ev.title}<br><span style="font-weight:600; font-size:0.72rem; color:var(--text-muted);">${dateLabel(ev.date)}</span></th>`).join('')}<th style="text-align:center;" title="Sum of the employee's own ratings across every event applicable to them this month">Total Rating</th><th style="text-align:center;" title="Total Rating ÷ number of rated events">Rating Points</th><th style="text-align:center;">Events</th></tr></thead>`;
             const body = data.map(e => {
-                // Rating Points can only ever land in 1..5 (it's an average of
-                // 1s and 5s), so it's colored on where it falls in that fixed
-                // range rather than by sign, unlike the old unrelated metric
-                // this column used to show.
+                // Rating Points is an average of 1s and 5s.
                 const pointsColor = e.rating_points == null ? 'var(--text-muted)' : e.rating_points >= 4 ? 'var(--success)' : e.rating_points >= 2.5 ? 'var(--warning)' : 'var(--danger)';
                 return `
                 <tr>
@@ -4393,11 +4150,7 @@ const G_App = {
             table.innerHTML = head + `<tbody>${body}</tbody>`;
             lucide.createIcons();
         },
-        // Lists the events a specific employee was rated on this month, each
-        // with its own rating, plus the Total Rating / Rating Points summary
-        // -- the "listahan ng mga Events na pinasukan ng employee at ang
-        // rating niya sa bawat event" view, separate from the wide
-        // all-employees x all-events grid above.
+        // Events the employee was rated on this month.
         openEventsModal: (employeeId) => {
             const emp = (G_App.ratings.raw.data || []).find(e => e.id === employeeId);
             if (!emp) return;
@@ -4473,9 +4226,7 @@ const G_App = {
         G_App.live.connect();
         lucide.createIcons();
 
-        // Open the section named in the URL (/employees, /events, ...); on a
-        // bare "/" fall back to whichever section was on screen last, then to
-        // the Dashboard -- and put that section's path in the address bar.
+        // Start at the URL's section, else the last viewed one, else Dashboard.
         const startView = G_App.ui.viewFromPath(location.pathname)
             || localStorage.getItem(G_App.ui.ACTIVE_VIEW_KEY)
             || 'dashboard';

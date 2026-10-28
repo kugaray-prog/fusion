@@ -3,17 +3,7 @@ import { View, Text, Image, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, CSPC_LOGO } from '../theme';
 
-// App identity mark (the CSPC seal, the same image already used on the
-// Login screen) paired with the app name, in the upper-left corner of every
-// main screen -- mirrors the admin web dashboard's sidebar header
-// (views/dashboard.ejs: a colored badge icon + "GeoAttend" wordmark) so the
-// mobile app and the admin portal read as the same product, and gives every
-// screen the same consistent header instead of each one styling its own
-// title independently.
-//
-// Falls back to a plain globe-icon badge if the remote logo image can't be
-// reached (no connectivity, the hosted image moves) -- branding stays
-// visible either way instead of leaving a blank gap.
+// CSPC logo + title header; falls back to a globe icon if the logo fails to load.
 export default function AppHeader({ title }) {
   const [logoFailed, setLogoFailed] = useState(false);
   return (

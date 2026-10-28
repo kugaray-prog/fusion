@@ -8,15 +8,7 @@ import { colors, radius, shadow } from '../theme';
 import { MODAL_ORIENTATIONS } from '../utils/responsive';
 import { alertServiceOff, clearServiceOffAlert } from '../utils/serviceOffAlert';
 
-// Rendered app-wide (see App.js), above the whole navigation stack, for as
-// long as the employee is signed in AND Location/GPS is off -- this is what
-// keeps every location-dependent feature (auto time-in/out tracking, the
-// Attendance screen, WifiCheck's location-based Wi-Fi read) unreachable
-// until GPS is back on: there's no close button, no swipe-to-dismiss, and it
-// sits on top of every screen equally, not just Dashboard/Attendance.
-// Disappears automatically the moment the periodic check in
-// LocationStatusContext detects GPS is enabled again -- no manual "continue"
-// step needed once it's actually on.
+// Blocks the whole app while signed in and Location is off.
 export default function LocationGateOverlay() {
   const { employee, deviceStatus } = useAuth();
   const { locationEnabled, checked, recheck } = useLocationStatus();
@@ -51,9 +43,6 @@ export default function LocationGateOverlay() {
         await Linking.openSettings();
       }
     } catch (e) {
-      // Nothing more we can do here — the "I've turned it on — Recheck"
-      // button below still lets them confirm manually once they've
-      // navigated to Settings themselves.
     }
   };
 

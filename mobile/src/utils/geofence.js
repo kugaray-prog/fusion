@@ -1,11 +1,6 @@
-// Geofence math shared by the in-app tracker (AttendanceTrackingContext) and
-// the background task that keeps attendance running with the app closed
-// (tasks/backgroundAttendance.js), so both decide "inside" the same way --
-// and the same way as the backend's geofenceService.
+// Geofence math shared with the background task; matches services/geofenceService.js.
 
-// Point-in-polygon test (ray-casting). Coerced to Number like the backend's
-// version, so string coordinates can never silently turn the math into
-// string concatenation.
+// Ray-casting point-in-polygon.
 export function isInsidePolygon(lat, lng, points) {
   lat = Number(lat);
   lng = Number(lng);
@@ -19,16 +14,10 @@ export function isInsidePolygon(lat, lng, points) {
   return inside;
 }
 
-// GPS error allowance at the boundary, mirroring the backend's
-// config.attendance.edgeToleranceMeters (keep the two in sync): a reading
-// just outside the polygon still counts as inside when the edge is within
-// the reading's own accuracy, capped at this many meters. 0 = the admin's
-// polygon is the exact boundary: stepping outside it times the employee out.
+// Keep in sync with config.attendance.edgeToleranceMeters. 0 = exact polygon.
 export const EDGE_TOLERANCE_METERS = 0;
 
-// Shortest distance in meters from a point to the polygon's boundary (flat
-// projection; accurate to well under a meter at geofence scale). Same math
-// as geofenceService.distanceToPolygonEdgeMeters on the backend.
+// Distance in meters to the polygon's nearest edge.
 export function distanceToEdgeMeters(lat, lng, points) {
   lat = Number(lat);
   lng = Number(lng);
@@ -60,10 +49,7 @@ export function isInsideGeofence(lat, lng, points, acc) {
   return tol > 0 && distanceToEdgeMeters(lat, lng, points) <= tol;
 }
 
-// Whether an event's attendance window is open right now. The server's
-// computed_status is only as fresh as the last geofence poll (up to 30s
-// old), so an event that has just started is also recognized from its own
-// start/end times. Falls back to computed_status if they can't be parsed.
+// Active by start/end time, falling back to computed_status.
 export function isEventActiveNow(g, nowMs = Date.now()) {
   const start = new Date(String(g.start_datetime || '').replace(' ', 'T')).getTime();
   const end = new Date(String(g.end_datetime || '').replace(' ', 'T')).getTime();
@@ -71,9 +57,7 @@ export function isEventActiveNow(g, nowMs = Date.now()) {
   return nowMs >= start && nowMs <= end;
 }
 
-// Today's date in the phone's local timezone as 'YYYY-MM-DD' -- matches the
-// server's attendance_date. toISOString() gives the UTC date, which is still
-// "yesterday" before 8:00 AM Philippine time.
+// Local 'YYYY-MM-DD' (toISOString would give the UTC date).
 export function localDateString(d = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

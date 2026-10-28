@@ -1,24 +1,15 @@
 import { useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// Layout breakpoints, in dp. A device counts as a tablet when its SHORT side
-// is at least 600 (every iPad, 7"+ Android tablets), so it stays a tablet in
-// both orientations. "Wide" describes the current window instead -- an iPad
-// or tablet in landscape -- and is where screens switch to two columns.
-// "Compact height" is a phone held in landscape, where vertical space is the
-// scarce thing and tall heroes/camera frames have to shrink.
+// Tablet = short side >= 600dp.
 const TABLET_MIN_SHORT_SIDE = 600;
 const WIDE_MIN_WIDTH = 900;
 const COMPACT_MAX_HEIGHT = 500;
 
-// Max width of a screen's content column (excluding gutters). Forms and
-// single cards read badly stretched across a 1000dp+ iPad, so they get the
-// narrowest column; list screens get more, and two-column layouts the most.
+// Max content widths.
 export const MAX_WIDTH = { form: 520, content: 720, wide: 1100 };
 
-// React Native's <Modal> on iOS only allows portrait unless told otherwise --
-// opening one while the app is in landscape would rotate the device UI.
-// Every Modal in the app passes this.
+// Allow every Modal in landscape on iOS.
 export const MODAL_ORIENTATIONS = ['portrait', 'portrait-upside-down', 'landscape', 'landscape-left', 'landscape-right'];
 
 export function useResponsive() {

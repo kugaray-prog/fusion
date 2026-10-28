@@ -1,16 +1,8 @@
-// ============================================================
-// CSPC GeoAttend — Mobile Web App
-// Same UI/design as provided. All data now comes from the real
-// GeoAttend backend via fetch() calls — no simulated logic.
-// ============================================================
+// GeoAttend mobile web app (/mobile).
 
 const API = window.__API_BASE__ || '/api';
 
-// ---- Persistent device identity -----------------------------------------
-// Browsers cannot read a real MAC address or IMEI (that's blocked for
-// privacy/security reasons on every modern browser), so we generate and
-// persist our own device UUID instead — this is what actually gets sent to
-// the backend as device_uid for device-binding and attendance validation.
+// Browsers can't read a hardware ID, so a random UUID is persisted instead.
 function getDeviceUid() {
   let uid = localStorage.getItem('ga_device_uid');
   if (!uid) {
@@ -30,7 +22,7 @@ function parseDeviceInfo() {
   return { brand, model, os };
 }
 
-// ---- Session storage ------------------------------------------------------
+// Session storage
 function saveSession(token, employee) {
   localStorage.setItem('ga_mobile_token', token);
   localStorage.setItem('ga_mobile_employee', JSON.stringify(employee));
@@ -64,13 +56,13 @@ async function apiFetch(path, options = {}) {
   return data;
 }
 
-// ---- Real-time clock --------------------------------------------------------
+// Real-time clock
 setInterval(() => {
   const clockEl = document.getElementById('clock');
   if (clockEl) clockEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }, 1000);
 
-// ---- Screen management ------------------------------------------------------
+// Screen management
 let pendingGoogleToken = null; // set after a Google login that didn't match an existing employee
 let activeGeofence = null;     // the currently-relevant event/geofence for attendance
 let currentAttendanceRecordAction = null; // 'time_in' once checked in, drives the button's next tap
@@ -99,7 +91,7 @@ function showOverlay(title, sub) {
 }
 function hideOverlay() { document.getElementById('globalOverlay').style.display = 'none'; }
 
-// ---- Google Sign-In -----------------------------------------------------
+// Google Sign-In
 function initGoogleSignIn() {
   const clientId = window.__GOOGLE_CLIENT_ID__;
   const errorEl = document.getElementById('login-error');
@@ -156,7 +148,7 @@ async function handleGoogleCredential(response) {
   }
 }
 
-// ---- Post-login choice ----------------------------------------------------
+// Post-login choice
 function skipToHome() {
   if (!getToken()) {
     alert('You need to register this device first — we could not find an existing account linked to your Google sign-in.');
@@ -170,7 +162,7 @@ function skipToHome() {
   }, 400);
 }
 
-// ---- Device registration ---------------------------------------------------
+// Device registration
 function prefillRegistrationForm() {
   const profile = window.__pendingGoogleProfile;
   if (profile) {
@@ -205,9 +197,7 @@ async function loadDepartmentOptions() {
   }
 }
 
-// Holds the validated registration form fields between "Continue to Face
-// Registration" and the final multipart submit, once the selfie + liveness
-// check are done.
+// Form fields kept until the face capture is submitted.
 let pendingRegistrationDetails = null;
 
 function goToFaceRegistration() {
@@ -221,10 +211,7 @@ function goToFaceRegistration() {
   const employeeId = document.getElementById('reg-empid').value.trim().toUpperCase();
   const department = document.getElementById('reg-dept').value;
   const position = document.getElementById('reg-position').value.trim();
-  // Every field is required except Middle Name and Suffix -- Gender and
-  // Classification each resolve to their typed text when "Others" was
-  // picked, same as the React Native app (RegistrationScreen.js), so the
-  // backend never sees the literal string "Others" itself.
+  // Middle Name and Suffix are optional; "Others" sends the typed text.
   const genderSelect = document.getElementById('reg-gender').value;
   const gender = genderSelect === 'Others' ? document.getElementById('reg-gender-other').value.trim() : genderSelect;
   const classificationSelect = document.getElementById('reg-classification').value;
@@ -269,11 +256,7 @@ function goToFaceRegistration() {
   initFaceRegCamera();
 }
 
-// ---- Face Registration camera + liveness engine ----------------------------
-// Same liveness process as the admin dashboard's Face Verification
-// (blink / turn head / nod, picked at random) — pure canvas pixel analysis,
-// no external face-landmark library. See public/js/app.js G_App.face for the
-// original implementation this mirrors.
+// Face registration liveness (same approach as G_App.face in app.js).
 const FACE_REG_CHALLENGES = {
   blink: 'Blink your eyes twice',
   turn_left: 'Slowly turn your head to the LEFT',
@@ -302,17 +285,8 @@ function stopFaceRegCamera() {
   if (v && v.srcObject) v.srcObject.getTracks().forEach(t => t.stop());
 }
 
-// YCbCr skin-tone blob per frame -> centroid + bounding box; head turns/nods
-// are a sustained centroid shift from a locked-in baseline, and blinks are a
-// dip-then-recovery in the eye band's local pixel contrast.
-//
-// Accuracy improvements over a naive single-frame version:
-//  - Bigger working canvas (120x120) for finer-grained pixel sampling.
-//  - The skin blob must be a plausible face size/shape (not a stray hand or
-//    a skin-toned wall patch) before we trust the frame at all.
-//  - Motion is measured relative to the face's own bounding-box size, not a
-//    fixed fraction of the canvas — the same physical head turn then
-//    triggers reliably whether the phone is held close or far away.
+// Skin-tone blob -> centroid and box; turns/nods are centroid shifts relative to
+// the box size, blinks are a contrast dip in the eye band.
 function sampleFaceRegMetrics(video, workCanvas) {
   const W = 120, H = 120;
   workCanvas.width = W; workCanvas.height = H;
@@ -339,9 +313,7 @@ function sampleFaceRegMetrics(video, workCanvas) {
 
   const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
   const aspect = bw / bh;
-  // Reject frames where the "skin blob" is too small or the wrong shape to
-  // plausibly be a face (a hand passing through frame, a skin-toned wall,
-  // stray background — none of these should count as a sample).
+  // Not face-sized or face-shaped.
   if (count < W * H * 0.06 || aspect < 0.55 || aspect > 1.85) return null;
 
   const eyeX0 = Math.max(0, Math.round(minX + bw * 0.18));
@@ -375,9 +347,7 @@ function runFaceRegChallenge(type, timeoutMs = 7000) {
     let baseline = null;
     let settled = false;
     let noFaceStreak = 0;
-    // Debounce counters: a threshold crossing must hold for a couple of
-    // consecutive samples before it counts, so one noisy/blurry frame can't
-    // trigger (or falsely un-trigger) a pass.
+    // A crossing must hold for consecutive samples.
     let moveConfirm = 0;
     let dipConfirm = 0, recoverConfirm = 0;
     let phase = 'baseline';
@@ -405,9 +375,7 @@ function runFaceRegChallenge(type, timeoutMs = 7000) {
 
       if (!baseline) {
         baselineSamples.push(m);
-        // Average several stable frames into the baseline instead of trusting
-        // a single one — a lot more resistant to a single noisy first sample
-        // skewing every threshold for the rest of the challenge.
+        // Baseline averaged over 5 frames.
         if (baselineSamples.length < 5) return;
         const n = baselineSamples.length;
         baseline = {
@@ -564,7 +532,7 @@ async function finalizeRegistration(passedActions) {
   }, 'image/jpeg', 0.92);
 }
 
-// ---- Home dashboard: real active/upcoming events + geofence status --------
+// Home dashboard: real active/upcoming events + geofence status
 async function loadHomeData() {
   const employee = getEmployee();
   if (employee) document.getElementById('welcome-text').textContent = `Welcome, ${employee.full_name.split(' ')[0]}!`;
@@ -653,7 +621,7 @@ function renderUpcoming(upcoming) {
   }).join('');
 }
 
-// ---- Live geofence containment check (point-in-polygon, mirrors backend) --
+// Live geofence containment check (point-in-polygon, mirrors backend)
 function isInsidePolygon(lat, lng, points) {
   let inside = false;
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
@@ -695,7 +663,7 @@ function checkGeofenceStatus(geofence) {
   );
 }
 
-// ---- Attendance start/end ---------------------------------------------------
+// Attendance start/end
 function getCurrentPosition() {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject(new Error('Geolocation is not supported on this device.'));
@@ -750,7 +718,7 @@ async function handleAttendance() {
   }
 }
 
-// ---- Logs ---------------------------------------------------------------
+// Logs
 // quiet: a live refresh keeps the current list on screen until the new one arrives.
 async function loadLogs({ quiet = false } = {}) {
   const container = document.getElementById('logs-container');
@@ -794,7 +762,7 @@ function renderLogs(logs) {
   `).join('');
 }
 
-// ---- Profile --------------------------------------------------------------
+// Profile
 function renderProfile() {
   const employee = getEmployee();
   const info = parseDeviceInfo();
@@ -817,12 +785,7 @@ function handleLogout() {
   location.reload();
 }
 
-// ---- Live updates -----------------------------------------------------------
-// WebSocket to /ws (services/realtime.js): the server says "something changed"
-// when an admin edits the schedule/geofences, edits or records this
-// employee's attendance, or approves/blocks this phone, and the open screen
-// re-fetches. A blocked phone is then signed out by apiFetch's DEVICE_BLOCKED
-// handling. Reconnects with backoff.
+// WebSocket change signals (services/realtime.js); the open screen re-fetches.
 let liveSocket = null;
 let liveRetryMs = 1000;
 let liveRefreshTimer = null;
@@ -865,7 +828,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && liveSocket) refreshActiveScreen();
 });
 
-// ---- Boot -------------------------------------------------------------------
+// Boot
 window.addEventListener('DOMContentLoaded', () => {
   initGoogleSignIn();
 

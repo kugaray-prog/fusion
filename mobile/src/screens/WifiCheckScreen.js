@@ -9,20 +9,9 @@ import { notify } from '../utils/notify';
 import { useAuth } from '../context/AuthContext';
 import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
-// Runs right after Google login / device registration, before the Dashboard is
-// reached (see App.js — this is the only screen in the authenticated stack
-// until it's satisfied). It confirms the phone is on the office's internet
-// connection, used as a second signal (alongside GPS geofencing in
-// AttendanceScreen) that the user is physically on site. Once confirmed, it
-// calls markWifiVerified() (AuthContext) rather than navigating anywhere
-// itself — App.js's RootNavigator reacts to that state and swaps this screen
-// out for the Dashboard stack on its own.
-//
-// The check is done by the SERVER from the connection's public IP (see
-// services/networkService.js), not from the Wi-Fi name: the main router and
-// every extender / repeater / secondary router on the same provider line
-// share that public IP, so the employee can join whichever one has signal,
-// whatever its SSID. Mobile data has a different IP and won't pass.
+// Confirms the phone is on the office network before the Dashboard. The server
+// checks the public IP (services/networkService.js), so any router or extender
+// on the office line passes; mobile data doesn't.
 export default function WifiCheckScreen() {
   const { markWifiVerified } = useAuth();
   const { topPad, insets, contentStyle } = useResponsive();

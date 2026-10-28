@@ -4,10 +4,7 @@ import { Platform } from 'react-native';
 import Notifications from './notificationsModule';
 import { savePushToken } from '../api/client';
 
-// Registers this phone's Expo push token with the server so a new event is
-// announced even while the app is closed. Never throws: push is a bonus, so a
-// simulator, web preview, Android Expo Go (no expo-notifications), a denied
-// permission or an offline phone just means no push, not a broken sign-in.
+// Registers the Expo push token. Never throws.
 export async function registerForPushNotifications() {
   if (!Notifications || Platform.OS === 'web' || !Device.isDevice) return null;
   try {

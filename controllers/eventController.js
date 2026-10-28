@@ -74,25 +74,6 @@ async function getAllEvents(req, res, next) {
   }
 }
 
-// GET /api/events/:id/occurrences
-async function getOccurrences(req, res, next) {
-  try {
-    const { id } = req.params;
-    const [rows] = await pool.query(
-      `SELECT id, title, start_datetime, end_datetime, parent_event_id, is_recurring_parent
-       FROM events
-       WHERE id = ? OR parent_event_id = ?
-          OR id = (SELECT parent_event_id FROM events WHERE id = ?)
-          OR parent_event_id = (SELECT parent_event_id FROM events WHERE id = ?)
-       ORDER BY start_datetime ASC`,
-      [id, id, id, id]
-    );
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    next(err);
-  }
-}
-
 // GET /api/events/ongoing
 // Minimal list (id, title) for the Verification panels' event picker.
 async function getOngoingEvents(req, res, next) {
@@ -125,5 +106,5 @@ async function deleteEvent(req, res, next) {
   }
 }
 
-module.exports = { getAllEvents, getOccurrences, getOngoingEvents, deleteEvent };
+module.exports = { getAllEvents, getOngoingEvents, deleteEvent };
 

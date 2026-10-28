@@ -4,9 +4,7 @@ const { isBlockedStatus, blockedMessage, cleanDeviceInfo } = require('../service
 const realtime = require('../services/realtime');
 const { isExpoToken } = require('../services/pushService');
 
-// GET /api/devices
-// Each device is paired with the face photo closest to its registered_at
-// (the one captured during that device's registration).
+// GET /api/devices (each paired with the face photo taken at its registration)
 async function getDevices(req, res, next) {
   try {
     const [rows] = await pool.query(
@@ -82,9 +80,7 @@ async function registerDevice(req, res, next) {
   }
 }
 
-// PUT /api/devices/push-token { token }
-// Saves the Expo push token for the X-Device-Uid phone, clearing it from any
-// other row first. { token: null } clears it.
+// PUT /api/devices/push-token { token } — null clears it.
 async function savePushToken(req, res, next) {
   try {
     const deviceUid = req.headers['x-device-uid'];
@@ -135,9 +131,7 @@ async function applyDeviceStatus(id, status, req) {
   return true;
 }
 
-// Deletes a device. If it was the only device of an unapproved self-registered
-// employee, that employee record is deleted too so they can register again.
-// Returns null when not found.
+// Also deletes an unapproved self-registered employee whose only device this was.
 async function removeDevice(id, req) {
   const [rows] = await pool.query(
     `SELECT md.id, md.employee_id, md.device_uid, e.is_approved, e.employee_code

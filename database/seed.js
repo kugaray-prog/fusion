@@ -1,8 +1,4 @@
-/**
- * Seeds the database with a default admin account, departments,
- * and sample employees so the dashboard is usable immediately after setup.
- * Run with: npm run seed
- */
+// Seeds the default admin, departments and sample employees. Run: npm run seed
 require('dotenv').config();
 const bcrypt = require('bcrypt');
 const pool = require('../config/db');
@@ -14,11 +10,7 @@ async function seed() {
   try {
     console.log('Seeding GeoAttend database...');
 
-    // 0. Email domain move: accounts created by earlier seeds still use the
-    //    old @geoattend.pro domain. Rename them to @my.cspc.edu.ph instead of
-    //    creating duplicates. An address is skipped if its @my.cspc.edu.ph
-    //    version already exists. Safe to run every time (nothing is left to
-    //    rename after the first run). Same as database/migration_v15_cspc_email_domain.sql.
+    // Rename accounts still on the old email domain.
     const { domain, legacyDomain } = config.email;
     for (const table of ['admin_accounts', 'employees']) {
       const [renamed] = await conn.query(

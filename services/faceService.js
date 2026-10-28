@@ -4,7 +4,7 @@ const config = require('../config/config');
 
 // InsightFace pipeline: SCRFD detects the face and 5 landmarks, the face is
 // aligned to the 112x112 ArcFace template, then the recognizer embeds it.
-// Model paths and switching: config/config.js, models/README.md.
+// Model paths: config/config.js.
 
 // Loaded lazily so the server boots even without the model files.
 let ort = null;
@@ -391,12 +391,6 @@ function warmUp() {
 module.exports = {
   getEmbedding,
   warmUp,
-  detectFace,
   cosineSimilarity,
-  findBestMatch,
-  MODEL_PATH: config.face.modelPath,
-  DETECTOR_MODEL_PATH: config.face.detectorModelPath,
-  INPUT_SIZE: config.face.inputSize,
-  // For test/faceService.geometry.test.js.
-  _internal: { solveSimilarityTransform, warpAffine, nms, iou },
+  findBestMatch
 };

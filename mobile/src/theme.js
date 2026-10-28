@@ -1,7 +1,4 @@
-// Shared design tokens — mirrors the admin dashboard's CSS variables
-// (views/dashboard.ejs :root) so the mobile app and the admin web portal
-// read as the same product: indigo primary, soft blue-tinted neutrals,
-// pill-rounded cards, and the same badge/status color language.
+// Design tokens matching the dashboard's CSS variables.
 export const colors = {
   // Brand
   primary: '#0D00A5',
@@ -10,9 +7,7 @@ export const colors = {
   secondary: '#2B3674',
   accent: '#4318FF',
 
-  // Legacy aliases kept so existing styles referencing these keep working —
-  // both now resolve to the same indigo brand color instead of the old
-  // navy/gold pairing.
+  // Legacy aliases.
   cspcBlue: '#0D00A5',
   cspcBlueLight: '#2B3674',
   cspcGold: '#0D00A5',
@@ -81,10 +76,6 @@ export const type = {
   overline: { fontSize: 11, fontWeight: '700', color: colors.textSub, letterSpacing: 0.6, textTransform: 'uppercase' },
 };
 
-// CSPC logo used across the login screen and header. Bundled with the app
-// (from Wikimedia Commons, "Camarines Sur Polytechnic Colleges Logo.png") so
-// it shows offline and doesn't break when a hotlinked URL changes. Use as an
-// <Image source={CSPC_LOGO}>.
 export const CSPC_LOGO = require('../assets/cspc-logo.png');
 
 export default { colors, radius, shadow, shadowLg, type, CSPC_LOGO };

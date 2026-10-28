@@ -1,20 +1,9 @@
 /**
- * GeoAttend email relay -- Google Apps Script.
- *
- * Sends the admin verification-code and certificate emails from the Google account that
- * deploys this script (services/mailService.js calls it over HTTPS, which
- * works on Render where SMTP is blocked).
- *
- * Setup:
- *   1. script.google.com > New project, paste this file in place of Code.gs.
- *   2. Project Settings (gear) > Script Properties > Add property:
- *        RELAY_SECRET = a long random string (same value as MAIL_RELAY_SECRET)
- *   3. Deploy > New deployment > type "Web app":
- *        Execute as: Me    Who has access: Anyone
- *      Authorize when asked, then copy the Web app URL (ends in /exec)
- *      into MAIL_RELAY_URL.
- *   After editing this file: Deploy > Manage deployments > edit > Version: New version.
- */
+* GeoAttend email relay (Google Apps Script), used by services/mailService.js.
+* Setup: paste into a new script.google.com project, set Script Property
+* RELAY_SECRET (= MAIL_RELAY_SECRET), deploy as a Web app (Execute as: Me,
+* Access: Anyone) and put its /exec URL in MAIL_RELAY_URL.
+*/
 
 function doPost(e) {
   try {

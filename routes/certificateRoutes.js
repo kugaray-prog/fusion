@@ -8,7 +8,6 @@ router.post('/generate', certificateController.generateCertificate);
 router.post('/generate-bulk', certificateController.generateBulkCertificates);
 router.post('/preview', certificateController.previewCertificate);
 router.get('/', certificateController.getCertificates);
-router.post('/:id/email', certificateController.resendCertificateEmail);
 router.get('/template', certificateController.getTemplate);
 router.put('/template', certificateController.saveTemplate);
 

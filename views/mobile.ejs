@@ -399,9 +399,7 @@ body {
     window.__API_BASE__ = "/api";
 </script>
 <script>
-    // Fit the fixed-size phone mockup (390x844) to any viewport by scaling
-    // it as a whole — the design/UI itself is completely unchanged, it's
-    // just rendered smaller on screens narrower/shorter than the mockup.
+    // Scale the 390x844 phone layout to fit the viewport.
     (function () {
         var PHONE_W = 390, PHONE_H = 844, MARGIN = 24;
         function fitPhone() {

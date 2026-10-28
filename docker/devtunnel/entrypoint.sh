@@ -1,12 +1,8 @@
 #!/bin/sh
-# Hosts DEVTUNNEL_ID (e.g. "pq2qwb2x.asse", from MOBILE_API_BASE_URL) and
-# forwards it to port 3000 of the app container. Needs a one-time login:
-#   docker compose run --rm tunnel login
+# Hosts DEVTUNNEL_ID and forwards it to the app's port 3000.
 set -e
 
-# Unlock a keyring (kept in the /root volume) so the login token survives.
-# The daemons' output goes to files, not $(...): they keep stdout open, so a
-# command substitution would wait on them forever.
+# Keyring keeps the login token. Daemon output goes to files: $(...) would hang.
 dbus-launch --sh-syntax > /tmp/dbus.env
 . /tmp/dbus.env
 export DBUS_SESSION_BUS_ADDRESS
@@ -22,9 +18,7 @@ case "$1" in
 esac
 
 if devtunnel user show 2>&1 | grep -q "Logged in"; then
-  # 30 days is the longest a tunnel may live, so restart the countdown on
-  # every start -- it never expires as long as this container runs now and then.
-  # The daily loop covers a container left running for more than 30 days.
+  # Tunnels expire after 30 days; extend on start and daily.
   ( while :; do
       devtunnel update "$DEVTUNNEL_ID" --expiration 30d >/dev/null 2>&1 \
         || echo "Dev Tunnels: could not renew the 30-day expiration (will retry)."

@@ -2,9 +2,7 @@ import React from 'react';
 import { Text, StyleSheet } from 'react-native';
 import { colors } from '../theme';
 
-// Mirrors the admin dashboard's .badge / .badge-success / .badge-warning /
-// .badge-info treatment: a tinted pill background with a matching solid
-// text color, bold + uppercase.
+// Same colors as the dashboard's .badge variants.
 const VARIANTS = {
   default: { bg: colors.primaryLight, text: colors.primary },
   waiting: { bg: colors.warningBg, text: colors.warningText },

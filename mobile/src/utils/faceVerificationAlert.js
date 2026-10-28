@@ -2,9 +2,7 @@ import Notifications from './notificationsModule';
 import { Platform, Vibration } from 'react-native';
 import { ensureNotificationPermission } from './eventReminders';
 
-// Dedicated high-importance channel so the alert sounds and vibrates even
-// with the phone in a pocket (Android channel settings can't be changed
-// after creation, hence a new channel rather than reusing event-reminders).
+// High-importance channel (sound + vibration).
 const CHANNEL_ID = 'face-verification-required';
 const VIBRATION_PATTERN = [0, 800, 400, 800, 400, 800];
 // While a record stays flagged, the alert repeats at most this often.
@@ -26,10 +24,7 @@ async function ensureChannel() {
   channelReady = true;
 }
 
-// Sounds + vibrates the phone and posts a notification telling the employee
-// their attendance was flagged (see detectGeoAnomaly on the backend) and
-// needs face verification. Safe to call on every heartbeat: it only fires
-// again once REPEAT_INTERVAL_MS has passed for the same record.
+// Notifies that a record needs face verification; repeats at most every REPEAT_INTERVAL_MS.
 export async function alertFaceVerificationRequired(attendanceId, eventTitle) {
   const now = Date.now();
   if (lastAlertAt[attendanceId] && now - lastAlertAt[attendanceId] < REPEAT_INTERVAL_MS) return;

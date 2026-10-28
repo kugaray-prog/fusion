@@ -12,19 +12,8 @@ import AppHeader from '../components/AppHeader';
 import { clearFaceVerificationAlert } from '../utils/faceVerificationAlert';
 import { useResponsive, MAX_WIDTH } from '../utils/responsive';
 
-// Automatic, on-device re-verification: AttendanceTrackingContext navigates
-// here the instant a geo-anomaly flags an attendance record (unusual
-// location activity -- see controllers/attendanceController.js
-// detectGeoAnomaly), and again on app resume if a flag is still
-// unresolved (see refreshSessionsFromHistory there). This never happens at
-// an admin's request -- the whole point is the EMPLOYEE proving it's really
-// them, right here on their own device, before the flagged attendance can
-// be confirmed. A failed or abandoned attempt leaves the record exactly as
-// flagged as it already was; only a genuine match
-// (controllers/attendanceController.js faceVerify) clears it.
-//
-// The capture is a live video selfie (hold steady, then blink), shared with
-// RegistrationScreen.js -- see components/LiveFaceCamera.js.
+// Opened automatically when a geo-anomaly flags a record. Only a server-side
+// match (attendanceController.faceVerify) clears the flag.
 const DETECTION_ATTEMPTS = 3;
 
 const formatTime = (value) => (value
@@ -45,9 +34,7 @@ export default function FaceVerificationScreen({ route, navigation }) {
   // Latest per-frame status from the live camera (drives the caption).
   const [live, setLive] = useState({ phase: 'hold', faceDetected: false, hint: null, eyesClosed: false });
   const [errorMsg, setErrorMsg] = useState('');
-  // The flagged record's event (title, venue, schedule), so the employee
-  // can see exactly which event this verification is for. Starts from the
-  // title the caller passed and is filled in from their attendance history.
+  // Event of the flagged record, filled in from history.
   const [eventInfo, setEventInfo] = useState(eventTitle ? { title: eventTitle } : null);
 
   // Verification is closed once the event ends (the server answers 410), so
@@ -99,9 +86,7 @@ export default function FaceVerificationScreen({ route, navigation }) {
 
   const scanPulse = useRef(new Animated.Value(0)).current;
 
-  // Location is looked up while the face scan runs, not after it, so it
-  // never holds up the upload. A recent cached fix is fine; a fresh one is
-  // only requested when there isn't one.
+  // Get location during the scan so it doesn't delay the upload.
   const locationRef = useRef(null);
   useEffect(() => {
     locationRef.current = Location.getLastKnownPositionAsync({ maxAge: 60000 })
@@ -113,9 +98,7 @@ export default function FaceVerificationScreen({ route, navigation }) {
     if (permission && !permission.granted) requestPermission();
   }, [permission]);
 
-  // Auto-starts the moment the camera reports it's ready -- "automatic na
-  // bubukas ang Face Verification screen" extends to the capture itself
-  // starting on its own, not just the screen appearing with a button to tap.
+  // Start the scan as soon as the camera is ready.
   const handleCameraReady = () => {
     if (startedRef.current) return;
     startedRef.current = true;
@@ -177,9 +160,7 @@ export default function FaceVerificationScreen({ route, navigation }) {
     // open, facing the camera); the video selfie covers the whole check.
     setStage('uploading');
     try {
-      // Location is a nice-to-have on this record, not a requirement -- GPS
-      // already had to be on to reach this flagged state in the first place
-      // -- so it gets at most a moment, in parallel with the video finishing.
+      // Location is optional; wait at most briefly.
       const [loc, videoUri] = await Promise.all([
         Promise.race([locationRef.current || Promise.resolve(null), wait(1500).then(() => null)]),
         result.video,
@@ -222,11 +203,7 @@ export default function FaceVerificationScreen({ route, navigation }) {
     }
   };
 
-  // Backing out does NOT confirm the attendance -- it stays flagged
-  // (requires_face_verification = 1) on the server exactly as it already
-  // was. Clearing the "already prompted" guard means the next meaningful
-  // history refresh (app resume, or a session auto-ending) brings this
-  // screen right back up rather than only ever retrying on a full app restart.
+  // Cancelling leaves the record flagged; the prompt returns on the next refresh.
   const handleCancel = () => {
     verifyingRef.current = false;
     cameraRef.current?.cancel();

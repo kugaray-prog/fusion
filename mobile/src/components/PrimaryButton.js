@@ -2,10 +2,7 @@ import React, { useRef } from 'react';
 import { Animated, Text, TouchableWithoutFeedback, ActivityIndicator, StyleSheet } from 'react-native';
 import { colors, radius, shadow } from '../theme';
 
-// Consistent "brand" button used across Login/Registration/Dashboard confirm
-// actions — adds a subtle press-scale animation and a built-in spinner swap
-// for the loading state, so every primary action in the app feels the same
-// rather than each screen hand-rolling its own TouchableOpacity + spinner.
+// Button with press animation and loading spinner.
 export default function PrimaryButton({
   title,
   onPress,

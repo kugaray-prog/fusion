@@ -50,9 +50,7 @@ export default function HistoryScreen({ navigation }) {
   // final status was settled.
   useLiveUpdates(['attendance'], load);
 
-  // Ticks any still-open ("on-going") record's Duration cell forward once a
-  // second, since its total keeps accumulating in real time until the
-  // employee leaves the geofence (or re-enters it after having left).
+  // Tick open records' durations every second.
   useEffect(() => {
     const hasOpenSession = records.some((r) => !r.time_out);
     if (!hasOpenSession) return undefined;

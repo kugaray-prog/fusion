@@ -8,27 +8,13 @@ import { colors, radius, shadow } from '../theme';
 import { MODAL_ORIENTATIONS } from '../utils/responsive';
 import { alertServiceOff, clearServiceOffAlert } from '../utils/serviceOffAlert';
 
-// Rendered app-wide (see App.js), above the whole navigation stack, for as
-// long as the employee is signed in AND Wi-Fi is off/disconnected -- mirrors
-// LocationGateOverlay exactly, just for Wi-Fi instead of GPS. No close
-// button, no swipe-to-dismiss, sits on top of every screen equally
-// (including WifiCheckScreen itself, if Wi-Fi drops while that screen is
-// still open). Disappears automatically the moment the periodic check in
-// WifiStatusContext detects Wi-Fi is back on -- no manual "continue" step
-// needed once it's actually on.
-//
-// If GPS is ALSO off, LocationGateOverlay is left to handle that alone
-// (checked below) rather than stacking two full-screen blocking modals at
-// once -- fix one thing at a time, GPS first since AttendanceTrackingContext
-// already treats it as the more fundamental signal.
+// Blocks the whole app while signed in and Wi-Fi is off.
+// Hidden when Location is also off (LocationGateOverlay shows first).
 export default function WifiGateOverlay() {
   const { employee, deviceStatus } = useAuth();
   const { wifiOn, checked, recheck } = useWifiStatus();
   const { locationEnabled } = useLocationStatus();
-  // Not while the device is still awaiting approval: WaitingApproval needs
-  // neither Wi-Fi nor GPS, and a full-screen Modal popping up in the same
-  // moment the navigator swaps stacks after face registration could leave
-  // Android on a blank screen (see RootNavigator in App.js).
+  // Not while awaiting approval (WaitingApproval needs neither).
   const visible = !!employee && deviceStatus !== 'pending' && checked && !wifiOn && locationEnabled;
 
   // Also post a phone notification while this is showing (see serviceOffAlert).
@@ -42,10 +28,6 @@ export default function WifiGateOverlay() {
   const openWifiSettings = async () => {
     try {
       if (Platform.OS === 'android') {
-        // Opens the system Wi-Fi settings screen directly (a standard,
-        // public Android intent action) -- same category of shortcut GPS
-        // gets via Location.enableNetworkProviderAsync in
-        // LocationGateOverlay.
         await Linking.sendIntent('android.settings.WIFI_SETTINGS');
         return;
       }
@@ -54,18 +36,12 @@ export default function WifiGateOverlay() {
     }
     try {
       if (Platform.OS === 'ios') {
-        // Apple doesn't allow deep-linking straight to the Wi-Fi settings
-        // pane via public API -- app-settings: (this app's own Settings
-        // page) is the closest available, same fallback LocationGateOverlay
-        // uses for GPS.
+        // iOS can't deep-link to Wi-Fi settings.
         await Linking.openURL('app-settings:');
       } else {
         await Linking.openSettings();
       }
     } catch (e) {
-      // Nothing more we can do here — the "I've turned it on — Recheck"
-      // button below still lets them confirm manually once they've
-      // navigated to Settings themselves.
     }
   };
 

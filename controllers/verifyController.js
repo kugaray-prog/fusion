@@ -1,9 +1,7 @@
 const pool = require('../config/db');
 const { sha256 } = require('../services/certificateService');
 
-// Public certificate verification (no login): the QR code on every
-// certificate opens /verify/<code>. The record shown comes from the
-// database, so a certificate whose printed details differ from it is fake.
+// Public page opened by the certificate QR code: /verify/<code>.
 
 const normalizeCode = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/(.{4})(?=.)/g, '$1-');
 

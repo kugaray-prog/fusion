@@ -1,26 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import FaceDetection from './faceDetection';
 
-// Liveness helpers shared by components/LiveFaceCamera.js. Real builds detect
-// faces on the live video stream there; runLivenessAttempt() below is the
-// still-photo polling fallback it uses in Expo Go, where the live-stream
-// native modules aren't available.
-//
-// The check itself: a live face must be held in frame (large enough and
-// facing the camera) for HOLD_FRAMES consecutive reads, then a real
-// eyes-open -> eyes-closed -> eyes-open blink must be observed via ML Kit's
-// per-eye "open probability". A photo or paused video held up to the camera
-// can pass the hold, but can't blink on command.
-//
-// Why it's fast:
-//   - Frames are captured at a capped resolution (see choosePictureSize)
-//     instead of the camera's full 12MP+, so each takePictureAsync, each ML
-//     Kit read and the final upload are all much smaller.
-//   - The next frame is captured WHILE the current one is being analyzed,
-//     roughly doubling the reads per second -- which also matters for
-//     catching a blink, since a blink only lasts a few hundred milliseconds.
-//   - The frame that completes the blink (face present, eyes open again) is
-//     returned as the result, so no separate capture is needed afterwards.
+// Still-photo liveness fallback for Expo Go (real builds use LiveFaceCamera's
+// frame processor): hold a face for HOLD_FRAMES reads, then detect a blink.
+// Frames are captured at reduced size, and the next one while the current is analyzed.
 
 const MAX_CAPTURE_SIDE = 1280; // plenty for the server's 112x112 aligned face crop
 const MIN_CAPTURE_SIDE = 480;
@@ -48,9 +31,7 @@ export function discardPhoto(photo) {
   if (photo?.uri) FileSystem.deleteAsync(photo.uri, { idempotent: true }).catch(() => {});
 }
 
-// Picks the largest "WxH" picture size whose longer side is <= MAX_CAPTURE_SIDE
-// (and shorter side >= MIN_CAPTURE_SIDE). Returns undefined -- the camera's
-// default -- if the device reports nothing usable.
+// Largest picture size within MIN/MAX_CAPTURE_SIDE, or undefined.
 export async function choosePictureSize(camera) {
   try {
     const sizes = await camera.getAvailablePictureSizesAsync();
@@ -110,17 +91,8 @@ export function eyeOpenness(face) {
   return (left + right) / 2;
 }
 
-/**
- * Runs one hold-then-blink attempt.
- *
- * isActive(): return false to cancel (screen left, Cancel pressed).
- * onStatus({ phase: 'hold' | 'blink', faceDetected, hint: null | 'far' | 'turned', eyesClosed })
- *   is called after every frame to drive the on-screen prompts.
- *
- * Resolves to { ok: true, photo } -- the eyes-open frame that completed the
- * blink; the caller owns (and must eventually discard) it -- or
- * { ok: false, reason: 'cancelled' | 'no-face' | 'far' | 'turned' | 'blink' }.
- */
+// One hold-then-blink attempt.
+// Resolves { ok: true, photo } or { ok: false, reason: 'cancelled' | 'no-face' | 'far' | 'turned' | 'blink' }.
 export async function runLivenessAttempt({ camera, isActive, onStatus }) {
   let phase = 'hold';
   let deadline = Date.now() + HOLD_TIMEOUT_MS;

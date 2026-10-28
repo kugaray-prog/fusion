@@ -118,9 +118,7 @@ function broadcastMutations(req, res, next) {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
   // Read now: routers rewrite req.path before the response finishes.
   const segment = req.path.split('/')[1];
-  // Registering from the phone creates/links the employee, device and face.
-  // A failed face check (401) or Identity Verification Lock (423) still
-  // changes the employee's attempt count / lock, so those are announced too.
+  // Link-device also changes attempt counts/locks on 401 and 423.
   if (segment === 'employee-auth' && req.path === '/employee-auth/link-device') {
     res.on('finish', () => {
       if (res.statusCode === 401 || res.statusCode === 423) return broadcastNow('employees');
@@ -140,10 +138,7 @@ function broadcastMutations(req, res, next) {
   next();
 }
 
-// Events start and end (and face locks expire) by the clock, not by a
-// request, so nothing else announces it: Ongoing/Upcoming labels,
-// Present/Absent statuses and lock badges would otherwise wait for the admin
-// page's 2-minute fallback refresh.
+// Announce clock-driven changes (events starting/ending, face locks expiring).
 let lastEventCheck = null;
 async function announceEventBoundaries() {
   const [[{ now }]] = await pool.query('SELECT NOW() AS now');

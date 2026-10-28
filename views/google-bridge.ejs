@@ -30,11 +30,8 @@
     </main>
 
     <script>
-        // Google Sign-In for the mobile app when it can't use Google's native
-        // flow (Expo Go, or a platform without its own OAuth client ID): this
-        // page signs in on the server's own HTTPS origin, then hands the ID
-        // token back to the app through its return URL. The server only
-        // renders it with an app-scheme return URL (see server.js).
+        // Google Sign-In for the app when native OAuth isn't available; returns the
+        // ID token to the app's return URL.
         var CLIENT_ID = <%- JSON.stringify(googleClientId).replace(/</g, '\\u003c') %>;
         var RETURN_URL = <%- JSON.stringify(returnUrl).replace(/</g, '\\u003c') %>;
         var statusEl = document.getElementById('status');

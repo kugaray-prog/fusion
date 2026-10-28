@@ -4,9 +4,7 @@ import { Platform } from 'react-native';
 // How long before an event's start time to fire the local reminder.
 const REMINDER_LEAD_MINUTES = 15;
 
-// Makes reminders actually pop up (banner + sound) while the app is open,
-// not just when it's backgrounded — Expo's default handler suppresses
-// foreground alerts otherwise.
+// Show notifications while the app is in the foreground too.
 Notifications?.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -18,10 +16,7 @@ Notifications?.setNotificationHandler({
 
 let permissionRequested = false;
 
-// Asks for notification permission once per app session. Safe to call
-// repeatedly — after the first successful/denied request it just no-ops.
-// Always false where notifications aren't available (Android Expo Go), so
-// every caller skips posting one.
+// Asks once per app session; always false where notifications are unavailable.
 export async function ensureNotificationPermission() {
   if (!Notifications) return false;
   if (permissionRequested) return true;
@@ -41,18 +36,9 @@ export async function ensureNotificationPermission() {
   return finalStatus === 'granted';
 }
 
-// A stable, event-specific notification identifier so re-scheduling on every
-// dashboard refresh replaces the same reminder instead of stacking up
-// duplicates for the same event.
 const identifierFor = (geofenceId) => `event-reminder-${geofenceId}`;
 
-// Schedules a "starting soon" local reminder for every one of today's events
-// that hasn't started yet, and an immediate "happening now" reminder for one
-// that just became active — so the employee gets nudged about an event
-// scheduled for today without needing to have the app open at exactly the
-// right moment. Already-scheduled/already-notified events are skipped on
-// repeat calls (the dashboard polls every 30s) via the stable identifier and
-// an in-memory "already fired" set.
+// "Starting soon" reminders for today's events and a one-time "happening now" alert.
 const notifiedActive = new Set();
 
 export async function scheduleTodayEventReminders(todaySchedule) {
@@ -69,9 +55,6 @@ export async function scheduleTodayEventReminders(todaySchedule) {
     const identifier = identifierFor(g.id);
 
     if (g.computed_status === 'active') {
-      // Event is happening right now — fire a one-time "starting now" nudge
-      // instead of a scheduled reminder (the lead-time window already
-      // passed), but only once per event per app session.
       if (!notifiedActive.has(g.id)) {
         notifiedActive.add(g.id);
         await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});

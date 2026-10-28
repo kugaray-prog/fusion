@@ -28,9 +28,7 @@ function InfoRow({ icon, label, value, mono }) {
 // avatar circle, name/employee id, and a monospace device-info block.
 export default function ProfileScreen({ navigation }) {
   const { employee, logout } = useAuth();
-  // Starts true whenever there's a photo path to try; a load failure (bad
-  // network, file removed from the server, etc.) flips this back to the
-  // placeholder avatar instead of showing a broken-image icon.
+  // Show the placeholder avatar if the photo fails to load.
   const [photoFailed, setPhotoFailed] = useState(false);
   const photoUrl = assetUrl(employee?.face_photo_url);
   // Same model/ID the registration form showed for this phone.

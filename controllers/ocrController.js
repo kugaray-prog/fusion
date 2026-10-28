@@ -4,9 +4,7 @@ const { logAction } = require('../services/auditService');
 const { removeUpload } = require('../services/uploadStore');
 const { recordVerificationAttendance } = require('./attendanceController');
 
-// POST /api/ocr/verify (multipart: image, optional event_id)
-// Reads only the ID number from the card and looks it up; name/position come
-// from the database. With event_id, a match also records attendance.
+// POST /api/ocr/verify (multipart: image, event_id?) — looks up the ID number; records attendance with event_id.
 async function verifyId(req, res, next) {
   try {
     if (!req.file) {

@@ -22,10 +22,7 @@ import {
 } from '../tasks/backgroundAttendance';
 import { noteServerHeard, noteReading, offlineInsideSeconds, forgetTrail, clearTrails } from '../utils/presenceTrail';
 
-// When the employee actually crossed the boundary, between the last reading
-// inside (prev) and the first one outside (now): assuming a steady walk, the
-// crossing happened in proportion to how far each reading is from the edge.
-// Falls back to the outside reading's own time if prev is missing or stale.
+// Estimated boundary-crossing time, interpolated by each reading's distance to the edge.
 function estimateExitTimeMs(prev, now, points) {
   if (!prev || !(now.at > prev.at) || now.at - prev.at > 30000) return now.at;
   const dIn = distanceToEdgeMeters(prev.latitude, prev.longitude, points);
@@ -34,44 +31,21 @@ function estimateExitTimeMs(prev, now, points) {
   return Math.round(prev.at + (now.at - prev.at) * (dIn / (dIn + dOut)));
 }
 
-// How often the last known location is re-checked against the geofences
-// even when no new GPS reading arrives. Android only reports a new reading
-// after the phone moves (distanceInterval), so someone already standing
-// inside when an event starts would otherwise wait for the next poll.
+// Re-check the last location this often (Android only reports new readings on movement).
 const REEVALUATE_MS = 5000;
 // After a rejected time-in, wait this long before trying again, instead of
 // resending on every GPS reading (every ~1s).
 const CHECK_IN_RETRY_MS = 2000;
 
-// How often a session already checked-in pings the server with the current
-// location. Leaving the geofence doesn't wait for this: evaluateLocation sends
-// the exit reading immediately (see config.attendance.autoEndOutsideStreakThreshold
-// on the backend). Kept a little above the backend's own
-// heartbeatMinIntervalSeconds (10s default) so pings aren't silently dropped,
-// and frequent enough that the backend's "same location as another
-// employee" check -- which compares against positions from the last 30s and
-// asks again every 30s (anomalyWindowSeconds / anomalyRecheckSeconds) --
-// always has a fresh position for this phone.
-// Also well inside the server's 30 s silence window
-// (silentSessionSeconds), so a phone that goes quiet -- Location switched
-// off with the app closed -- is timed out within about half a minute.
+// Heartbeat while timed in. Above the server's 10 s minimum, below its 30 s silence timeout.
 const HEARTBEAT_INTERVAL_MS = 12000;
-// Between heartbeats, a GPS reading this far (meters) from the last position
-// sent is pushed to the server right away, at most once per LIVE_POSITION_MIN_MS,
-// so the admin sees the employee's latitude/longitude move as they move.
+// Push the live position early when moved this far (at most once per LIVE_POSITION_MIN_MS).
 const LIVE_POSITION_MIN_METERS = 3;
 const LIVE_POSITION_MIN_MS = 3000;
 // How often the list of active event geofences is refreshed, so a
 // newly-started event is picked up without an app restart.
 const GEOFENCE_POLL_MS = 30000;
-// Consecutive local GPS readings outside the geofence (while a session is
-// open) required before the app treats itself as "exited": it freezes the
-// displayed duration, locks in that exact reading (coordinates + the GPS
-// timestamp) and sends it to the server right away so the time-out lands in
-// real time. 1 = the first reading outside the polygon. GPS keeps working
-// without connectivity, so this is detected instantly even with no
-// signal/WiFi; the heartbeat keeps retrying the same reading until the
-// server acknowledges it.
+// Outside readings needed before treating the employee as exited.
 const LOCAL_OUTSIDE_CONFIRM_READINGS = 1;
 
 const AttendanceTrackingContext = createContext(null);
@@ -79,10 +53,7 @@ const AttendanceTrackingContext = createContext(null);
 export function AttendanceTrackingProvider({ children }) {
   const { employee, deviceStatus, loading: authLoading } = useAuth();
   const { locationEnabled } = useLocationStatus();
-  // Tracking (auto time-in/out) is a location-dependent feature, so it's
-  // gated on Location/GPS actually being on at the OS level, not just on
-  // being signed in — see LocationStatusContext + LocationGateOverlay, which
-  // blocks the UI the same moment this stops running.
+  // Tracking requires an approved device and Location on.
   const trackingEnabled = !!employee && deviceStatus === 'approved' && locationEnabled;
 
   const [location, setLocation] = useState(null);
@@ -91,15 +62,10 @@ export function AttendanceTrackingProvider({ children }) {
   const [geofences, setGeofences] = useState([]);
   // event_id -> { inside, geofence }
   const [presence, setPresence] = useState({});
-  // event_id -> attendance record { id, time_in, time_out, total_duration_seconds,
-  // open_session_time_in, session_count }, for anything open or completed
-  // today — restored from the server on mount so tracking (and the
-  // accumulated duration) survives an app restart, not just an in-memory submit.
+  // event_id -> today's attendance record (restored from the server on mount).
   const [sessions, setSessions] = useState({});
   const [autoSubmitting, setAutoSubmitting] = useState({}); // event_id -> bool, guards against double-submits
-  // event_id -> the server's reason for the last rejected auto time-in (e.g.
-  // "GPS accuracy too low"), shown on the Attendance screen so a failed
-  // check-in isn't indistinguishable from one that's still in progress.
+  // event_id -> reason the last auto time-in was rejected.
   const [checkInErrors, setCheckInErrors] = useState({});
 
   const watchRef = useRef(null);
@@ -114,29 +80,16 @@ export function AttendanceTrackingProvider({ children }) {
   // it); sent with every time-in and heartbeat so the server can refuse it.
   const mockedRef = useRef(false);
   const lastCheckInFailureRef = useRef({}); // event_id -> ms of the last rejected time-in
-  // attendanceId -> true, once FaceVerificationScreen has been opened for it
-  // this app session -- stops a still-pending anomaly from re-navigating
-  // there on every periodic history refresh while the employee has
-  // deliberately backed out of it and is doing something else in the app.
-  // It's still re-checked (and will navigate again) on every fresh mount
-  // (app open/resume), since that ref itself is reset by a remount.
+  // attendanceId -> true once Face Verification was opened this app session.
   const promptedVerificationRef = useRef({});
 
-  // Sends the employee straight to FaceVerificationScreen -- called both
-  // right after a time-in that comes back flagged, and from
-  // refreshSessionsFromHistory below for a flag that's still open from
-  // earlier (app was closed/backgrounded before it got resolved).
   const goToFaceVerification = useCallback((attendanceId, eventTitle) => {
     if (!attendanceId) return;
     // Sound + vibration so an employee with the phone in their pocket still
     // notices; throttled internally, so it repeats while still flagged.
     alertFaceVerificationRequired(attendanceId, eventTitle);
     if (promptedVerificationRef.current[attendanceId]) return;
-    // FaceVerification is only registered once the employee is past the
-    // WaitingApproval / WifiCheck gates (see App.js RootNavigator). Tracking
-    // can flag a record before that -- e.g. right after an app reload, while
-    // WifiCheck is still showing -- so hold it and navigate as soon as the
-    // screen exists (see the navigationRef 'state' listener below).
+    // FaceVerification isn't registered until past WaitingApproval/WifiCheck; defer until it is.
     const routeNames = navigationRef.isReady() ? navigationRef.getRootState()?.routeNames : null;
     if (!routeNames || !routeNames.includes('FaceVerification')) {
       pendingVerificationNavRef.current = { attendanceId, eventTitle };
@@ -163,13 +116,8 @@ export function AttendanceTrackingProvider({ children }) {
   const geofencesRef = useRef([]);
   const autoSubmittingRef = useRef({});
   const localOutsideStreakRef = useRef({}); // event_id -> consecutive local "outside" GPS readings while a session is open
-  // event_id -> { attendanceId, observedAt (ISO), latitude, longitude } for a
-  // confirmed-outside reading that hasn't been acknowledged by the server
-  // yet (offline, or just hasn't gotten a heartbeat through). The heartbeat
-  // loop below keeps retrying THIS exact frozen reading -- not whatever the
-  // live location happens to be by the time connectivity returns -- so the
-  // session is eventually closed using the moment the employee actually
-  // left, not the moment the retry finally landed.
+  // event_id -> { attendanceId, observedAt, latitude, longitude } of an exit not yet
+  // acknowledged by the server; heartbeats resend this exact reading.
   const pendingExitRef = useRef({});
 
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
@@ -187,28 +135,13 @@ export function AttendanceTrackingProvider({ children }) {
     }
   };
 
-  // Pings the server periodically for an open session so it can auto time-out
-  // (set time_out) once the device has been outside the geofence for a
-  // couple of consecutive pings. Runs regardless of which screen is focused —
-  // this is what fixes sessions getting stuck "on-going" just because the
-  // user navigated away from the Attendance screen. When the server reports
-  // the session ended, this just stops the timer and refreshes from the
-  // server's own totals — re-entering the geofence later (evaluateLocation
-  // below) is what opens the NEXT session and its own heartbeat.
-  //
-  // If a local exit was detected while offline (pendingExitRef), this keeps
-  // resending THAT frozen reading every tick -- not the live location, which
-  // may already show the device back inside by the time connectivity
-  // returns -- until the server acknowledges the session closed. Sending the
-  // original captured coordinates/time repeatedly also naturally rebuilds
-  // the server's own outside-streak the same way real-time pings would have.
+  // Heartbeat for an open session, independent of the focused screen. Resends a
+  // pending exit reading until the server confirms the time-out.
   const startHeartbeat = useCallback((eventId, attendanceId) => {
     stopHeartbeat(attendanceId);
     const tick = async () => {
       if (heartbeatInFlight.current[attendanceId]) {
-        // A ping is already on its way (e.g. a live-position push) -- send
-        // this one as soon as it returns instead of dropping it, so an exit
-        // detected mid-request still reaches the server immediately.
+        // A ping is in flight: rerun right after it.
         heartbeatRerun.current[attendanceId] = true;
         return;
       }
@@ -241,11 +174,7 @@ export function AttendanceTrackingProvider({ children }) {
           forgetTrail(attendanceId);
           if (usingPending) delete pendingExitRef.current[eventId];
           stopHeartbeat(attendanceId);
-          // Closed locally right away (ref too, since the state -> ref sync
-          // waits for a re-render), so walking back in times in again on the
-          // next GPS reading instead of after the history refresh below. The
-          // displayed duration stays frozen at the exit until that refresh
-          // brings the server's own total.
+          // Close locally now so re-entry can time in on the next reading.
           const endedAt = usingPending ? pending.observedAt : new Date().toISOString();
           const closeLocally = (all) => {
             const s = all[eventId];
@@ -260,10 +189,7 @@ export function AttendanceTrackingProvider({ children }) {
             notify('Time-Out Recorded', 'You left the event area, so your session was automatically timed out. Your total time keeps accumulating if you come back.');
           }
         } else if (result?.data?.requiresFaceVerification) {
-          // The server flagged this session mid-way (another employee's
-          // device is reporting the same location) -- see detectGeoAnomaly.
-          // It also stopped the duration clock, so re-sync to show the
-          // paused total instead of a still-ticking one.
+          // Flagged by the server for face verification: re-sync the paused total.
           if (!sessionsRef.current[eventId]?.requires_face_verification) {
             refreshSessionsFromHistoryRef.current?.();
           }
@@ -280,9 +206,7 @@ export function AttendanceTrackingProvider({ children }) {
           }
         }
       } catch (e) {
-        // Non-fatal — a missed ping just retries on the next tick, still
-        // using the same frozen pending-exit reading if one is set, so a
-        // connectivity gap doesn't lose track of when the employee actually left.
+        // Retried on the next tick.
       } finally {
         delete heartbeatInFlight.current[attendanceId];
         if (heartbeatRerun.current[attendanceId]) {
@@ -295,10 +219,7 @@ export function AttendanceTrackingProvider({ children }) {
     heartbeatTimers.current[attendanceId] = setInterval(tick, HEARTBEAT_INTERVAL_MS);
   }, [goToFaceVerification]);
 
-  // Sends the new position straight away when the employee moves, instead
-  // of waiting for the next 25s heartbeat, so the admin's attendance view
-  // follows them live. Skipped for a session with a frozen exit reading --
-  // the heartbeat keeps resending that one instead.
+  // Send movement immediately instead of waiting for the next heartbeat.
   const pushLivePosition = (coords) => {
     Object.entries(sessionsRef.current).forEach(([eventId, s]) => {
       if (!s?.id || s.time_out || pendingExitRef.current[eventId]) return;
@@ -307,9 +228,7 @@ export function AttendanceTrackingProvider({ children }) {
       const last = lastSentPositionRef.current[s.id];
       if (last) {
         if (Date.now() - last.at < LIVE_POSITION_MIN_MS) return;
-        // A move smaller than the reading's own accuracy radius is just GPS
-        // jitter -- a phone lying still indoors drifts several meters -- and
-        // would otherwise send a ping every few seconds without anyone moving.
+        // Ignore movement within the GPS accuracy radius.
         const minMeters = Math.max(LIVE_POSITION_MIN_METERS, Number(coords.accuracy) || 0);
         if (distanceMeters(last.latitude, last.longitude, coords.latitude, coords.longitude) < minMeters) return;
       }
@@ -317,20 +236,12 @@ export function AttendanceTrackingProvider({ children }) {
     });
   };
 
-  // Restores today's attendance state (open, completed, or in-between visits)
-  // from the server — including the accumulated total_duration_seconds and
-  // which session (if any) is currently open — so auto time-in doesn't fire
-  // again for a session already open, and an already-open session resumes
-  // its heartbeat immediately on app start, even if it was left open from a
-  // previous app session.
+  // Restores today's records from the server and resumes heartbeats for open sessions.
   const refreshSessionsFromHistory = useCallback(async () => {
     try {
       let history = await getMyHistory();
       const today = localDateString();
-      // Timed out by the server while this phone was offline but stayed
-      // inside (see utils/presenceTrail.js): ask for it back before taking
-      // the time-out as final, or the next reading inside would just time in
-      // afresh and lose the offline stretch.
+      // Ask the server to undo a time-out made while offline but inside.
       const heldExitFor = (a) => {
         const p = pendingExitRef.current[a.event_id];
         return p && p.attendanceId === a.id ? p : null;
@@ -378,10 +289,7 @@ export function AttendanceTrackingProvider({ children }) {
           requires_face_verification: !!a.requires_face_verification
         };
       });
-      // A confirmed-but-not-yet-acknowledged local exit (see evaluateLocation)
-      // must keep freezing its event's displayed duration even across this
-      // refresh -- otherwise a history sync while still offline would let the
-      // figure start climbing again with the true wall clock.
+      // Keep the duration frozen for an exit not yet acknowledged.
       Object.entries(pendingExitRef.current).forEach(([eventId, pending]) => {
         const session = map[eventId];
         if (session && session.id === pending.attendanceId && !session.time_out) {
@@ -396,15 +304,7 @@ export function AttendanceTrackingProvider({ children }) {
       todays.forEach((a) => {
         if (!a.time_out) startHeartbeat(a.event_id, a.id);
       });
-      // A record flagged by anomaly detection (requires_face_verification)
-      // that's still unresolved -- e.g. the employee backed out of
-      // FaceVerificationScreen, or closed the app before completing it --
-      // gets re-prompted here rather than staying silently unconfirmed.
-      // goToFaceVerification's own promptedVerificationRef guards against
-      // this firing again for a record already shown this session, so it
-      // only actually re-navigates on a fresh mount (app open/resume).
-      // Once the event has ended, verification is closed server-side
-      // (faceVerify answers 410), so an ended event never brings the screen up.
+      // Re-prompt face verification for a still-flagged record of a running event.
       const eventEnded = (a) => !!a.event_end && new Date(a.event_end) <= new Date();
       const stillFlagged = todays.find((a) => a.requires_face_verification && !eventEnded(a));
       if (stillFlagged) {
@@ -422,10 +322,7 @@ export function AttendanceTrackingProvider({ children }) {
     }
   }, [startHeartbeat, goToFaceVerification]);
 
-  // startHeartbeat needs to call refreshSessionsFromHistory (to re-sync the
-  // total after an auto-end), but refreshSessionsFromHistory also calls
-  // startHeartbeat — a ref sidesteps the circular dependency without
-  // re-creating the interval callback on every history refresh.
+  // Ref breaks the startHeartbeat <-> refreshSessionsFromHistory cycle.
   const refreshSessionsFromHistoryRef = useRef(null);
   useEffect(() => { refreshSessionsFromHistoryRef.current = refreshSessionsFromHistory; }, [refreshSessionsFromHistory]);
 
@@ -438,11 +335,7 @@ export function AttendanceTrackingProvider({ children }) {
     }
   }, []);
 
-  // Automatically records a time-in the moment the device is detected inside
-  // an active event's geofence — no button tap required. Also fires on a
-  // RE-entry (the employee left and came back while the event is still
-  // running): the backend opens a new session and keeps adding to the same
-  // day's accumulated total rather than starting over.
+  // Auto time-in on entering an active event's geofence (also re-entries).
   const autoCheckIn = useCallback(async (geofence, coords, acc) => {
     const eventId = geofence.event_id;
     if (autoSubmittingRef.current[eventId]) return;
@@ -488,26 +381,16 @@ export function AttendanceTrackingProvider({ children }) {
             ? `Welcome back to "${geofence.title}" — you were automatically timed in again.`
             : `You entered "${geofence.title}" and were automatically timed in.`
         );
-        // Unusual location activity was detected on this time-in (see
-        // detectGeoAnomaly on the backend) -- send the employee straight
-        // into on-device Face Verification. This is never something an
-        // admin does on the employee's behalf; the attendance stays
-        // unconfirmed until this employee proves it's them, right here.
         if (result.data.requiresFaceVerification) {
           refreshSessionsFromHistoryRef.current?.();
           goToFaceVerification(result.data.id, geofence.title);
         }
       }
     } catch (err) {
-      // Expected rejections (outside geofence by the time the request lands,
-      // event window closed, GPS accuracy too low, device not yet approved)
-      // don't pop up an alert — the next location update just tries again —
-      // but the reason is kept so the Attendance screen can show it.
+      // Expected rejections retry on the next reading; the reason is shown on the Attendance screen.
       lastCheckInFailureRef.current[eventId] = Date.now();
       if (err?.response?.status === 409) {
-        // The server already has a session open for this event (e.g. timed
-        // in before an app restart and the history refresh failed). Sync
-        // instead of retrying a time-in that can never succeed.
+        // Server already has an open session: sync instead of retrying.
         await refreshSessionsFromHistoryRef.current?.();
         setCheckInErrors((prev) => ({ ...prev, [eventId]: null }));
         return;
@@ -521,22 +404,10 @@ export function AttendanceTrackingProvider({ children }) {
     }
   }, [employee, deviceUid, startHeartbeat, goToFaceVerification]);
 
-  // Core loop: whenever a fresh location comes in, check it against every
-  // currently-active event geofence. Entering one with no OPEN session right
-  // now -> auto time-in (which may be a first check-in or a re-entry after an
-  // earlier auto time-out — either way the day's duration keeps accumulating).
-  //
-  // Leaving one with an OPEN session -> after LOCAL_OUTSIDE_CONFIRM_READINGS
-  // consecutive outside readings (1 by default), freeze that session's
-  // displayed duration right here (pendingExitAt), lock in this exact
-  // reading and send it to the server immediately; the heartbeat loop keeps
-  // retrying it if there's no connectivity (see startHeartbeat). The server
-  // closes the session at that reading's own GPS timestamp, so the time-out
-  // is exact even if the request lands late.
-  //
-  // `recheck` marks a re-evaluation of the last reading rather than a new
-  // one: it can time in, but doesn't count toward the outside streak, which
-  // must be made of separate GPS readings.
+  // Checks each reading against active geofences: inside with no open session ->
+  // time in; outside with an open session -> freeze the duration and send the exit
+  // reading now. `recheck` re-evaluates the last reading without counting toward
+  // the outside streak.
   const evaluateLocation = useCallback((coords, acc, observedAtMs, { recheck = false } = {}) => {
     const activeGeofences = geofencesRef.current.filter((g) => isEventActiveNow(g));
     const nextPresence = {};
@@ -582,31 +453,19 @@ export function AttendanceTrackingProvider({ children }) {
             ...prev,
             [eventId]: { ...(prev[eventId] || {}), pendingExitAt: observedAtIso }
           }));
-          // Tell the server now rather than on the next scheduled heartbeat,
-          // so the time-out is recorded the moment they leave the polygon.
-          // The employee is told right away too, even before the server
-          // answers (or with no connectivity at all).
+          // Send the exit now instead of on the next heartbeat.
           heartbeatTicks.current[existingSession.id]?.();
           notify('Time-Out Recorded', `You left "${g.title}", so you were automatically timed out. Your total time keeps accumulating if you come back.`);
         }
       } else if (inside) {
         localOutsideStreakRef.current[g.event_id] = 0;
-        // Note: pendingExitRef is intentionally NOT cleared here — that
-        // outside period still needs to reach the server so the session
-        // closes with the correct duration before a fresh re-entry session
-        // can open (see startHeartbeat/refreshSessionsFromHistory).
+        // pendingExitRef stays until the server acknowledges the exit.
       }
     });
     setPresence(nextPresence);
   }, [autoCheckIn]);
 
-  // Admin changes arrive live: new/edited events and event areas, and edits
-  // to this employee's attendance. The polls above/below remain for changes
-  // that only depend on the clock (an event starting or ending).
-  // 'attendance' also arrives the instant the server flags this employee for
-  // face verification (and pauses their duration), so the history refresh
-  // below opens FaceVerificationScreen right away rather than on the next
-  // heartbeat.
+  // Live admin changes; 'attendance' also opens Face Verification as soon as a record is flagged.
   useLiveUpdates(['events', 'geofences', 'attendance'], (topic) => {
     if (!trackingEnabled) return;
     if (topic === 'attendance' || topic === '*') refreshSessionsFromHistory();
@@ -636,10 +495,7 @@ export function AttendanceTrackingProvider({ children }) {
     return () => sub.remove();
   }, [trackingEnabled]);
 
-  // One-time setup: permissions, device registration, initial history/geofence
-  // load, and the continuous location watch. Everything below keeps running
-  // for as long as the app is in the foreground, regardless of which screen
-  // the employee is looking at.
+  // Setup: permissions, device registration, history/geofence load, location watch.
   useEffect(() => {
     if (!trackingEnabled) return;
     let cancelled = false;
@@ -652,11 +508,7 @@ export function AttendanceTrackingProvider({ children }) {
       }
       if (!cancelled) setPermissionDenied(false);
 
-      // GPS starts first so the phone already has a fix by the time the
-      // server calls below finish (a sleeping server can take ~50s to answer).
-      // Nothing is evaluated until refreshGeofences loads the event list,
-      // which happens after today's sessions are restored, so this can't
-      // cause a duplicate time-in.
+      // Start GPS first; readings aren't evaluated until geofences load after sessions are restored.
       try {
         // A reading every second, moving or not, so stepping out of the
         // polygon is noticed within about a second.
@@ -668,10 +520,7 @@ export function AttendanceTrackingProvider({ children }) {
             mockedRef.current = !!loc.mocked;
             noteReading({ at: loc.timestamp || Date.now(), mocked: !!loc.mocked });
             setAccuracy(loc.coords.accuracy);
-            // loc.timestamp is when the GPS chip actually took this reading —
-            // works fine offline (no WiFi/data needed) and is what lets a
-            // "left the geofence" moment be captured accurately even before
-            // there's any connectivity to report it (see evaluateLocation).
+            // loc.timestamp is the GPS fix time (valid offline).
             evaluateLocation(loc.coords, loc.coords.accuracy, loc.timestamp);
             pushLivePosition(loc.coords);
           }
@@ -679,18 +528,11 @@ export function AttendanceTrackingProvider({ children }) {
         if (cancelled) sub.remove();
         else watchRef.current = sub;
       } catch (e) {
-        // GPS could have been switched off in the instant between the last
-        // LocationStatusContext poll and this call — LocationGateOverlay
-        // will catch it on its own next poll tick either way, so there's
-        // nothing more to do here than avoid an unhandled rejection.
+        // GPS turned off meanwhile; LocationGateOverlay handles it.
       }
       if (cancelled) return;
 
-      // All three requests go out together rather than one after another --
-      // auto time-in can't happen until they're all back. The event list is
-      // only applied once today's sessions are restored, so it still can't
-      // cause a duplicate time-in.
-      // Same values the registration form showed and submitted.
+      // Loaded in parallel; geofences are applied only after sessions are restored.
       const device = getDeviceInfo();
       const registering = registerDevice({
         employee_id: employee.id,
@@ -728,14 +570,8 @@ export function AttendanceTrackingProvider({ children }) {
     };
   }, [trackingEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Location/GPS switched off while a session is open: the app can no longer
-  // show the employee is inside, so the duration must stop right now and
-  // only resume once Location is back on (a fresh auto time-in). Every open
-  // session is frozen at this moment (pendingExitAt) and the server is told
-  // to close it at that same time -- retried here, since the main tracking
-  // loop and its heartbeats are stopped while Location is off. If it still
-  // hasn't gone through when Location returns, the restarted heartbeat keeps
-  // resending the same frozen location-off reading.
+  // Location turned off with a session open: freeze it now and tell the server
+  // (retried until acknowledged).
   useEffect(() => {
     if (!employee || deviceStatus !== 'approved' || locationEnabled) return;
     const offAt = new Date().toISOString();
@@ -805,10 +641,7 @@ export function AttendanceTrackingProvider({ children }) {
     };
   }, [locationEnabled, employee, deviceStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Hand-off to the background task (tasks/backgroundAttendance.js), which
-  // keeps attendance running -- time-in, keep-alive pings, and time-out the
-  // moment the phone leaves the area -- once the app is in the background or
-  // swiped closed. It works from whatever this tracker last knew.
+  // Hand state off to the background task (tasks/backgroundAttendance.js).
   useEffect(() => {
     if (!employee || deviceStatus !== 'approved') return;
     const bgSessions = {};
@@ -826,11 +659,8 @@ export function AttendanceTrackingProvider({ children }) {
     saveBackgroundState({ employeeId: employee.id, geofences, sessions: bgSessions, pendingExits: bgExits });
   }, [employee, deviceStatus, geofences, sessions]);
 
-  // Starts the background task while there's an event to track (the list
-  // only holds active and upcoming events) or a session still open. It
-  // needs Location set to "Allow all the time"; that's asked for once per
-  // app launch, with the reason, and the app keeps working in the foreground
-  // only if it's declined. Signing out stops it.
+  // Run the background task while there's an event to track or a session open.
+  // Asks for "Allow all the time" once per launch.
   const askedBackgroundRef = useRef(false);
   useEffect(() => {
     // Still restoring the signed-in employee: don't mistake that for a sign-out.
@@ -888,26 +718,13 @@ export function AttendanceTrackingProvider({ children }) {
     geofences,
     presence, // event_id -> { inside, geofence }
     sessions, // event_id -> { id, time_in, time_out, total_duration_seconds, open_session_time_in, session_count, requires_face_verification }
-    isAutoSubmitting: (eventId) => !!autoSubmitting[eventId],
     checkInErrors, // event_id -> last server rejection message for auto time-in, or null
-    // Live accumulated duration in seconds for an event's session today —
-    // keeps ticking upward while a session is open, across however many
-    // separate time-in/time-out dips have happened so far.
+    // Live duration in seconds across today's sessions.
     getDurationSeconds: (eventId) => liveDurationSeconds(sessions[eventId]),
     refreshGeofences,
     refreshSessionsFromHistory,
-    // Used by FaceVerificationScreen: refreshAfterVerification re-syncs
-    // session state once a verification succeeds (so the Dashboard/
-    // Attendance screens immediately reflect the now-confirmed record).
     refreshAfterVerification: refreshSessionsFromHistory,
-    // clearPendingVerification resets that attendance id's "already
-    // prompted" guard, called on both success (tidy, though moot since a
-    // resolved record's requires_face_verification is 0 and won't match
-    // again) and on Cancel -- clearing it there means the very next
-    // meaningful history refresh (refreshSessionsFromHistory only runs at
-    // specific moments: app mount, and a session auto-ending -- not a tight
-    // poll) re-surfaces the prompt rather than only ever trying again on a
-    // full app restart.
+    // Lets the next history refresh prompt again after a cancel.
     clearPendingVerification: (attendanceId) => {
       if (attendanceId) delete promptedVerificationRef.current[attendanceId];
     }

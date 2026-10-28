@@ -3,10 +3,7 @@ const config = require('../config/config');
 const pool = require('../config/db');
 const { getBlockedStatus, sendDeviceBlocked } = require('../services/deviceAccess');
 
-/**
- * Verifies the admin JWT (Bearer header or cookie) and re-checks that the
- * account still exists and is active, so deleted admins lose access immediately.
- */
+// Admin JWT (header or cookie); the account must still exist and be active.
 async function requireAuth(req, res, next) {
   const header = req.headers.authorization;
   const bearerToken = header && header.startsWith('Bearer ') ? header.split(' ')[1] : null;
@@ -49,10 +46,7 @@ function requireRole(...roles) {
   };
 }
 
-/**
- * Verifies the employee JWT and rejects requests from blacklisted/rejected
- * devices (X-Device-Uid) with DEVICE_BLOCKED, which signs the app out.
- */
+// Employee JWT; blocked devices (X-Device-Uid) get DEVICE_BLOCKED.
 async function requireEmployeeAuth(req, res, next) {
   const header = req.headers.authorization;
   const token = header && header.startsWith('Bearer ') ? header.split(' ')[1] : null;
