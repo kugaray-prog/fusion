@@ -3,19 +3,9 @@ const path = require('path');
 const sharp = require('sharp');
 const pool = require('../config/db');
 
-// Durable copies of uploaded photos (face-verification selfies, registered
-// faces, employee photos, OCR scans), kept in MySQL under the same public
-// path the app already stores ("/uploads/selfies/123.jpg").
-//
-// Render's free instance has no persistent disk: the uploads/ folder is
-// wiped on every deploy and every restart (including waking up after 15
-// idle minutes), which left the database pointing at photos that no longer
-// existed. The file on disk is still written first and used as-is (face
-// recognition reads it); this copy is what survives. serveStoredUpload
-// answers /uploads/* requests for files the disk no longer has.
-//
-// Copies are downscaled JPEGs (longest side 800px), roughly 40-80 KB each,
-// so the free database's storage goes a long way. Videos are not stored.
+// Durable copies of uploaded photos in MySQL, keyed by public path
+// ("/uploads/selfies/123.jpg"), for hosts whose disk is wiped on restart.
+// Stored as JPEGs (longest side 800px). Videos are not stored.
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 const MAX_SIDE = 800;
@@ -40,7 +30,6 @@ function ensureTable() {
   return tableReady;
 }
 
-// "/uploads/selfies/x.jpg" for an absolute file path inside uploads/, else null.
 function publicPathFor(absPath) {
   const rel = path.relative(UPLOADS_DIR, absPath);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
@@ -55,8 +44,7 @@ async function compress(input) {
     .toBuffer();
 }
 
-// Stores `input` (file path or Buffer) under `publicPath`. Replaces any
-// existing copy for that path.
+// Stores `input` (path or Buffer) under `publicPath`, replacing any copy.
 async function saveUpload(publicPath, input) {
   await ensureTable();
   const data = await compress(input);
@@ -74,9 +62,7 @@ async function hasUpload(publicPath) {
   return rows.length > 0;
 }
 
-// Express middleware, run right after multer: stores a copy of every
-// uploaded IMAGE in the request. A failure is logged, not thrown -- the
-// request itself (e.g. the attendance face check) must not fail because of it.
+// Middleware after multer: stores every uploaded image. Failures are only logged.
 async function persistRequestUploads(req, res, next) {
   const files = [];
   if (req.file) files.push(req.file);
@@ -94,9 +80,7 @@ async function persistRequestUploads(req, res, next) {
   next();
 }
 
-// Express middleware for GET /uploads/*, mounted after express.static: the
-// file isn't on disk (wiped by a restart), so serve the stored copy and put
-// it back on disk for next time.
+// Fallback for GET /uploads/*: serves the stored copy and restores it to disk.
 async function serveStoredUpload(req, res, next) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
   let publicPath;
@@ -126,8 +110,7 @@ async function serveStoredUpload(req, res, next) {
   }
 }
 
-// Deletes a photo for good: its stored copy and the file on this machine's
-// disk. With the stored copy gone, no server's sync can write it back.
+// Deletes both the stored copy and the file on disk.
 async function removeUpload(publicPath) {
   if (!publicPath || !publicPath.startsWith('/uploads/') || publicPath.includes('..')) return;
   await ensureTable();
@@ -139,11 +122,8 @@ function diskPathFor(publicPath) {
   return path.join(UPLOADS_DIR, ...publicPath.slice('/uploads/'.length).split('/'));
 }
 
-// Every photo path this machine has already had on disk, saved in
-// uploads/.sync-state.json. A known path that's now missing was deleted on
-// purpose, so the sync (and serveStoredUpload) leave it deleted instead of
-// writing it back on every run. A wiped folder (Render restart) loses this
-// file too, so there everything is still restored as before.
+// Paths this machine has had on disk. A known path now missing was deleted on
+// purpose and is not restored.
 const STATE_FILE = path.join(UPLOADS_DIR, '.sync-state.json');
 let knownPaths = null;
 let hadStateFile = false;
@@ -158,7 +138,6 @@ function loadKnownPaths() {
   }
   return knownPaths;
 }
-// Any photo in uploads/ at all (not just the .gitkeep placeholders)?
 function hasAnyPhotoOnDisk() {
   try {
     return fs.readdirSync(UPLOADS_DIR, { withFileTypes: true }).some((dir) =>
@@ -172,22 +151,13 @@ async function saveKnownPaths() {
   await fs.promises.mkdir(UPLOADS_DIR, { recursive: true });
   await fs.promises.writeFile(STATE_FILE, JSON.stringify([...loadKnownPaths()]));
 }
-// True when this machine had the file and it has since been deleted.
 function wasDeletedLocally(publicPath) {
   return loadKnownPaths().has(publicPath) && !fs.existsSync(diskPathFor(publicPath));
 }
 
-// Writes stored photos that aren't on this machine's disk yet into uploads/
-// (same subfolder and filename as their path). Local and deployed servers
-// share one database, so a server running on localhost gets every photo
-// captured anywhere -- mobile face verification (including anomaly checks),
-// OCR scans, kiosk face checks, registrations -- in its own uploads folder,
-// and a freshly restarted host gets its wiped folder back. Photos deleted
-// from this machine's uploads/ stay deleted (see wasDeletedLocally).
-//
-// The first run checks everything; later runs only look at rows added since
-// the previous run (plus a minute of overlap), which keeps a 5-second
-// interval cheap. Returns how many files were written.
+// Writes stored photos missing from uploads/ (skipping ones deleted locally).
+// After the first full run, only rows added since the last run are checked.
+// Returns the number of files written.
 let syncing = false;
 let syncedUpTo = null; // newest created_at seen, as the DB returned it
 async function syncToDisk({ full = false } = {}) {
@@ -196,16 +166,14 @@ async function syncToDisk({ full = false } = {}) {
   let written = 0;
   const known = loadKnownPaths();
   const knownBefore = known.size;
-  // First run without a state file (e.g. just upgraded) in a folder that
-  // still has photos: it wasn't wiped, so anything missing was deleted on
-  // purpose. An empty folder (fresh clone, wiped host) is restored in full.
+  // No state file yet but photos on disk: the folder wasn't wiped, so treat
+  // missing files as deleted. An empty folder is restored in full.
   const adoptMissing = full && !hadStateFile && knownBefore === 0 && hasAnyPhotoOnDisk();
   try {
     await ensureTable();
     const since = full ? null : syncedUpTo;
     const [rows] = since
-      // One minute of overlap covers a row committed a little after its
-      // created_at; files already on disk are skipped straight away.
+      // Overlap catches rows committed slightly after their created_at.
       ? await pool.query('SELECT path, created_at FROM stored_uploads WHERE created_at >= ? - INTERVAL 1 MINUTE ORDER BY created_at', [since])
       : await pool.query('SELECT path, created_at FROM stored_uploads ORDER BY created_at');
     for (const { path: publicPath, created_at: createdAt } of rows) {
@@ -232,8 +200,6 @@ async function syncToDisk({ full = false } = {}) {
   return written;
 }
 
-// Full sync now, then new photos every intervalMs (default 5 s) so a photo
-// captured on any server shows up in this machine's uploads/ within seconds.
 function startDiskSync(intervalMs = Number(process.env.UPLOAD_SYNC_INTERVAL_MS) || 5000) {
   const tick = (full) => syncToDisk({ full })
     .then((n) => { if (n) console.log(`[uploadStore] Saved ${n} photo(s) into uploads/.`); })

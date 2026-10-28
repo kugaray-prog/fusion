@@ -1,10 +1,8 @@
 const networkService = require('../services/networkService');
 const { logAction } = require('../services/auditService');
 
-// GET /api/network/check (employee) -- used by the mobile app's network gate
-// (WifiCheckScreen) instead of reading the Wi-Fi SSID. `enforced` is false
-// while no allowed IPs have been configured yet, so a fresh deployment
-// doesn't lock every employee out before an admin has set this up.
+// GET /api/network/check (employee)
+// `enforced` is false until an allowed IP is configured.
 async function checkEmployeeNetwork(req, res, next) {
   try {
     const ip = await networkService.resolveClientIp(req);
@@ -19,9 +17,7 @@ async function checkEmployeeNetwork(req, res, next) {
   }
 }
 
-// GET /api/network/settings (super admin) -- `your_ip` is the admin's own
-// public IP as the server sees it, so an admin sitting on the office network
-// can add it to the list with one click.
+// GET /api/network/settings (super admin). `your_ip` is the admin's public IP.
 async function getSettings(req, res, next) {
   try {
     const entries = await networkService.getAllowedEntries();
@@ -31,7 +27,7 @@ async function getSettings(req, res, next) {
   }
 }
 
-// PUT /api/network/settings (super admin) body: { allowed_ips: "a, b\nc" | ["a", "b"] }
+// PUT /api/network/settings { allowed_ips: "a, b\nc" | ["a", "b"] }
 async function updateSettings(req, res, next) {
   try {
     const { allowed_ips } = req.body;

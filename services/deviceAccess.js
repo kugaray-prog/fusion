@@ -1,10 +1,7 @@
 const pool = require('../config/db');
 
-// Device statuses (mobile_devices.status) that lock a phone out of the app
-// entirely: an admin blacklisted it, or rejected its registration. A pending
-// device is not blocked -- it's held on the "waiting for approval" screen.
-// 'removed' isn't stored anywhere: it's reported for a signed-in phone whose
-// device record an admin deleted (it must sign in and register again).
+// Statuses that lock a phone out. 'removed' is not stored: it means the
+// signed-in phone's device record was deleted by an admin.
 const BLOCKED_STATUSES = ['blacklisted', 'rejected', 'removed'];
 
 function isBlockedStatus(status) {
@@ -21,8 +18,7 @@ function blockedMessage(status) {
   return "This device's registration was rejected by your administrator, so it can't be used to sign in or record attendance. Contact your administrator.";
 }
 
-// Sends the standard 403 the mobile app recognizes (code DEVICE_BLOCKED):
-// it signs out, shows a notification and explains on the Login screen.
+// 403 with code DEVICE_BLOCKED, which makes the mobile app sign out.
 function sendDeviceBlocked(res, status) {
   return res.status(403).json({
     success: false,
@@ -32,10 +28,8 @@ function sendDeviceBlocked(res, status) {
   });
 }
 
-// The blocked status of a device, or null if it's allowed.
-// Without employeeId (sign-in/registration): a device not on file is fine.
-// With employeeId (a signed-in request): that employee's device must still
-// exist -- if an admin deleted it, the phone is 'removed'.
+// Returns the blocked status or null. With employeeId, the device must still
+// exist for that employee, otherwise it is 'removed'.
 async function getBlockedStatus(deviceUid, employeeId = null) {
   if (!deviceUid) return null;
   const [rows] = employeeId == null
@@ -45,10 +39,8 @@ async function getBlockedStatus(deviceUid, employeeId = null) {
   return isBlockedStatus(rows[0].status) ? rows[0].status : null;
 }
 
-// Fits client-reported device details to the mobile_devices column sizes.
-// Some Android builds (e.g. Xiaomi/HyperOS) report a full build fingerprint
-// as the OS name, which overflowed os VARCHAR(60) and failed registration
-// with a raw "Data too long" error; older app builds still send it.
+// Trims device details to column sizes (some Android builds report a full
+// build fingerprint as the OS name).
 function cleanDeviceInfo({ model, brand, os }) {
   const clip = (v, max) => {
     const s = v == null ? '' : String(v).trim();

@@ -30,10 +30,8 @@ async function createDepartment(req, res, next) {
   }
 }
 
-// PUT /api/departments/:id  body: { name, office, description }
-// Employees point at the department by id, so a rename carries over to all
-// of them. Employees whose office was just the old office name (the default
-// when an admin registers someone) get the new office name too.
+// PUT /api/departments/:id { name, office, description }
+// Employees whose office matched the old name get the new one too.
 async function updateDepartment(req, res, next) {
   try {
     const name = String(req.body.name || '').trim();

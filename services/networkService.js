@@ -1,19 +1,10 @@
 const net = require('net');
 const pool = require('../config/db');
 
-// Office-network check for the mobile app (replaces the old Wi-Fi SSID
-// match). Every device on the office connection -- the main router AND any
-// extender / repeater / secondary router behind it -- reaches the internet
-// through the same provider line, so the server sees the same public IP
-// (or, over IPv6, the same provider-assigned prefix) no matter which access
-// point the phone joined or what that access point's SSID is.
-//
-// The allow-list lives in settings.allowed_network_ips (editable from the
-// admin dashboard's Settings page), falling back to the ALLOWED_NETWORK_IPS
-// env var. Entries are separated by commas or new lines; each is either an
-// exact address ("112.198.10.25", "2001:db8::1") or a CIDR range
-// ("112.198.0.0/16", "2001:db8:1200::/56") -- a range covers a provider that
-// hands out a different public IP after each router restart.
+// Office-network check: every access point on the office line shares one
+// public IP (or IPv6 prefix). The allow-list (settings.allowed_network_ips,
+// fallback ALLOWED_NETWORK_IPS) holds exact IPs or CIDR ranges, separated by
+// commas or new lines.
 const SETTING_KEY = 'allowed_network_ips';
 
 function normalizeIp(ip) {
@@ -23,11 +14,8 @@ function normalizeIp(ip) {
   return v;
 }
 
-// The phone's real public IP. On Render the request arrives through
-// Cloudflare and Render's own proxy, so req.socket is a proxy, not the phone.
-// CF-Connecting-IP is set (and overwritten, so it can't be spoofed by the
-// client) by Cloudflare itself; True-Client-IP / X-Forwarded-For are
-// fallbacks for other hosting setups, and the socket address for local dev.
+// Real client IP: CF-Connecting-IP (set by Cloudflare, not spoofable), then
+// True-Client-IP / X-Forwarded-For, then the socket address.
 function getClientIp(req) {
   const candidates = [
     req.headers['cf-connecting-ip'],
@@ -42,10 +30,7 @@ function getClientIp(req) {
   return '';
 }
 
-// Loopback and private-LAN ranges. A request from one of these never crossed
-// the internet -- it's the admin on localhost, or a phone hitting the dev
-// server over the same Wi-Fi -- so the client shares the server's own public
-// IP, which is what the allow-list needs.
+// Loopback/private ranges: these clients share the server's own public IP.
 const LOCAL_RANGES = new net.BlockList();
 LOCAL_RANGES.addSubnet('127.0.0.0', 8, 'ipv4');
 LOCAL_RANGES.addSubnet('10.0.0.0', 8, 'ipv4');
@@ -65,8 +50,7 @@ const PUBLIC_IP_SOURCES = ['https://api.ipify.org', 'https://icanhazip.com'];
 const PUBLIC_IP_TTL_MS = 5 * 60 * 1000;
 let publicIpCache = { ip: '', at: 0 };
 
-// The server's own public IP, looked up from an echo service and cached for
-// a few minutes. Returns '' if every source is unreachable.
+// Cached for a few minutes; '' when no echo service is reachable.
 async function getServerPublicIp() {
   if (publicIpCache.ip && Date.now() - publicIpCache.at < PUBLIC_IP_TTL_MS) return publicIpCache.ip;
   for (const url of PUBLIC_IP_SOURCES) {
@@ -83,9 +67,7 @@ async function getServerPublicIp() {
   return '';
 }
 
-// Like getClientIp, but a localhost / LAN address is swapped for the public
-// IP the office connection actually uses, so local testing behaves the same
-// as a deployed server.
+// Like getClientIp, but a local/LAN address is replaced by the server's public IP.
 async function resolveClientIp(req) {
   const ip = getClientIp(req);
   if (!isLocalIp(ip)) return ip;
@@ -99,7 +81,6 @@ function splitEntries(raw) {
     .filter(Boolean);
 }
 
-// Returns an error message for an invalid entry, or null if it's valid.
 function validateEntry(entry) {
   const [addr, bits, extra] = entry.split('/');
   const family = net.isIP(addr);

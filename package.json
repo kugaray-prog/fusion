@@ -1,7 +1,7 @@
 {
   "name": "geoattend-pro",
   "version": "1.0.0",
-  "description": "GeoAttend Pro - Geofenced Attendance Monitoring System with OCR and Face Identity Verification",
+  "description": "GeoAttend - Geofenced Attendance Monitoring System with OCR and Face Identity Verification",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

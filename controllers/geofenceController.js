@@ -9,8 +9,7 @@ function centroidOf(points) {
   return { lat: sum.lat / points.length, lng: sum.lng / points.length };
 }
 
-// Weekday numbers (ISO: 1=Mon..7=Sun) that fall on each recurrence type,
-// used to expand a recurring event definition into individual occurrence dates.
+// Expands a recurring definition into occurrence dates (ISO weekdays 1=Mon..7=Sun).
 function expandRecurrenceDates({ recurrence_type, recurrence_days, start, end, recurrence_end_date }) {
   const startDate = new Date(start);
   const endDate = new Date(end);
@@ -43,27 +42,15 @@ function expandRecurrenceDates({ recurrence_type, recurrence_days, start, end, r
   return occurrences;
 }
 
-// Formats a Date using ITS OWN local calendar/clock fields (year, month, day,
-// hours, minutes, seconds) — never through toISOString(), which converts to
-// UTC and silently shifts the wall-clock time (e.g. an admin in the
-// Philippines, UTC+8, picking 6:00 PM would get stored as 10:00 AM).
-// `start`/`end` come in as naive "YYYY-MM-DDTHH:mm" strings (no timezone
-// offset) from the <input type="datetime-local">, so `new Date(start)` is
-// parsed as a local wall-clock time already — we just need to read it back
-// out the same way, not re-interpret it as UTC.
+// Formats with local fields; toISOString() would shift the time to UTC.
 function toMysqlDatetime(d) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// Returns a 409 message if any of `occurrences` clashes with an existing
-// event, or null. Two clashes are refused:
-//   - the same event again: same name and same start/end (e.g. "Create
-//     Event" clicked twice while the first request was still saving);
-//   - the same venue booked for an overlapping time by a different event.
-// Names and venues are compared trimmed and case-insensitively. Events
-// without a venue name are only checked for the first case. `excludeEventId`
-// skips the event being edited.
+// Returns a 409 message, or null, when an occurrence duplicates an existing
+// event (same title and times) or books the same venue at an overlapping
+// time. Comparisons are trimmed and case-insensitive.
 async function findScheduleConflict(conn, { title, venue, occurrences, excludeEventId = null }) {
   const normTitle = String(title || '').trim().toLowerCase();
   const normVenue = String(venue || '').trim().toLowerCase();
@@ -92,8 +79,7 @@ async function findScheduleConflict(conn, { title, venue, occurrences, excludeEv
   return null;
 }
 
-// GET /api/geofences/default-location — CSPC coordinates used to pre-fill the
-// "create event" form. Admins can still override the location/radius per event.
+// GET /api/geofences/default-location
 async function getDefaultLocation(req, res, next) {
   try {
     const [rows] = await pool.query(
@@ -106,7 +92,6 @@ async function getDefaultLocation(req, res, next) {
         lat: byKey.cspc_latitude ? Number(byKey.cspc_latitude) : config.defaultGeofence.lat,
         lng: byKey.cspc_longitude ? Number(byKey.cspc_longitude) : config.defaultGeofence.lng,
         label: byKey.cspc_label || config.defaultGeofence.label,
-        // Map zoom the Geo-Fences page opens at (18 = close-up of the CSPC campus).
         zoom: byKey.cspc_zoom ? Number(byKey.cspc_zoom) : 18
       }
     });
@@ -115,10 +100,7 @@ async function getDefaultLocation(req, res, next) {
   }
 }
 
-// PUT /api/geofences/default-location  body: { lat, lng, zoom }
-// "Save this map view as CSPC default" on the Geo-Fences page: the map's
-// current center and zoom become what the page opens at and what "Use CSPC
-// Default Location" jumps to.
+// PUT /api/geofences/default-location { lat, lng, zoom }
 async function saveDefaultLocation(req, res, next) {
   try {
     const lat = Number(req.body.lat);
@@ -145,9 +127,7 @@ async function saveDefaultLocation(req, res, next) {
   }
 }
 
-// GET /api/geofences  (includes each geofence's polygon points, for map rendering/editing)
-// ?limit=N — return only the N most-recently-created events (used by the
-// Geo-Fences panel's default "3 most recent" view; omit for the full list).
+// GET /api/geofences?limit=N (includes polygon points)
 async function getGeofences(req, res, next) {
   try {
     const { limit } = req.query;
@@ -172,7 +152,6 @@ async function getGeofences(req, res, next) {
 
     const audiences = await eventAudience.loadAudiences(rows.map((g) => g.event_id));
 
-    // Auto activation/expiration based on event schedule
     const now = new Date();
     const withStatus = rows.map((g) => {
       const start = new Date(g.start_datetime);
@@ -180,7 +159,7 @@ async function getGeofences(req, res, next) {
       let computedStatus = 'upcoming';
       if (now >= start && now <= end) computedStatus = 'active';
       else if (now > end) computedStatus = 'expired';
-      // Both empty = every employee is expected (see services/eventAudience.js).
+      // Both empty = everyone (see services/eventAudience.js).
       const audience = audiences.get(g.event_id);
       return {
         ...g,
@@ -197,11 +176,10 @@ async function getGeofences(req, res, next) {
   }
 }
 
-// POST /api/geofences  (creates event + polygon geofence together, matching the UI form)
-// Optional recurrence fields: recurrence_type ('none'|'weekly'|'dates'), recurrence_days
-// ("1,3,5" = Mon/Wed/Fri, ISO weekday numbers), recurrence_end_date (YYYY-MM-DD).
-// When a recurrence is set, one event+geofence row is created per occurrence, each with
-// its own attendance records, linked back to the first occurrence via parent_event_id.
+// POST /api/geofences (event + polygon geofence)
+// Recurrence: recurrence_type ('none'|'weekly'|'dates'), recurrence_days
+// ("1,3,5"), recurrence_end_date. Each occurrence gets its own row, linked via
+// parent_event_id.
 async function createGeofence(req, res, next) {
   const conn = await pool.getConnection();
   let locked = false;
@@ -213,9 +191,6 @@ async function createGeofence(req, res, next) {
     if (!title || !start || !end || !Array.isArray(points) || points.length < 3) {
       return res.status(400).json({ success: false, message: 'Title, schedule, and at least 3 boundary points are required.' });
     }
-    // New events can't be scheduled to start in the past (mirrors the
-    // `min` lock on the admin UI's date/time picker — enforced here too so
-    // the rule holds even for direct API calls).
     if (new Date(start).getTime() < Date.now()) {
       return res.status(400).json({ success: false, message: "The event start date/time can't be in the past." });
     }
@@ -228,7 +203,7 @@ async function createGeofence(req, res, next) {
     const attendees = eventAudience.parseAttendees(req.body) || { departmentIds: [], employeeIds: [] };
     if (attendees.error) return res.status(400).json({ success: false, message: attendees.error });
 
-    // Latitude/Longitude typed manually in the form take priority over the auto-computed centroid.
+    // Manually entered coordinates override the computed centroid.
     const hasManualCoords = center_lat !== undefined && center_lat !== null && center_lat !== '' &&
                              center_lng !== undefined && center_lng !== null && center_lng !== '';
     if (hasManualCoords && (isNaN(Number(center_lat)) || isNaN(Number(center_lng)))) {
@@ -238,9 +213,7 @@ async function createGeofence(req, res, next) {
 
     const occurrences = expandRecurrenceDates({ recurrence_type, recurrence_days, start, end, recurrence_end_date });
 
-    // Serialize event creation so two requests arriving together (double
-    // click, two admins) can't both pass the conflict check before either
-    // has inserted. Released in `finally`.
+    // Serialize creation so concurrent requests can't both pass the conflict check.
     const [[lock]] = await conn.query("SELECT GET_LOCK('geoattend_create_event', 10) AS got");
     if (!lock.got) {
       return res.status(503).json({ success: false, message: 'Another event is being saved. Please try again.' });
@@ -292,7 +265,6 @@ async function createGeofence(req, res, next) {
       }
     }
 
-    // Every occurrence of a recurring event gets the same attendees.
     await eventAudience.saveAudience(conn, createdEventIds, attendees);
 
     await conn.commit();
@@ -312,9 +284,8 @@ async function createGeofence(req, res, next) {
         : 'Event created.',
       data: { id: firstGeofenceId, event_id: parentEventId, occurrence_count: occurrences.length, event_ids: createdEventIds }
     });
-    // Tells every approved phone, including ones with the app closed. Not
-    // awaited: the admin's save shouldn't wait on Expo's push service.
-    // Limited events only notify the employees they're limited to.
+    // Not awaited so the save doesn't wait on Expo. Restricted events only
+    // notify their attendees.
     const restricted = attendees.departmentIds.length > 0 || attendees.employeeIds.length > 0;
     const employeeIds = restricted
       ? await eventAudience.audienceEmployeeIds({ id: parentEventId }, { activeOnly: false }).catch(() => [])
@@ -347,7 +318,7 @@ async function updateGeofence(req, res, next) {
     const attendees = eventAudience.parseAttendees(req.body); // null = keep the current attendees
     if (attendees && attendees.error) return res.status(400).json({ success: false, message: attendees.error });
 
-    // Latitude/Longitude typed manually in the form take priority over the auto-computed centroid.
+    // Manually entered coordinates override the computed centroid.
     const hasManualCoords = center_lat !== undefined && center_lat !== null && center_lat !== '' &&
                              center_lng !== undefined && center_lng !== null && center_lng !== '';
     if (hasManualCoords && (isNaN(Number(center_lat)) || isNaN(Number(center_lng)))) {
@@ -371,7 +342,6 @@ async function updateGeofence(req, res, next) {
       [title, venue, toMysqlDatetime(new Date(start)), toMysqlDatetime(new Date(end)), existing[0].event_id]
     );
 
-    // Replace the polygon's points wholesale - simplest, safest way to persist an edited shape.
     await conn.query('DELETE FROM geofence_points WHERE geofence_id = ?', [id]);
     for (let i = 0; i < points.length; i++) {
       await conn.query(
@@ -400,7 +370,7 @@ async function deleteGeofence(req, res, next) {
     const [rows] = await pool.query('SELECT event_id FROM geofences WHERE id = ?', [req.params.id]);
     if (!rows[0]) return res.status(404).json({ success: false, message: 'Geofence not found.' });
 
-    // Deleting the event cascades to the geofence, which cascades to geofence_points.
+    // Cascades to the geofence and its points.
     await pool.query('DELETE FROM events WHERE id = ?', [rows[0].event_id]);
     await logAction({ adminId: req.admin.id, action: 'delete', module: 'geofence', details: { id: req.params.id }, ip: req.ip });
 
@@ -410,8 +380,7 @@ async function deleteGeofence(req, res, next) {
   }
 }
 
-// GET /api/geofences/attendee-options — offices and approved employees for
-// the Geo-Fences form's "Required Attendees" picker.
+// GET /api/geofences/attendee-options
 async function getAttendeeOptions(req, res, next) {
   try {
     const [[departments], [employees]] = await Promise.all([
@@ -438,7 +407,7 @@ async function toggleGeofence(req, res, next) {
   }
 }
 
-// GET /api/geofences/mobile/active  (employee-facing — active + upcoming events only, no admin data)
+// GET /api/geofences/mobile/active (employee: active and upcoming events)
 async function getActiveForMobile(req, res, next) {
   try {
     const [rows] = await pool.query(
@@ -459,7 +428,6 @@ async function getActiveForMobile(req, res, next) {
       pointsByGeofence[p.geofence_id].push({ lat: Number(p.lat), lng: Number(p.lng) });
     }
 
-    // Only the events this employee is required to attend.
     const [[[employee]], audiences] = await Promise.all([
       pool.query('SELECT id, department_id FROM employees WHERE id = ?', [req.employee.id]),
       eventAudience.loadAudiences(rows.map((g) => g.event_id))

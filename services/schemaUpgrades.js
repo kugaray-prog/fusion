@@ -1,9 +1,7 @@
 const pool = require('../config/db');
 const cspcOffices = require('./cspcOffices');
 
-// Small, idempotent schema changes applied at server start, so an existing
-// database (e.g. the Docker one) picks them up without a manual
-// migration. Each step checks before changing anything.
+// Idempotent schema changes applied at startup; each step checks first.
 
 async function columnExists(table, column) {
   const [rows] = await pool.query(
@@ -13,12 +11,8 @@ async function columnExists(table, column) {
   return rows.length > 0;
 }
 
-// employees.is_approved: 0 for someone who registered themselves in the app
-// and hasn't been accepted by an admin yet (their device is still pending).
-// They stay out of the Employees list, dashboard counts, ratings and reports
-// until an admin approves their device (deviceController.updateDeviceStatus).
-// Everyone already in the database counts as approved, except earlier
-// self-registrations whose device was never approved.
+// employees.is_approved: 0 for self-registered employees whose device is not
+// yet approved. Existing employees are backfilled as approved.
 async function addEmployeeApproval() {
   if (await columnExists('employees', 'is_approved')) return;
   await pool.query('ALTER TABLE employees ADD COLUMN is_approved TINYINT(1) NOT NULL DEFAULT 1');
@@ -33,18 +27,14 @@ async function addEmployeeApproval() {
   console.log(`[schema] Added employees.is_approved (${result.affectedRows} pending self-registration(s)).`);
 }
 
-// face_records.source: where a face-verification photo came from -- the
-// admin's Verification kiosk ('kiosk', every existing row) or an employee's
-// own anomaly re-verification in the mobile app ('mobile_anomaly').
+// face_records.source: 'kiosk' (admin Verification) or 'mobile_anomaly'.
 async function addFaceRecordSource() {
   if (await columnExists('face_records', 'source')) return;
   await pool.query("ALTER TABLE face_records ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'kiosk'");
   console.log('[schema] Added face_records.source.');
 }
 
-// One-time codes emailed to a new admin's address before the account is
-// created (adminAccountController.sendAdminOtp / createAdminAccount), which
-// proves the address is real and belongs to them.
+// Email OTPs that verify a new admin's address before the account is created.
 async function addAdminEmailOtps() {
   await pool.query(
     `CREATE TABLE IF NOT EXISTS admin_email_otps (
@@ -60,8 +50,6 @@ async function addAdminEmailOtps() {
   );
 }
 
-// Alerts shown in the admin dashboard's notification bell (see
-// services/adminNotificationService.js).
 async function addAdminNotifications() {
   await pool.query(
     `CREATE TABLE IF NOT EXISTS admin_notifications (
@@ -80,10 +68,7 @@ async function addAdminNotifications() {
   );
 }
 
-// attendance.status_finalized: set once an ended event's attendance has had
-// its final status settled (attendanceController.finalizeEndedEventStatuses).
-// Records of events that already ended keep the status they have, so the
-// presence rule only applies to events still running or yet to come.
+// attendance.status_finalized: set once an ended event's statuses are settled.
 async function addAttendanceStatusFinalized() {
   if (await columnExists('attendance', 'status_finalized')) return;
   await pool.query('ALTER TABLE attendance ADD COLUMN status_finalized TINYINT(1) NOT NULL DEFAULT 0');
@@ -95,16 +80,13 @@ async function addAttendanceStatusFinalized() {
   console.log(`[schema] Added attendance.status_finalized (${result.affectedRows} existing record(s) kept as-is).`);
 }
 
-// mobile_devices.push_token: the phone's Expo push token, so a new event can
-// be announced even while the app is closed (services/pushService.js).
 async function addDevicePushToken() {
   if (await columnExists('mobile_devices', 'push_token')) return;
   await pool.query('ALTER TABLE mobile_devices ADD COLUMN push_token VARCHAR(255) NULL');
   console.log('[schema] Added mobile_devices.push_token.');
 }
 
-// The offices and employees an event is limited to (services/eventAudience.js).
-// An event with no rows here is open to everyone, as before.
+// Events with no rows here are open to everyone.
 async function addEventAttendees() {
   await pool.query(
     `CREATE TABLE IF NOT EXISTS event_attendee_departments (
@@ -126,8 +108,20 @@ async function addEventAttendees() {
   );
 }
 
-// CSPC's departments/offices (services/cspcOffices.js). Only missing names are
-// inserted, so departments added by admins or registrations are untouched.
+// Certificate verification (QR code + file hash) and email delivery status.
+async function addCertificateVerification() {
+  if (await columnExists('certificates', 'verification_code')) return;
+  await pool.query(
+    `ALTER TABLE certificates
+       ADD COLUMN verification_code VARCHAR(20) NULL UNIQUE AFTER pdf_path,
+       ADD COLUMN file_hash CHAR(64) NULL AFTER verification_code,
+       ADD COLUMN emailed_at DATETIME NULL AFTER file_hash,
+       ADD COLUMN email_error VARCHAR(255) NULL AFTER emailed_at`
+  );
+  console.log('[schema] Added certificates.verification_code, file_hash, emailed_at, email_error.');
+}
+
+// Inserts only missing names; existing departments are untouched.
 async function addCspcOffices() {
   const [result] = await pool.query(
     'INSERT IGNORE INTO departments (name, office) VALUES ?',
@@ -146,10 +140,7 @@ async function indexExists(table, index) {
   return rows.length > 0;
 }
 
-// Removes schema the app never reads or writes: the old monthly `ratings`
-// table (replaced by employee_ratings), columns nothing fills in, and two
-// single-column indexes already covered by a composite index on the same
-// leading column. Every one of these was empty when this was written.
+// Drops the legacy `ratings` table, unused columns and redundant indexes.
 async function dropUnusedSchema() {
   await pool.query('DROP TABLE IF EXISTS ratings');
   const columns = [
@@ -184,6 +175,7 @@ async function run() {
   await addAttendanceStatusFinalized();
   await addDevicePushToken();
   await addEventAttendees();
+  await addCertificateVerification();
   await addCspcOffices();
   await dropUnusedSchema();
 }

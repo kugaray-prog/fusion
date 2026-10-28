@@ -1,9 +1,7 @@
 const pool = require('../config/db');
 const { logAction } = require('../services/auditService');
 
-// Ongoing first, then upcoming (soonest first), then completed (most recent
-// first) — otherwise years of future recurring occurrences bury the events
-// that matter now.
+// Ongoing, then upcoming (soonest first), then completed (latest first).
 const EVENT_STATUS_ORDER = `
   CASE WHEN NOW() BETWEEN e.start_datetime AND e.end_datetime THEN 0
        WHEN e.start_datetime > NOW() THEN 1
@@ -12,14 +10,10 @@ const EVENT_STATUS_ORDER = `
   e.start_datetime DESC`;
 
 // GET /api/events?search=&status=all|upcoming|ongoing|completed&page=&limit=
-// Powers the Events "View All" page. Distinct from /api/geofences (which is
-// the boundary-editing workspace) — this is a read-only searchable listing of
-// every event (including every generated occurrence of a recurring series).
 async function getAllEvents(req, res, next) {
   try {
     const { search = '', status = 'all', page = 1, limit = 25 } = req.query;
-    // limit=all returns every event — recurring series generate hundreds of
-    // occurrences, so a fixed cap hides ongoing/completed ones.
+    // Recurring series can have hundreds of occurrences, so allow no cap.
     const noLimit = limit === 'all';
     const offset = (Number(page) - 1) * Number(limit);
 
@@ -52,8 +46,7 @@ async function getAllEvents(req, res, next) {
       params
     );
 
-    // Per-status totals for the current search (ignoring the status filter),
-    // shown on the Events page's status chips.
+    // Per-status totals for the status chips (ignores the status filter).
     const searchWhere = search ? 'WHERE (e.title LIKE ? OR e.venue LIKE ?)' : '';
     const [[c]] = await pool.query(
       `SELECT COUNT(*) AS total,
@@ -81,8 +74,7 @@ async function getAllEvents(req, res, next) {
   }
 }
 
-// GET /api/events/:id/occurrences — every occurrence of a recurring series
-// (siblings sharing the same parent_event_id, plus the parent itself).
+// GET /api/events/:id/occurrences
 async function getOccurrences(req, res, next) {
   try {
     const { id } = req.params;
@@ -101,12 +93,8 @@ async function getOccurrences(req, res, next) {
   }
 }
 
-// GET /api/events/ongoing — minimal list of events currently in their
-// scheduled window (title + id only), for the admin Verification panels'
-// (OCR / Face) "which event is this attendance for" picker. Deliberately
-// lighter/more open than getAllEvents (super_admin only): the restricted
-// Verification-only 'admin' role needs this to use OCR/Face verification as
-// an attendance method, but has no reason to see the full events workspace.
+// GET /api/events/ongoing
+// Minimal list (id, title) for the Verification panels' event picker.
 async function getOngoingEvents(req, res, next) {
   try {
     const [rows] = await pool.query(
@@ -121,9 +109,8 @@ async function getOngoingEvents(req, res, next) {
   }
 }
 
-// DELETE /api/events/:id — deletes the event; its geofence and (for a
-// recurring parent) every generated occurrence cascade with it. Attendance
-// records are kept, their event_id set to NULL by the foreign key.
+// DELETE /api/events/:id
+// The geofence and occurrences cascade; attendance keeps its rows (event_id NULL).
 async function deleteEvent(req, res, next) {
   try {
     const [rows] = await pool.query('SELECT id, title FROM events WHERE id = ?', [req.params.id]);

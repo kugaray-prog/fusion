@@ -1,6 +1,6 @@
 # Data Flow Diagrams — maintenance guide
 
-This directory holds the GeoAttend Pro DFD set. **The SVGs are generated, never hand-edited.**
+This directory holds the GeoAttend DFD set. **The SVGs are generated, never hand-edited.**
 All four diagrams come from one script, `scripts/generate-dfds.js`.
 
 ## Files

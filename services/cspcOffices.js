@@ -1,6 +1,4 @@
-// CSPC's official departments and offices. Added to the departments table at
-// server start (services/schemaUpgrades.js) and by the seed (database/seed.js).
-// Departments already in the database are left alone.
+// CSPC departments/offices, inserted at startup when missing (schemaUpgrades.js).
 module.exports = [
   'Office of the President',
   'Office of the Vice President for Academic Affairs',

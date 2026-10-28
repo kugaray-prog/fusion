@@ -1,4 +1,4 @@
-# Deploying GeoAttend Pro — Full Guide
+# Deploying GeoAttend — Full Guide
 
 ## Before anything else: what "deploy on GitHub" actually means here
 
@@ -42,9 +42,8 @@ advice would miss:
   Management "View" feature was built) that MySQL 5.7 doesn't support at
   all. A host that defaults to 5.7 will fail confusingly on that one
   endpoint while everything else works.
-- **One file in this repo, `models/w600k_r50.onnx`, is 174MB** — over
-  GitHub's hard 100MB-per-file limit on a normal push. Part 7 covers
-  exactly how to handle it.
+- The default face models (`det_500m.onnx`, `w600k_mbf.onnx`) are
+  committed. The optional larger buffalo_l pack is not — see Part 7.
 
 ---
 
@@ -100,17 +99,12 @@ git remote add origin https://github.com/<your-username>/geoattend-pro.git
 git push -u origin main
 ```
 
-If `git push` fails specifically on a *large file* error mentioning
-`w600k_r50.onnx`, your `.gitignore` didn't catch it before the first `git add`
-— see Part 7.
-
 ### 1.4 Confirm what actually got pushed
 
 Open the repo on github.com and spot-check:
 
 - `.env` should **not** be there. `.env.example` should.
-- `models/det_10g.onnx` should be there (17MB, fine to commit — see Part 7).
-- `models/w600k_r50.onnx` should **not** be there.
+- `models/det_500m.onnx` and `models/w600k_mbf.onnx` should be there.
 - `node_modules/`, `mobile/node_modules/`, and `uploads/` should not be there.
 
 ---
@@ -365,35 +359,13 @@ Parts 3/4).
 
 ## Part 7 — The face-recognition model files, precisely
 
-This repo ships two ONNX model files under `models/`:
+The default buffalo_s pair (`det_500m.onnx`, `w600k_mbf.onnx`) is committed
+under `models/`, so Docker and bare `npm start` deploys need no extra step.
 
-| File | Size | In this repo's Git history? |
-|---|---|---|
-| `det_10g.onnx` | ~17MB | **Yes** — small enough, committed normally |
-| `w600k_r50.onnx` | ~174MB | **No** — `.gitignore`d, over GitHub's 100MB hard limit |
-
-GitHub rejects any single file over 100MB in a normal `git push` outright —
-this isn't a soft warning, the push fails. `w600k_r50.onnx` is well over
-that, which is why it's excluded.
-
-**If you're using the included `Dockerfile`:** nothing to do — it downloads
-this file automatically during the image build, using the exact command
-`models/README.md` documents (from InsightFace's official `buffalo_l`
-release on GitHub).
-
-**If you're deploying without Docker** (a bare VPS running `npm start`
-directly), download it once, manually, on the server:
-
-```bash
-cd geoattend-pro
-curl -L -o /tmp/buffalo_l.zip https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip
-unzip -o /tmp/buffalo_l.zip w600k_r50.onnx -d models/
-rm /tmp/buffalo_l.zip
-```
-
-Until that file is in place, Face Verification specifically fails with a
-clear setup error — every other part of the app (attendance, geofencing,
-reports, ratings, device management, and so on) works normally regardless.
+The optional buffalo_l pair (`det_10g.onnx`, `w600k_r50.onnx`) is
+`.gitignore`d because `w600k_r50.onnx` (~174MB) exceeds GitHub's 100MB
+limit. To use it, follow the download steps in `models/README.md` and set
+`FACE_DETECTOR_MODEL_PATH` / `FACE_MODEL_PATH`.
 
 **Licensing note:** the `buffalo_l` model weights are available for
 non-commercial research use per InsightFace's model zoo terms. If this
@@ -514,7 +486,7 @@ before that change still points at whatever URL was in there when it ran.
 
 ```bash
 curl https://your-domain.com/api/health
-# {"success":true,"message":"GeoAttend Pro API is running.","environment":"production"}
+# {"success":true,"message":"GeoAttend API is running.","environment":"production"}
 ```
 
 Then, in a browser: load the admin dashboard, log in with the seeded admin

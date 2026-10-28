@@ -1,7 +1,4 @@
-/**
- * Returns the distance in meters between two lat/lng points using the
- * Haversine formula.
- */
+/** Haversine distance in meters. */
 function distanceMeters(lat1, lng1, lat2, lng2) {
   const R = 6371000; // Earth radius in meters
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -16,14 +13,8 @@ function distanceMeters(lat1, lng1, lat2, lng2) {
 }
 
 /**
- * Point-in-polygon test using the ray-casting algorithm.
- * points: [{lat, lng}, ...]
- * Coordinates are explicitly coerced to Number here — MySQL's DECIMAL columns
- * come back from mysql2 as strings (no `decimalNumbers: true` set on the pool),
- * and `+` on a string concatenates instead of adding, silently breaking the
- * intersection math and making every point register as "outside" regardless
- * of actual location. Coercing here makes this function correct no matter
- * what type the caller passes in.
+ * Ray-casting point-in-polygon. Coordinates are coerced to Number because
+ * mysql2 returns DECIMAL columns as strings.
  */
 function isInsidePolygon(lat, lng, points) {
   lat = Number(lat);
@@ -41,9 +32,8 @@ function isInsidePolygon(lat, lng, points) {
 }
 
 /**
- * Shortest distance in meters from a point to a polygon's boundary. Uses a
- * flat (equirectangular) projection around the point, which is accurate to
- * well under a meter at geofence scale.
+ * Distance in meters from a point to the polygon boundary (equirectangular
+ * projection, accurate at geofence scale).
  */
 function distanceToPolygonEdgeMeters(lat, lng, points) {
   lat = Number(lat);
@@ -65,14 +55,8 @@ function distanceToPolygonEdgeMeters(lat, lng, points) {
 }
 
 /**
- * Determines whether a given lat/lng is inside a geofence record.
- * geofence: { shape_type, center_lat, center_lng, radius_meters, points: [...] }
- * center_lat/center_lng/radius_meters are also DECIMAL columns and get the same
- * Number() coercion treatment as the polygon points, for the same reason.
- *
- * toleranceMeters: a point outside the boundary by no more than this still
- * counts as inside (GPS error allowance). distanceMeters is how far outside
- * the boundary the point is (0 when inside).
+ * Returns { inside, distanceMeters }. A point within toleranceMeters outside
+ * the boundary still counts as inside.
  */
 function isInsideGeofence(lat, lng, geofence, toleranceMeters = 0) {
   const tol = Math.max(0, Number(toleranceMeters) || 0);
@@ -81,7 +65,6 @@ function isInsideGeofence(lat, lng, geofence, toleranceMeters = 0) {
     const outsideBy = Math.max(0, dist - Number(geofence.radius_meters));
     return { inside: outsideBy <= tol, distanceMeters: Math.round(outsideBy) };
   }
-  // polygon / rectangle both stored as point lists
   const points = geofence.points || [];
   if (points.length < 3) return { inside: false, distanceMeters: null };
   if (isInsidePolygon(lat, lng, points)) return { inside: true, distanceMeters: 0 };

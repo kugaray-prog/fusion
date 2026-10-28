@@ -65,14 +65,7 @@ async function generateReport(req, res, next) {
   }
 }
 
-// GET /api/reports/export/:format  (csv|excel)
-// Deliberately excludes Work Hours -- the on-screen report preview never
-// showed it either (see the Reports view's table columns in app.js), and it
-// isn't needed for basic attendance review. CSV (json2csv) and Excel
-// (ExcelJS) both derive their columns from REPORT_EXPORT_FIELDS below
-// (matching these SELECT aliases exactly), so leaving a column out here and
-// out of that list is enough to leave it out of both downloaded file
-// formats -- no separate column list to keep in sync beyond that one.
+// Columns of both CSV and Excel exports.
 const REPORT_EXPORT_FIELDS = ['Date', 'Employee', 'Employee ID', 'Department', 'Status', 'Late Minutes'];
 
 async function exportReport(req, res, next) {
@@ -93,13 +86,7 @@ async function exportReport(req, res, next) {
 
     if (req.params.format === 'csv') {
       const { Parser } = require('json2csv');
-      // An explicit `fields` list is required here, not just nice-to-have:
-      // with no rows to infer columns from, json2csv's Parser throws "Data
-      // should not be empty or the fields option should be included"
-      // instead of writing a CSV -- e.g. an admin exporting a period or
-      // filter combination with no matching attendance. Passing this list
-      // also makes the still-a-header-row-only CSV that filters would
-      // reasonably produce, instead of a 500 error.
+      // `fields` is required: json2csv throws on empty data without it.
       const csv = new Parser({ fields: REPORT_EXPORT_FIELDS }).parse(rows);
       res.header('Content-Type', 'text/csv');
       res.attachment('attendance_report.csv');
@@ -110,10 +97,7 @@ async function exportReport(req, res, next) {
       const ExcelJS = require('exceljs');
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('Attendance Report');
-      // Columns are always set from the same explicit list (not just when
-      // rows.length > 0, as this used to be) -- otherwise a zero-row export
-      // downloaded as a workbook with no header row at all, which reads as
-      // broken/empty rather than "no records matched this filter".
+      // Always set so an empty export still has a header row.
       sheet.columns = REPORT_EXPORT_FIELDS.map((key) => ({ header: key, key, width: 20 }));
       if (rows.length > 0) {
         sheet.addRows(rows);
@@ -131,12 +115,7 @@ async function exportReport(req, res, next) {
   }
 }
 
-// ------------------------------------------------------------
-// Attendance insights by office / college
-// ------------------------------------------------------------
-
-// If an employee has more than one row for the same event (an event running
-// past midnight gets one row per date), the best status is the one counted.
+// An event past midnight has one row per date; the best status counts.
 const STATUS_RANK = { Present: 4, Late: 3, Excused: 2, Absent: 1 };
 const BREAKDOWN_KEY = { Present: 'present', Late: 'late', Excused: 'excused', Absent: 'absent' };
 // Sort weight for a single event's status (includes "No time-in").
@@ -146,25 +125,9 @@ const toPercent = (part, whole) => (whole ? Math.round((part / whole) * 1000) / 
 const emptyBreakdown = () => ({ present: 0, late: 0, excused: 0, absent: 0, no_time_in: 0 });
 
 // GET /api/reports/insights?year=&month=&event_id=&order=most|least&rank_by=rate|count
-//
-// Ranks every office/college by attendance at the events in scope: the
-// selected event, or every event that has already started in the selected
-// year/month. Upcoming events are left out, since nobody can have attended
-// them yet.
-//
-// Uses the same rules as the rest of the app:
-//   - Expected: active employees on the event's attendee list (chosen
-//     offices/employees, else the event's department, else everyone). Same
-//     as ratingController's expectedEmployeeIdsForEvent.
-//   - Attended: Present or Late (same as the Dashboard department chart).
-//   - Missed: Excused, Absent, or no attendance row at all ("No time-in").
-//   - Anyone with an attendance row for the event is counted too, even if
-//     they weren't expected (e.g. on leave but still showed up).
-//
-// order=most sorts offices from highest to lowest attendance, order=least
-// from lowest to highest. rank_by=rate (default) compares attendance %,
-// rank_by=count compares the number of attendances. Each office includes
-// the employees involved, sorted the same way.
+// Ranks offices by attendance at started events in scope. Expected = active
+// employees in the event's audience; attended = Present/Late; missed =
+// Excused/Absent/no row. Unexpected employees with a row are counted too.
 async function getInsights(req, res, next) {
   try {
     const order = req.query.order === 'least' ? 'least' : 'most';
@@ -182,9 +145,7 @@ async function getInsights(req, res, next) {
       return res.status(400).json({ success: false, message: 'event_id must be a number, or "all".' });
     }
 
-    // Close attendance still open past its event's end first (the same
-    // self-heal the Attendance tab runs), so someone who timed in and left
-    // early is counted by their final status instead of as Present.
+    // Close sessions left open past their event's end first.
     await settleEndedEvents();
 
     let where = 'WHERE 1=1';

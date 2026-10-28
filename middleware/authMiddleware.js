@@ -4,24 +4,8 @@ const pool = require('../config/db');
 const { getBlockedStatus, sendDeviceBlocked } = require('../services/deviceAccess');
 
 /**
- * Verifies the JWT sent in the Authorization header (Bearer token)
- * or in the httpOnly cookie set at login, and attaches the decoded
- * admin payload to req.admin.
- *
- * The JWT signature alone only proves the token was issued by this server
- * at some point in the past -- it says nothing about whether that admin
- * account is still around NOW, and a session can last up to 30 days
- * ("remember me"). Without re-checking, a deleted or deactivated admin's
- * existing session keeps working exactly as before until the token expires
- * on its own: they can still approve devices, edit ratings, and so on, and
- * every one of those actions calls logAction() (services/auditService.js)
- * with their admin_id, which then fails to INSERT into audit_logs with
- * "Cannot add or update a child row: a foreign key constraint fails ...
- * admin_id ... REFERENCES admin_accounts" -- because that admin_id no
- * longer exists to reference. Re-checking here closes the actual gap (the
- * account should stop working the moment it's deleted/deactivated, not
- * just fail to log that it did something) rather than only patching the
- * audit-log symptom.
+ * Verifies the admin JWT (Bearer header or cookie) and re-checks that the
+ * account still exists and is active, so deleted admins lose access immediately.
  */
 async function requireAuth(req, res, next) {
   const header = req.headers.authorization;
@@ -48,9 +32,7 @@ async function requireAuth(req, res, next) {
     if (!admin || !admin.is_active) {
       return res.status(401).json({ success: false, message: 'Your account is no longer active. Please contact an administrator.' });
     }
-    // Role is taken from the database, not the token, so a role change
-    // (e.g. demoted from super_admin) takes effect on the admin's very next
-    // request instead of only after their current session expires.
+    // Role comes from the database so role changes apply on the next request.
     req.admin = { ...decoded, role: admin.role };
     next();
   } catch (err) {
@@ -58,10 +40,6 @@ async function requireAuth(req, res, next) {
   }
 }
 
-/**
- * Restricts a route to specific admin roles.
- * Usage: requireRole('super_admin', 'admin')
- */
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.admin || !roles.includes(req.admin.role)) {
@@ -72,14 +50,8 @@ function requireRole(...roles) {
 }
 
 /**
- * Verifies an employee JWT (issued by /api/employee-auth/login) and attaches
- * the decoded payload to req.employee. Used by mobile-app-facing routes.
- *
- * The mobile app sends its device id as X-Device-Uid on every request. If
- * that device has been blacklisted or rejected by an admin, the request is
- * refused with code DEVICE_BLOCKED, which signs the app out -- so blocking a
- * device takes effect on a phone that is already signed in, not only at its
- * next sign-in.
+ * Verifies the employee JWT and rejects requests from blacklisted/rejected
+ * devices (X-Device-Uid) with DEVICE_BLOCKED, which signs the app out.
  */
 async function requireEmployeeAuth(req, res, next) {
   const header = req.headers.authorization;

@@ -12,9 +12,7 @@ function errorHandler(err, req, res, next) {
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ success: false, message: 'Uploaded file is too large.' });
   }
-  // Insert/update referenced a row that doesn't exist (e.g. an employee_id
-  // that was deleted after the client cached it locally) — never leak the
-  // raw "Cannot add or update a child row..." MySQL message to the UI.
+  // Hide raw MySQL foreign-key messages from the UI.
   if (err.code === 'ER_NO_REFERENCED_ROW_2' || err.code === 'ER_NO_REFERENCED_ROW') {
     return res.status(409).json({
       success: false,
@@ -22,7 +20,6 @@ function errorHandler(err, req, res, next) {
       message: 'One of the records this refers to (e.g. your account) no longer exists. Please sign out and sign in again.'
     });
   }
-  // Attempted to delete/update a row that other records still depend on.
   if (err.code === 'ER_ROW_IS_REFERENCED_2' || err.code === 'ER_ROW_IS_REFERENCED') {
     return res.status(409).json({
       success: false,

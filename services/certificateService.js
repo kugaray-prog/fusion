@@ -1,13 +1,12 @@
 const PDFDocument = require('pdfkit');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
 const LOGO_PATH = path.join(__dirname, '..', 'public', 'img', 'cspc-logo.png');
 
-// Wording printed on every certificate. Admins can override any of these
-// from Settings (stored as JSON under the 'certificate_template' setting --
-// see certificateController.getTemplate/saveTemplate); blank fields fall back
-// to these defaults. Signatory titles are newline-separated lines.
+// Default certificate wording; admins override it from Settings
+// ('certificate_template'). Signatory titles are newline-separated.
 const DEFAULT_TEMPLATE = {
   schoolName: 'CAMARINES SUR POLYTECHNIC COLLEGES',
   accreditation: 'ISO 9001 : 2008 CERTIFIED',
@@ -52,8 +51,7 @@ function goldGradient(doc, x1, y1, x2, y2) {
     .stop(1, '#9C6B18');
 }
 
-// Stepped gold "Greek key" ornament hugging a corner. (x, y) is the corner;
-// dx/dy (+1/-1) point into the page.
+// Greek-key corner ornament; dx/dy (+1/-1) point into the page.
 function drawCornerKey(doc, x, y, dx, dy) {
   const s = 9;
   const p = (a, b) => [x + dx * a * s, y + dy * b * s];
@@ -69,8 +67,7 @@ function drawCornerKey(doc, x, y, dx, dy) {
   doc.restore();
 }
 
-// Draws one line of mixed plain / underlined-filled segments, centered, and
-// shrinks the font until it fits `maxWidth`.
+// Draws one centered line of plain/underlined segments, shrinking to fit maxWidth.
 function drawBlankLine(doc, segments, y, { maxWidth, size = 11.5, minSize = 7 }) {
   let fontSize = size;
   const widthAt = (fs) => segments.reduce((w, seg) => {
@@ -91,59 +88,83 @@ function drawBlankLine(doc, segments, y, { maxWidth, size = 11.5, minSize = 7 })
   });
 }
 
-/**
- * Generates a PDF certificate of attendance in the CSPC design, using the
- * admin-editable wording in `template` (see DEFAULT_TEMPLATE).
- * Returns { pdfPath }.
- */
-async function generateCertificatePdf({ certificateNumber, employeeName, ...rest }) {
-  return generateCertificatesPdf({ fileName: certificateNumber, employeeNames: [employeeName], ...rest });
+// Unguessable code printed on each certificate, e.g. "K7QM-4XTB-9PRD".
+// No 0/O/1/I so it can be typed back from paper.
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newVerificationCode() {
+  const bytes = crypto.randomBytes(12);
+  const chars = Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
+  return chars.match(/.{4}/g).join('-');
+}
+
+function sha256(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+/** Generates a single certificate PDF. Returns { pdfPath, sha256 }. */
+async function generateCertificatePdf({ fileName, page, ...rest }) {
+  return generateCertificatesPdf({ fileName, pages: [page], ...rest });
 }
 
 /**
- * Bulk version: one landscape page per name in `employeeNames`, all in a
- * single PDF (so a whole department prints in one go). Returns { pdfPath }.
+ * One page per entry of pages ({ employeeName }) in a single PDF.
+ * Returns { pdfPath, sha256 }.
  */
-async function generateCertificatesPdf({ fileName, employeeNames, eventTitle, issuedDate, awardDate, venue, template }) {
-  const t = resolveTemplate(template);
+async function generateCertificatesPdf({ fileName, pages, ...rest }) {
   const dir = path.join(__dirname, '..', 'uploads', 'certificates');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const pdfPath = path.join(dir, `${fileName}.pdf`);
+  const buffer = await renderCertificatesPdf({ pages, ...rest });
+  await fs.promises.writeFile(pdfPath, buffer);
 
-  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0, autoFirstPage: false });
-  const stream = fs.createWriteStream(pdfPath);
-  const written = new Promise((resolve, reject) => {
-    stream.on('finish', resolve);
-    stream.on('error', reject);
+  return { pdfPath, sha256: sha256(buffer) };
+}
+
+/** Renders the PDF in memory without saving it (also used for previews). */
+async function renderCertificatesPdf({ pages, eventTitle, issuedDate, awardDate, venue, template }) {
+  const t = resolveTemplate(template);
+
+  // Opens without a password but is locked against editing; the owner
+  // password is thrown away, so a changed certificate must be reissued.
+  const doc = new PDFDocument({
+    size: 'A4', layout: 'landscape', margin: 0, autoFirstPage: false,
+    pdfVersion: '1.7',
+    ownerPassword: crypto.randomBytes(24).toString('hex'),
+    permissions: {
+      printing: 'highResolution', modifying: false, copying: false, annotating: false,
+      fillingForms: false, contentAccessibility: true, documentAssembly: false
+    },
+    info: { Title: `${t.title} ${t.subtitle} - ${eventTitle}`, Author: t.schoolName, Subject: eventTitle }
   });
-  doc.pipe(stream);
+  const chunks = [];
+  doc.on('data', (chunk) => chunks.push(chunk));
+  const finished = new Promise((resolve, reject) => {
+    doc.on('end', resolve);
+    doc.on('error', reject);
+  });
 
-  for (let i = 0; i < employeeNames.length; i++) {
+  for (let i = 0; i < pages.length; i++) {
     doc.addPage();
-    drawCertificatePage(doc, { t, employeeName: employeeNames[i], eventTitle, issuedDate, awardDate, venue });
-    // A whole-staff batch is hundreds of pages: let other requests
-    // (heartbeats, live updates) run, and the file stream drain, in between.
+    drawCertificatePage(doc, { t, employeeName: pages[i].employeeName, eventTitle, issuedDate, awardDate, venue });
+    // Yield every 10 pages so other requests keep running on large batches.
     if (i % 10 === 9) await new Promise((resolve) => setImmediate(resolve));
   }
 
   doc.end();
-  await written;
-
-  return { pdfPath };
+  await finished;
+  return Buffer.concat(chunks);
 }
 
 function drawCertificatePage(doc, { t, employeeName, eventTitle, issuedDate, awardDate, venue }) {
   const W = doc.page.width;
   const H = doc.page.height;
 
-  // Navy background with lighter diagonal panels.
   doc.rect(0, 0, W, H).fill(NAVY);
   doc.polygon([W * 0.55, 0], [W * 0.8, 0], [W * 0.35, H], [W * 0.1, H]).fillOpacity(0.35).fill(NAVY_LIGHT);
   doc.polygon([W * 0.9, 0], [W, 0], [W, H * 0.3], [W * 0.75, H]).fillOpacity(0.25).fill(NAVY_LIGHT);
   doc.fillOpacity(1);
 
-  // Gold ribbons: top-right and bottom-left corners.
   doc.polygon([W * 0.82, 0], [W * 0.875, 0], [W, H * 0.2], [W, H * 0.285])
     .fill(goldGradient(doc, W * 0.82, 0, W, H * 0.28));
   doc.polygon([W * 0.9, 0], [W * 0.925, 0], [W, H * 0.12], [W, H * 0.16])
@@ -153,16 +174,13 @@ function drawCertificatePage(doc, { t, employeeName, eventTitle, issuedDate, awa
   doc.polygon([0, H * 0.84], [0, H * 0.88], [W * 0.075, H], [W * 0.05, H])
     .fill(goldGradient(doc, 0, H * 0.84, W * 0.075, H));
 
-  // White card with a thin gold inner border.
   const cx = 38, cy = 32, cw = W - 76, ch = H - 60;
   doc.rect(cx, cy, cw, ch).fill('#FFFFFF');
   doc.rect(cx + 7, cy + 7, cw - 14, ch - 14).lineWidth(1.2).strokeColor('#D4A94A').stroke();
 
-  // Greek-key corners (top-left and bottom-right).
   drawCornerKey(doc, 14, 12, 1, 1);
   drawCornerKey(doc, W - 14, H - 12, -1, -1);
 
-  // Header: logo + school name.
   const headerName = t.schoolName;
   let headerSize = 19;
   doc.font('Times-Bold');
@@ -177,7 +195,6 @@ function drawCertificatePage(doc, { t, employeeName, eventTitle, issuedDate, awa
   doc.font('Times-Roman').fontSize(10).fillColor(NAVY)
     .text(t.accreditation, textX, 85, { width: nameW, align: 'center', lineBreak: false });
 
-  // Title.
   let titleSize = 66;
   doc.font('Times-Bold');
   while (titleSize > 30 && doc.fontSize(titleSize).widthOfString(t.title) > 680) titleSize -= 1;
@@ -189,7 +206,6 @@ function drawCertificatePage(doc, { t, employeeName, eventTitle, issuedDate, awa
   doc.font('Helvetica').fontSize(15).fillColor(TEXT)
     .text(t.awardText, 0, 252, { width: W, align: 'center', lineBreak: false });
 
-  // Recipient name over the blue line.
   let nameSize = 30;
   doc.font('Times-Bold');
   while (nameSize > 16 && doc.fontSize(nameSize).widthOfString(employeeName) > 460) nameSize -= 1;
@@ -197,7 +213,6 @@ function drawCertificatePage(doc, { t, employeeName, eventTitle, issuedDate, awa
     .text(employeeName, 0, 356 - nameSize, { width: W, align: 'center', lineBreak: false });
   doc.moveTo(W / 2 - 230, 362).lineTo(W / 2 + 230, 362).lineWidth(1.2).strokeColor(TITLE_BLUE).stroke();
 
-  // "for attending the ___. Given this award on ___ at ___."
   drawBlankLine(doc, [
     { text: 'for attending the ' },
     { text: eventTitle, fill: true },
@@ -211,7 +226,6 @@ function drawCertificatePage(doc, { t, employeeName, eventTitle, issuedDate, awa
     { text: '.' }
   ], 400, { maxWidth: 560 });
 
-  // Signatories.
   const sigY = 486;
   const signatories = [
     { name: t.signatory1Name, title: t.signatory1Title.split(/\r?\n/) },
@@ -234,4 +248,7 @@ function drawCertificatePage(doc, { t, employeeName, eventTitle, issuedDate, awa
   });
 }
 
-module.exports = { generateCertificatePdf, generateCertificatesPdf, DEFAULT_TEMPLATE, resolveTemplate };
+module.exports = {
+  generateCertificatePdf, generateCertificatesPdf, renderCertificatesPdf, newVerificationCode, sha256,
+  DEFAULT_TEMPLATE, resolveTemplate
+};

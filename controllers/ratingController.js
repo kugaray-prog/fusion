@@ -4,31 +4,13 @@ const { logAction } = require('../services/auditService');
 const { settleEndedEvents } = require('./attendanceController');
 const { audienceEmployeeIds } = require('../services/eventAudience');
 
-// The employees "expected" at a given event: its chosen attendees (offices
-// and/or individual employees picked on the Geo-Fences page), else everyone
-// in the event's department, or the entire roster when the event isn't
-// department-scoped. On-leave employees aren't expected anywhere — never
-// auto-mark them Absent for an event they were never going to attend.
 const expectedEmployeeIdsForEvent = (event) => audienceEmployeeIds(event);
 
-// Auto-generates/refreshes employee_ratings rows for every COMPLETED event
-// (its schedule has already ended) that starts within [rangeStart, rangeEnd).
-// This is what makes ratings follow the actual event calendar instead of
-// only Mondays: whatever days an event is scheduled on — Monday, Wednesday,
-// Friday, any combination — each occurrence gets its own rating record for
-// every employee expected to attend it, the moment the event ends.
-//
-// Rating is derived straight from the employee's attendance_status for that
-// event: Present or Late = 5, Absent/Excused = 1, and an employee who never
-// checked in at all (no attendance row exists) also = 1 (a genuine no-show
-// is the same as an absence). Runs before every /api/ratings read — the
-// same self-healing-on-read pattern attendanceController.settleEndedEvents
-// already uses — so the table is always caught up with real attendance
-// without needing a cron job. An admin's manual edit (is_manual = 1) is
-// never overwritten by this.
+// Creates/refreshes employee_ratings for every event that ended within
+// [rangeStart, rangeEnd): Present/Late = 5, Absent/Excused/no row = 1.
+// Runs before each ratings read. Manual ratings (is_manual = 1) are kept.
 async function generateRatingsForRange(rangeStart, rangeEnd) {
-  // Settle ended events first (open sessions, unverified flagged attendance)
-  // so ratings are computed from final statuses.
+  // Settle ended events first so ratings use final statuses.
   await settleEndedEvents();
   const [events] = await pool.query(
     `SELECT id, title, department_id, start_datetime, end_datetime
@@ -44,9 +26,7 @@ async function generateRatingsForRange(rangeStart, rangeEnd) {
       expectedEmployeeIdsForEvent(ev),
       audienceEmployeeIds(ev, { activeOnly: false })
     ]);
-    // Drop auto-generated ratings of anyone taken off the event's attendee
-    // list (e.g. after it ended). Manual ratings, and those of employees who
-    // only went on leave later, are kept.
+    // Drop auto ratings of employees removed from the attendee list.
     await pool.query(
       `DELETE FROM employee_ratings WHERE event_id = ? AND is_manual = 0 ${audienceIds.length ? 'AND employee_id NOT IN (?)' : ''}`,
       audienceIds.length ? [ev.id, audienceIds] : [ev.id]
@@ -79,29 +59,9 @@ async function generateRatingsForRange(rangeStart, rangeEnd) {
 }
 
 // GET /api/ratings?month=&year=&employee_id=&department=
-// Returns every event that has already ENDED within the given month/year
-// (any weekday — not just Mondays), plus each employee's auto-generated (or
-// admin-edited) 1-5 rating for every such event they were expected to
-// attend.
-//
-// Total Rating and Rating Points (requested formula):
-//   Total Rating  = SUM of the employee's own ratings across every event
-//                    applicable to them this month (their own department's
-//                    events plus any company-wide ones — not a raw count of
-//                    every event in the month).
-//   Rating Points = Total Rating ÷ number of those rated events.
-//
-//   e.g. present at 3 events, rated 5 each: Total Rating = 5+5+5 = 15,
-//        Rating Points = 15 ÷ 3 = 5.
-//   e.g. present twice (5, 5) and absent once (1): Total Rating =
-//        5+5+1 = 11, Rating Points = 11 ÷ 3 = 3.67.
-//
-// Note: `rating_points` here is unrelated to the employees.rating_points
-// column written by attendanceController.recalculateRatingPoints() (an
-// older, separate "5 attendances = 1 point" counter used elsewhere in the
-// dashboard) — that column is intentionally not selected below, so this
-// endpoint's own `rating_points` field can carry the meaning requested here
-// without colliding with it.
+// Total Rating = sum of the employee's event ratings in the month.
+// Rating Points = Total Rating / number of rated events.
+// Unrelated to the employees.rating_points column.
 async function getRatings(req, res, next) {
   try {
     const now = new Date();
@@ -114,8 +74,6 @@ async function getRatings(req, res, next) {
     const employeeId = req.query.employee_id && req.query.employee_id !== 'all' ? req.query.employee_id : null;
     const department = req.query.department && req.query.department !== 'all' ? req.query.department : null;
 
-    // Self-heal: make sure every completed event in this range has its
-    // ratings generated/refreshed before we read them.
     await generateRatingsForRange(rangeStart, rangeEnd);
 
     const [events] = await pool.query(
@@ -170,10 +128,6 @@ async function getRatings(req, res, next) {
 
     const data = employees.map((emp) => {
       const ratings = byEmployee[emp.id] || {};
-      // Chronological list of this employee's own rated events, for the
-      // admin Ratings panel's per-employee event breakdown ("listahan ng
-      // mga Events na pinasukan ng employee at ang rating niya sa bawat
-      // event") -- each entry pairs the event with that specific rating.
       const ratedEvents = Object.entries(ratings)
         .map(([eventId, r]) => {
           const ev = eventById[eventId];
@@ -221,12 +175,8 @@ async function getRatings(req, res, next) {
   }
 }
 
-// PATCH /api/ratings — { employee_id, event_id, rating, notes }
-// Admin manually sets/edits a rating for a specific employee + event. Only
-// two values are allowed: 1 (Absent) or 5 (Present) — matching the auto-fill
-// scheme, so an admin override can't introduce an off-scale value like 2/3/4.
-// Marking it is_manual = 1 so future auto-generation runs never silently
-// overwrite the admin's call.
+// PATCH /api/ratings { employee_id, event_id, rating (1 or 5), notes }
+// Marked is_manual so auto-generation never overwrites it.
 async function upsertRating(req, res, next) {
   try {
     const { employee_id, event_id, rating, notes } = req.body;
@@ -273,11 +223,8 @@ function performancePeriod(year, period) {
 }
 
 // GET /api/ratings/performance?year=&period=1|2|year&department=
-// Reporting (Rating) module: turns the event ratings above into
-//   IPCR -- each employee's score = average of their event ratings in the
-//           period (the same Rating Points as the monthly view), and
-//   OPCR -- each office's score = average of its employees' IPCR scores,
-// both with the CSC adjectival rating (Outstanding ... Poor).
+// IPCR = average of an employee's event ratings in the period.
+// OPCR = average of an office's IPCR scores.
 async function getPerformance(req, res, next) {
   try {
     const now = new Date();

@@ -1,12 +1,9 @@
 const pool = require('../config/db');
 const { logAction } = require('../services/auditService');
 
-// The Position and Classification dropdowns of the Add/Edit Employee form.
-// The whole list lives in the settings table as a JSON array (the same
-// key-value store the office network allow-list uses), so an admin can add
-// to it and delete any entry, built-in ones included, from the form's
-// "+ Add new" window. Until a list is first changed, the defaults below are
-// used; they match the mobile registration form (RegistrationScreen.js).
+// Position and Classification dropdown lists, stored as JSON arrays in
+// settings. Defaults are used until a list is first changed and match
+// RegistrationScreen.js.
 const KINDS = {
   position: 'employee_positions',
   classification: 'employee_classifications'
@@ -28,8 +25,7 @@ const MAX_LENGTH = { position: 120, classification: 50 }; // employees.position 
 async function readList(kind) {
   const [rows] = await pool.query('SELECT setting_value FROM settings WHERE setting_key = ?', [KINDS[kind]]);
   if (!rows[0]) {
-    // Never changed yet: the defaults, plus anything saved under the first
-    // version's key (custom_positions / custom_classifications).
+    // Not changed yet: defaults plus the legacy custom_* key.
     const [legacy] = await pool.query('SELECT setting_value FROM settings WHERE setting_key = ?', [`custom_${kind}s`]);
     let extra = [];
     try { extra = legacy[0] ? JSON.parse(legacy[0].setting_value) : []; } catch (e) { /* ignore */ }
@@ -99,10 +95,8 @@ async function addOption(req, res, next) {
   }
 }
 
-// DELETE /api/employee-options/:kind  body: { value }
-// Any entry can be removed, built-in ones included. It only leaves the
-// dropdown: employees who already have it keep it (the form shows it under
-// "Others" with the text filled in).
+// DELETE /api/employee-options/:kind { value }
+// Employees who already have the value keep it.
 async function removeOption(req, res, next) {
   try {
     const kind = kindFrom(req, res);

@@ -3,10 +3,8 @@ const router = express.Router();
 const pool = require('../config/db');
 const { requireAuth, requireRole } = require('../middleware/authMiddleware');
 
-// Admin dashboard notification bell (see services/adminNotificationService.js).
 router.use(requireAuth, requireRole('super_admin'));
 
-// GET /api/admin-notifications?limit=30 — newest first, plus the unread count.
 router.get('/', async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
@@ -22,7 +20,6 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// PATCH /api/admin-notifications/read-all
 router.patch('/read-all', async (req, res, next) => {
   try {
     await pool.query('UPDATE admin_notifications SET is_read = 1 WHERE is_read = 0');
@@ -32,7 +29,6 @@ router.patch('/read-all', async (req, res, next) => {
   }
 });
 
-// PATCH /api/admin-notifications/:id/read
 router.patch('/:id/read', async (req, res, next) => {
   try {
     await pool.query('UPDATE admin_notifications SET is_read = 1 WHERE id = ?', [req.params.id]);
@@ -42,7 +38,7 @@ router.patch('/:id/read', async (req, res, next) => {
   }
 });
 
-// DELETE /api/admin-notifications — clears every notification already read.
+// Clears all read notifications.
 router.delete('/', async (req, res, next) => {
   try {
     const [result] = await pool.query('DELETE FROM admin_notifications WHERE is_read = 1');

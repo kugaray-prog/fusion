@@ -2,12 +2,9 @@ const bcrypt = require('bcrypt');
 const pool = require('../config/db');
 const { logAction } = require('../services/auditService');
 
-// Allowed values for the (optional) name suffix dropdown.
 const VALID_SUFFIXES = ['', 'Jr.', 'Sr.', 'II', 'III', 'IV', 'V'];
 
-// Composes the single full_name column (still used everywhere else in the app:
-// reports, certificates, tables, mobile app, etc.) from the split name parts,
-// in "Given [Middle] Surname [Suffix]" order.
+// "Given [Middle] Surname [Suffix]"
 function composeFullName({ given_name, middle_name, surname, suffix }) {
   return [given_name, middle_name, surname, suffix]
     .map(part => (part || '').trim())
@@ -15,14 +12,8 @@ function composeFullName({ given_name, middle_name, surname, suffix }) {
     .join(' ');
 }
 
-// Classification is free text (VARCHAR(50) -- see
-// database/migration_v16_position_gender_classification.sql). The mobile
-// registration form's picker offers a fixed list plus a free-text "Others"
-// override (RegistrationScreen.js CLASSIFICATION_OPTIONS), and the admin
-// Employees form's dropdown (views/dashboard.ejs #inp-classification) lists
-// both that set and the older Regular/COS/Casual values for anyone still
-// using them -- so this is checked for "present and a reasonable length",
-// not against a fixed whitelist, the same way `position` already is.
+// Free text (the mobile form has an "Others" option), so only presence and
+// length are checked.
 function isValidClassification(value) {
   return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 50;
 }
@@ -33,13 +24,11 @@ async function getEmployees(req, res, next) {
     const { search = '', department = 'all', status = 'all', classification = 'all', page = 1, limit = 20 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
-    // Self-registered employees stay hidden until an admin approves their
-    // device (see services/schemaUpgrades.js).
+    // Self-registered employees stay hidden until their device is approved.
     let where = 'WHERE e.is_approved = 1';
     const params = [];
 
-    // Each word must appear somewhere, in any order, so "cruz juan" or
-    // "Dela Cruz, Juan" still finds "Juan Dela Cruz".
+    // Every word must match, in any order ("cruz juan" finds "Juan Dela Cruz").
     const searchWords = String(search).split(/[\s,]+/).filter(Boolean).slice(0, 10);
     for (const word of searchWords) {
       where += ' AND (e.full_name LIKE ? OR e.employee_code LIKE ? OR e.email LIKE ?)';
@@ -239,7 +228,7 @@ async function updateEmployee(req, res, next) {
   }
 }
 
-// PATCH /api/employees/:id/remark — quick update, used by the Remark button in the table
+// PATCH /api/employees/:id/remark
 async function updateRemark(req, res, next) {
   try {
     const { id } = req.params;
@@ -257,11 +246,8 @@ async function updateRemark(req, res, next) {
   }
 }
 
-// PATCH /api/employees/:id/unlock-face — the admin fallback for the mobile
-// DoubleSafe device re-verification checkpoint (employeeAuthController.linkDevice):
-// clears a lockout early instead of making the employee wait out the cooldown,
-// for cases like a genuinely changed appearance or a stubbornly uncooperative
-// camera. Mirrors GCash support's ability to manually clear a DoubleSafe lock.
+// PATCH /api/employees/:id/unlock-face
+// Clears a face re-verification lockout early (see employeeAuthController.linkDevice).
 async function unlockFace(req, res, next) {
   try {
     const { id } = req.params;
@@ -343,9 +329,8 @@ async function exportExcel(req, res, next) {
   }
 }
 
-// Reads an uploaded CSV or Excel buffer into an array of plain row objects,
-// keyed by a normalized (lowercased, trimmed, spaces->underscores) header name
-// so "Employee ID", "employee id", and "employee_code" all resolve the same way.
+// Parses CSV/Excel into row objects keyed by normalized header
+// ("Employee ID" -> employee_id).
 async function parseImportBuffer(file) {
   const ExcelJS = require('exceljs');
   const workbook = new ExcelJS.Workbook();
@@ -386,9 +371,7 @@ async function parseImportBuffer(file) {
   return rows;
 }
 
-// Normalizes one parsed row into the shape createEmployee expects, tolerating
-// a few common header aliases so real-world HR export spreadsheets work
-// without the admin having to rename columns first.
+// Maps common header aliases onto the fields createEmployee expects.
 function normalizeImportRow(row) {
   const get = (...keys) => {
     for (const k of keys) {
@@ -413,10 +396,8 @@ function normalizeImportRow(row) {
   };
 }
 
-// Validates one normalized row against required fields + known departments,
-// and flags duplicates against both the database and earlier rows in this
-// same file (so importing the same file twice, or a file with an internal
-// duplicate, is caught before anything is written).
+// Checks required fields and departments, and duplicates against the database
+// and earlier rows in the same file.
 function validateImportRow(row, { existingCodes, existingEmails, seenCodesInFile, departmentNames }) {
   const errors = [];
   if (!row.employee_code) errors.push('Missing Employee ID');
@@ -444,9 +425,8 @@ function validateImportRow(row, { existingCodes, existingEmails, seenCodesInFile
   return { ...row, errors, isDuplicate, isValid: errors.length === 0 };
 }
 
-// POST /api/employees/import/preview  (multipart, field name "file")
-// Parses + validates the file WITHOUT writing anything to the database, and
-// returns a per-row breakdown the admin can review before confirming.
+// POST /api/employees/import/preview (multipart "file")
+// Validates without writing anything.
 async function importPreview(req, res, next) {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'A CSV or Excel file is required.' });
@@ -478,12 +458,8 @@ async function importPreview(req, res, next) {
   }
 }
 
-// POST /api/employees/import/commit  (JSON body: { rows: [...] })
-// Imports exactly the rows the admin confirmed from the preview step (already
-// validated client-side), re-validating server-side so nothing malformed or
-// newly-duplicated (e.g. two admins importing at once) can slip through and
-// corrupt existing employee data. Rows found invalid at commit time are
-// skipped, not fatal to the rest of the batch.
+// POST /api/employees/import/commit { rows }
+// Re-validates server-side; invalid rows are skipped, not fatal.
 async function importCommit(req, res, next) {
   const conn = await pool.getConnection();
   try {

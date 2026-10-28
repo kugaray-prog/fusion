@@ -1,11 +1,7 @@
 require('dotenv').config();
 
-// Event start/end times are stored as Philippine local time with no zone
-// attached, and `new Date('2026-09-24 13:35:00')` parses them in the process's
-// timezone. Hosts like Render run in UTC, which made ongoing events show as
-// "Soon" (8 hours late) and blocked check-in. Must run before any Date is used.
-// Deliberately ignores any TZ the host sets (containers often set TZ=UTC);
-// override with APP_TIMEZONE if the app is ever used outside the Philippines.
+// Event times are stored as Philippine local time without a zone, so pin the
+// process timezone before any Date is created (hosts often default to UTC).
 process.env.TZ = process.env.APP_TIMEZONE || 'Asia/Manila';
 
 const express = require('express');
@@ -20,10 +16,7 @@ const { accountRateLimitOptions } = require('./middleware/rateLimitKey');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 const config = require('./config/config');
 
-// ------------------------------------------------------------
-// Safety nets
-// ------------------------------------------------------------
-// Prevent unexpected async errors from crashing the whole server.
+// Log stray async errors instead of crashing the server.
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Promise Rejection:', reason);
 });
@@ -32,22 +25,16 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
 });
 
-// ------------------------------------------------------------
-// App configuration
-// ------------------------------------------------------------
 const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 console.log(`Environment: ${NODE_ENV}`);
 
-// ------------------------------------------------------------
-// Security & Core Middleware
-// ------------------------------------------------------------
 app.use(
   helmet({
     contentSecurityPolicy: false,
-    // Google Sign-In's popup must be able to message the login page back.
+    // Lets the Google Sign-In popup message the login page.
     crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' }
   })
 );
@@ -63,9 +50,6 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// ------------------------------------------------------------
-// Session
-// ------------------------------------------------------------
 app.use(
   session({
     secret: process.env.SESSION_SECRET || 'dev_session_secret',
@@ -83,28 +67,14 @@ app.use(
   })
 );
 
-// ------------------------------------------------------------
-// API Rate Limiting
-// ------------------------------------------------------------
-// During local development, rate limiting is disabled so repeated
-// login/testing requests will not be blocked.
-//
-// In production, the API is protected with a rate limiter.
-//
-// IMPORTANT:
-// This is only the GLOBAL /api limiter.
-// If login still says "Too many login attempts", there is
-// another login-specific limiter inside authRoutes.js or
-// employeeAuthRoutes.js.
-// ------------------------------------------------------------
+// Global /api limiter, production only. Login has its own stricter limiter
+// in authRoutes.js / employeeAuthRoutes.js.
 
 const apiLimiter = rateLimit({
-  // Per signed-in account (or real client IP when signed out), not per Render
-  // proxy or shared campus IP -- see middleware/rateLimitKey.js.
+  // Keyed per account or real client IP (see middleware/rateLimitKey.js).
   ...accountRateLimitOptions,
   windowMs: 15 * 60 * 1000,
 
-  // Production limit
   max: 1000,
 
   standardHeaders: true,
@@ -116,7 +86,6 @@ const apiLimiter = rateLimit({
   }
 });
 
-// Apply the global API limiter ONLY in production.
 if (NODE_ENV === 'production') {
   app.use('/api', apiLimiter);
 
@@ -125,17 +94,12 @@ if (NODE_ENV === 'production') {
   console.log('API rate limiting: DISABLED (development mode)');
 }
 
-// ------------------------------------------------------------
-// Static Assets & Uploaded Files
-// ------------------------------------------------------------
-
 app.use(
   '/uploads',
   express.static(path.join(__dirname, 'uploads'))
 );
 
-// Not on disk (the host wiped it on restart)? Serve the copy kept in the
-// database -- see services/uploadStore.js.
+// Fallback: serve the database copy when the file is missing on disk.
 app.use(
   '/uploads',
   require('./services/uploadStore').serveStoredUpload
@@ -150,12 +114,8 @@ app.use(
   express.static(path.join(__dirname, 'public'))
 );
 
-// ------------------------------------------------------------
-// Request Logging
-// ------------------------------------------------------------
-// Prints every API/page request to the terminal once it finishes, e.g.
-//   [10:42:07] GET    /api/nav/employees 200 3ms
-// Registered after the static handlers so asset/photo hits stay quiet.
+// Request log, e.g. "[10:42:07] GET /api/nav/employees 200 3ms".
+// Registered after the static handlers so asset hits stay quiet.
 
 const METHOD_COLORS = {
   GET: '\x1b[32m',
@@ -179,10 +139,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ------------------------------------------------------------
-// View Engine
-// ------------------------------------------------------------
-
 app.set('view engine', 'ejs');
 
 app.set(
@@ -190,125 +146,101 @@ app.set(
   path.join(__dirname, 'views')
 );
 
-// ------------------------------------------------------------
-// API Routes
-// ------------------------------------------------------------
-
-// Tells open admin dashboards (over the /ws WebSocket) when data changes,
-// so they refresh right away -- see services/realtime.js.
+// Notifies open dashboards over /ws when data changes.
 app.use('/api', require('./services/realtime').broadcastMutations);
 
-// Admin authentication
 app.use(
   '/api/auth',
   require('./routes/authRoutes')
 );
 
-// Employee / mobile authentication
 app.use(
   '/api/employee-auth',
   require('./routes/employeeAuthRoutes')
 );
 
-// Employees
 app.use(
   '/api/employees',
   require('./routes/employeeRoutes')
 );
 
-// Departments
 app.use(
   '/api/departments',
   require('./routes/departmentRoutes')
 );
 
-// Admin-added positions / classifications for the employee form
 app.use(
   '/api/employee-options',
   require('./routes/employeeOptionRoutes')
 );
 
-// Attendance
 app.use(
   '/api/attendance',
   require('./routes/attendanceRoutes')
 );
 
-// Geo-fences
 app.use(
   '/api/geofences',
   require('./routes/geofenceRoutes')
 );
 
-// Events
 app.use(
   '/api/events',
   require('./routes/eventRoutes')
 );
 
-// Admin notification bell
 app.use(
   '/api/admin-notifications',
   require('./routes/adminNotificationRoutes')
 );
 
-// OCR
 app.use(
   '/api/ocr',
   require('./routes/ocrRoutes')
 );
 
-// Face verification
 app.use(
   '/api/face',
   require('./routes/faceRoutes')
 );
 
-// Device management
 app.use(
   '/api/devices',
   require('./routes/deviceRoutes')
 );
 
-// Reports
 app.use(
   '/api/reports',
   require('./routes/reportRoutes')
 );
 
-// Certificates
 app.use(
   '/api/certificates',
   require('./routes/certificateRoutes')
 );
 
-// Dashboard
 app.use(
   '/api/dashboard',
   require('./routes/dashboardRoutes')
 );
 
-// Ratings
 app.use(
   '/api/ratings',
   require('./routes/ratingRoutes')
 );
 
-// Admin accounts
 app.use(
   '/api/admin-accounts',
   require('./routes/adminAccountRoutes')
 );
 
-// Office network (public IP) check for the mobile app + its admin settings
 app.use(
   '/api/network',
   require('./routes/networkRoutes')
 );
 
-// ------------------------------------------------------------
-// API Health Check
-// ------------------------------------------------------------
+// Public certificate verification: /verify pages and /api/verify/:code/check.
+app.use(require('./routes/verifyRoutes'));
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -318,22 +250,13 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// ------------------------------------------------------------
-// Sidebar Navigation
-// ------------------------------------------------------------
-// The dashboard switches sections client-side; it calls this on every
-// sidebar click so each navigation shows up in the request log above.
+// Called on each sidebar click so client-side navigation shows in the request log.
 
 app.get('/api/nav/:section', (req, res) => {
   res.json({ success: true, section: req.params.section });
 });
 
-// ------------------------------------------------------------
-// Admin Dashboard
-// ------------------------------------------------------------
-
-// "/" plus one path per sidebar section (see VIEW_PATHS in public/js/app.js),
-// so /dashboard, /employees, ... load the dashboard on that section.
+// One path per sidebar section (VIEW_PATHS in public/js/app.js).
 const DASHBOARD_PATHS = [
   '/',
   '/dashboard',
@@ -354,20 +277,14 @@ app.get(DASHBOARD_PATHS, (req, res) => {
     googleMapsApiKey:
       process.env.GOOGLE_MAPS_API_KEY || '',
 
-    // Pre-fills the admin login field (admin@my.cspc.edu.ph by default)
     defaultAdminEmail: config.email.defaultAdmin,
 
-    // "Sign in with Google" on the admin login (hidden when unset)
+    // Hides "Sign in with Google" when unset.
     googleClientId: process.env.GOOGLE_CLIENT_ID || '',
 
-    // Google's account picker is limited to this domain (the server checks it too)
     emailDomain: config.email.domain
   });
 });
-
-// ------------------------------------------------------------
-// Mobile Page
-// ------------------------------------------------------------
 
 app.get('/mobile', (req, res) => {
   res.render('mobile', {
@@ -376,12 +293,8 @@ app.get('/mobile', (req, res) => {
   });
 });
 
-// Google Sign-In bridge for the mobile app (views/google-bridge.ejs): used
-// where Google rejects the app's own OAuth redirect -- Expo Go, or iOS
-// without an iOS client ID ("Access blocked ... invalid_request"). The page
-// hands the ID token to `return`, so only the app's own URL schemes are
-// accepted there; an https:// return URL could otherwise send a sign-in
-// token to any site.
+// Google Sign-In bridge for Expo Go / iOS, where Google rejects the app's own
+// redirect. The ID token goes to `return`, so only app URL schemes are allowed.
 const GOOGLE_BRIDGE_RETURN_SCHEMES = ['exp:', 'exps:', 'geoattendpro:', 'exp+geoattend-pro-mobile:'];
 
 app.get('/mobile/google-signin', (req, res) => {
@@ -390,7 +303,6 @@ app.get('/mobile/google-signin', (req, res) => {
     const parsed = new URL(String(req.query.return || ''));
     if (GOOGLE_BRIDGE_RETURN_SCHEMES.includes(parsed.protocol)) returnUrl = parsed.href.split('#')[0];
   } catch (e) {
-    // falls through to the 400 below
   }
   if (!returnUrl) return res.status(400).send('Invalid return URL.');
   res.render('google-bridge', {
@@ -399,20 +311,11 @@ app.get('/mobile/google-signin', (req, res) => {
   });
 });
 
-// ------------------------------------------------------------
-// Error Handling
-// ------------------------------------------------------------
-
 app.use(notFound);
 
 app.use(errorHandler);
 
-// ------------------------------------------------------------
-// Start Server
-// ------------------------------------------------------------
-
-// Apply any pending schema upgrades before taking requests; a failure is
-// logged and the server starts anyway.
+// Schema upgrade failures are logged; the server still starts.
 require('./services/schemaUpgrades').run()
   .catch((err) => console.error('Schema upgrade failed:', err.message))
   .finally(() => {
@@ -429,27 +332,19 @@ require('./services/schemaUpgrades').run()
   console.log('==========================================');
   console.log('');
 
-  // Warm the face models in the background -- failures (e.g. model files
-  // missing) are logged here and surface again on the first face request.
+  // Preload face models; a failure surfaces again on the first face request.
   require('./services/faceService').warmUp()
     .then(() => console.log('Face recognition models loaded.'))
     .catch((err) => console.error('Face model warm-up failed:', err.message));
 
-  // Keep uploads/ filled with every captured photo (face verification, OCR,
-  // registrations) from the shared database -- see services/uploadStore.js.
   require('./services/uploadStore').startDiskSync();
 
-  // Times out open attendance sessions whose phone has gone silent
-  // (Location turned off or the app stopped while closed) -- see
-  // attendanceController.closeSilentSessions.
+  // Time out sessions whose phone stopped sending heartbeats.
   const { closeSilentSessions } = require('./controllers/attendanceController');
-  // Every 5 s, so a silent phone is caught soon after the window passes.
   setInterval(closeSilentSessions, 5000);
-  // Clears anomaly alerts once their event has ended (see expireEndedEventAnomalies).
   const { expireEndedEventAnomalies } = require('./controllers/attendanceController');
   setInterval(() => expireEndedEventAnomalies().catch(err => console.error('[anomalies] Expire failed:', err.message)), 30000);
   });
 
-  // Live dashboard updates (WebSocket at /ws) on the same port.
   require('./services/realtime').attach(server);
   });

@@ -1,21 +1,7 @@
-// Live updates over a WebSocket at /ws, so open screens refresh the moment
-// data changes instead of polling: the admin dashboard, the /mobile web app
-// and the Expo mobile app all connect here.
-//
-// The socket only carries "something changed" signals ({ type: 'change',
-// topic }) — never the data itself. Clients re-fetch through the normal
-// authenticated REST API, so no permission logic is duplicated here.
-//
-// Who hears what:
-//   - Admins: every topic. broadcastMutations announces each successful
-//     POST/PUT/PATCH/DELETE under /api (topic = first path segment, e.g.
-//     "attendance"), and notifyAdmins announces "notifications".
-//   - Employees: schedule changes everyone needs (EMPLOYEE_TOPICS), plus
-//     changes to their own records sent by notifyEmployee ("attendance" when
-//     an admin edits/records their attendance, "device" when their phone is
-//     approved/blocked/removed).
-// Broadcasts are coalesced per topic: employees' heartbeats can hit
-// /api/attendance every few seconds, and one refresh per burst is enough.
+// WebSocket at /ws carrying only { type: 'change', topic } signals; clients
+// re-fetch through the REST API. Admins receive every topic, employees only
+// EMPLOYEE_TOPICS plus their own notifyEmployee topics. Broadcasts are
+// coalesced per topic.
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
@@ -25,17 +11,14 @@ const { getBlockedStatus } = require('./deviceAccess');
 const COALESCE_MS = 1500;
 const PING_MS = 30000;
 
-// /api/<segment> requests that don't change any screen's data.
 const IGNORED_SEGMENTS = new Set(['auth', 'employee-auth', 'nav', 'health']);
-// Admin changes every signed-in employee's app should pick up.
 const EMPLOYEE_TOPICS = new Set(['events', 'geofences']);
 
 let wss = null;
 const pending = new Map(); // coalesce key -> timer
 
-// Token from ?token= (browsers can't set headers on a WebSocket), checked the
-// same way as middleware/authMiddleware.js. Employees also send ?device= so a
-// blacklisted/rejected phone is refused here too.
+// Token comes from ?token= (browsers can't set WebSocket headers). Employees
+// also send ?device= so blocked phones are refused.
 async function authenticate(req) {
   const params = new URL(req.url, 'http://localhost').searchParams;
   const token = params.get('token');
@@ -61,9 +44,7 @@ function attach(server) {
 
   server.on('upgrade', async (req, socket, head) => {
     if (!req.url.startsWith('/ws')) return socket.destroy();
-    // Node drops its own error listener from an upgrading socket, so a client
-    // that disconnects while authenticate() awaits the database would emit an
-    // unhandled 'error' and crash the process. ws adds its own in handleUpgrade.
+    // Prevents a crash if the client disconnects while authenticate() is pending.
     const onSocketError = () => socket.destroy();
     socket.on('error', onSocketError);
     try {
@@ -85,8 +66,7 @@ function attach(server) {
     }
   });
 
-  // Drop connections that stopped answering (closed laptop, phone lost
-  // signal) and keep idle ones from being cut by proxies.
+  // Drop dead connections and keep idle ones alive through proxies.
   const pinger = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (!ws.isAlive) return ws.terminate();
@@ -108,10 +88,7 @@ function send(key, topic, shouldReceive) {
   }, COALESCE_MS));
 }
 
-// Sends right away instead of after COALESCE_MS, replacing any queued
-// send for the same key. For changes the admin must see the instant they
-// happen: 'attendance-status' = an employee was timed in or out (unlike the
-// plain 'attendance' topic, which every heartbeat also announces).
+// Sends immediately, replacing any queued send for the same key.
 function sendNow(key, topic, shouldReceive) {
   if (!wss) return;
   clearTimeout(pending.get(key));
@@ -126,27 +103,24 @@ function broadcastNow(topic) {
   sendNow(topic, topic, (client) => client.role === 'admin' || EMPLOYEE_TOPICS.has(topic));
 }
 
-// Admins hear every topic; employees only the shared schedule topics.
 function broadcast(topic) {
   send(topic, topic, (client) => client.role === 'admin' || EMPLOYEE_TOPICS.has(topic));
 }
 
-// Tells one employee's open apps that their own records changed.
 function notifyEmployee(employeeId, topic) {
   if (!employeeId) return;
   const id = Number(employeeId);
   send(`employee:${id}:${topic}`, topic, (client) => client.role === 'employee' && client.id === id);
 }
 
-// Express middleware (mount on /api): announces each successful write.
+// Announces each successful POST/PUT/PATCH/DELETE under /api.
 function broadcastMutations(req, res, next) {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
-  // Read now: routers rewrite req.url/req.path before the response finishes.
+  // Read now: routers rewrite req.path before the response finishes.
   const segment = req.path.split('/')[1];
   if (!segment || IGNORED_SEGMENTS.has(segment)) return next();
-  // A handler that only reads (e.g. a POST preview) sets res.locals.noBroadcast.
-  // Goes out at once, except employees' attendance writes: heartbeats arrive
-  // many per second while an event runs, so those are coalesced.
+  // Handlers can opt out via res.locals.noBroadcast. Employee attendance writes
+  // (heartbeats) are coalesced; everything else goes out immediately.
   res.on('finish', () => {
     if (res.statusCode >= 400 || res.locals.noBroadcast) return;
     if (segment === 'attendance' && !req.admin) broadcast(segment);

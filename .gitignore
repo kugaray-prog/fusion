@@ -1,5 +1,5 @@
 # ============================================================
-# GeoAttend Pro — .gitignore
+# GeoAttend — .gitignore
 # ============================================================
 
 # --- Secrets ---
@@ -14,14 +14,8 @@ node_modules/
 mobile/node_modules/
 
 # --- Face recognition models (large binaries) ---
-# w600k_r50.onnx (~174MB) exceeds GitHub's 100MB per-file push limit and is
-# licensed for non-commercial research use only (see models/README.md) --
-# don't commit it; anyone cloning this repo downloads it once with the
-# command in models/README.md / DEPLOYMENT.md. det_10g.onnx (~17MB) is
-# small enough to commit directly and is deliberately NOT excluded below --
-# leaving both out would mean a fresh clone can't run Face Verification at
-# all until BOTH files are fetched manually, instead of just the one that
-# actually has to be.
+# Optional buffalo_l models: too large for GitHub (see models/README.md).
+models/det_10g.onnx
 models/w600k_r50.onnx
 
 # --- User-uploaded content ---

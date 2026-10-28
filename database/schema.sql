@@ -1,5 +1,5 @@
 -- ============================================================
--- GeoAttend Pro — Database Schema (MySQL 8+)
+-- GeoAttend — Database Schema (MySQL 8+)
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS geoattend
@@ -398,6 +398,12 @@ CREATE TABLE certificates (
   event_title VARCHAR(200) NOT NULL,
   issued_date DATE NOT NULL,
   pdf_path VARCHAR(255) NULL,
+  -- Printed on the certificate (QR + text); looked up by the public /verify page.
+  verification_code VARCHAR(20) NULL UNIQUE,
+  -- SHA-256 of the employee's own PDF, to spot an edited copy.
+  file_hash CHAR(64) NULL,
+  emailed_at DATETIME NULL,
+  email_error VARCHAR(255) NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
   FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL

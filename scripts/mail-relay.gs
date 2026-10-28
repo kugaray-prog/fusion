@@ -1,7 +1,7 @@
 /**
  * GeoAttend email relay -- Google Apps Script.
  *
- * Sends the admin verification-code emails from the Google account that
+ * Sends the admin verification-code and certificate emails from the Google account that
  * deploys this script (services/mailService.js calls it over HTTPS, which
  * works on Render where SMTP is blocked).
  *
@@ -31,7 +31,10 @@ function doPost(e) {
       subject: String(req.subject || '').slice(0, 250),
       body: String(req.text || ''),
       htmlBody: String(req.html || ''),
-      name: String(req.name || 'GeoAttend').slice(0, 80)
+      name: String(req.name || 'GeoAttend').slice(0, 80),
+      attachments: (req.attachments || []).map(function (a) {
+        return Utilities.newBlob(Utilities.base64Decode(a.base64), a.mimeType || 'application/octet-stream', a.name);
+      })
     });
     return reply({ ok: true, remaining: MailApp.getRemainingDailyQuota() });
   } catch (err) {

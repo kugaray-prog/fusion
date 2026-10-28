@@ -29,10 +29,8 @@ async function getAdminAccounts(req, res, next) {
   }
 }
 
-// POST /api/admin-accounts/send-otp — { email, full_name }
-// Emails a 6-digit code to the new admin's address. Creating the account
-// (below) requires that code, so only a real inbox the person controls can
-// become an admin account.
+// POST /api/admin-accounts/send-otp { email, full_name }
+// Emails a 6-digit code required to create the account.
 async function sendAdminOtp(req, res, next) {
   try {
     const email = normalizeEmail(req.body.email);
@@ -93,8 +91,7 @@ async function sendAdminOtp(req, res, next) {
   }
 }
 
-// Checks (and on success consumes) the emailed code for `email`. Returns an
-// error message, or null when the code is right.
+// Verifies and consumes the code. Returns an error message, or null.
 async function verifyAdminOtp(email, otp) {
   const [rows] = await pool.query(
     'SELECT id, code_hash, attempts, expires_at < NOW() AS expired FROM admin_email_otps WHERE email = ? ORDER BY id DESC LIMIT 1',
@@ -113,11 +110,9 @@ async function verifyAdminOtp(email, otp) {
   return null;
 }
 
-// POST /api/admin-accounts — { full_name, email, role, otp }
-// role: 'super_admin' (full access) or 'admin' (Verification module only — OCR & Face)
-// otp: the code emailed by sendAdminOtp. No password is set here: the email
-// is verified by the code, and the new admin signs in with their
-// institutional Google account (authController.googleLogin).
+// POST /api/admin-accounts { full_name, email, role, otp }
+// role: 'super_admin' or 'admin' (Verification only). No password: the admin
+// signs in with their institutional Google account.
 async function createAdminAccount(req, res, next) {
   try {
     const { full_name, role, otp } = req.body;
@@ -138,8 +133,7 @@ async function createAdminAccount(req, res, next) {
     const otpError = await verifyAdminOtp(email, otp);
     if (otpError) return res.status(400).json({ success: false, code: 'OTP_INVALID', message: otpError });
 
-    // password_hash is NOT NULL; a random secret nobody knows keeps password
-    // sign-in closed for this account.
+    // Random unknown password keeps password sign-in closed (column is NOT NULL).
     const hash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
     const [result] = await pool.query(
       `INSERT INTO admin_accounts (full_name, email, password_hash, role) VALUES (?, ?, ?, ?)`,
@@ -153,7 +147,7 @@ async function createAdminAccount(req, res, next) {
   }
 }
 
-// PATCH /api/admin-accounts/:id — { full_name, role, is_active, password }
+// PATCH /api/admin-accounts/:id { full_name, role, is_active, password }
 async function updateAdminAccount(req, res, next) {
   try {
     const { id } = req.params;

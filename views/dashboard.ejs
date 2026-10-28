@@ -2303,9 +2303,18 @@
                                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">Venue</label>
                                     <input type="text" id="cert-venue" class="geo-input" placeholder="e.g. CSPC Gymnasium, Nabua, Camarines Sur">
                                 </div>
-                                <button class="btn-primary" onclick="G_App.settings.generateCertificate()">
-                                    <i data-lucide="award"></i> Generate & Print Certificate
-                                </button>
+                                <!-- Emails each employee their own locked PDF. -->
+                                <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+                                    <input type="checkbox" id="cert-send-email" checked> Email each employee their certificate
+                                </label>
+                                <div style="display: flex; gap: 10px;">
+                                    <button type="button" class="btn-primary" style="flex: 1; background: var(--border); color: var(--text-main);" onclick="G_App.settings.previewCertificate()">
+                                        <i data-lucide="eye"></i> Preview
+                                    </button>
+                                    <button class="btn-primary" style="flex: 2;" onclick="G_App.settings.generateCertificate()">
+                                        <i data-lucide="award"></i> Generate & Print Certificate
+                                    </button>
+                                </div>
                                 <button type="button" class="dash-link" style="margin: 0;" onclick="G_App.settings.toggleCertTemplate()"><i data-lucide="pencil"></i> Edit Certificate Text</button>
                                 <!-- Wording printed on every certificate; blank = default. -->
                                 <div id="cert-template-panel" class="hidden" style="display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--border, #e5e7eb); padding-top: 15px;">

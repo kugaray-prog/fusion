@@ -5,8 +5,7 @@ const { clientRateLimitOptions } = require('../middleware/rateLimitKey');
 const authController = require('../controllers/authController');
 const { requireAuth } = require('../middleware/authMiddleware');
 
-// Only failed attempts count, so admins sharing the campus IP don't use up
-// each other's allowance by logging in successfully.
+// Only failed attempts count, so admins on the same IP don't block each other.
 const loginLimiter = rateLimit({
   ...clientRateLimitOptions,
   windowMs: 15 * 60 * 1000,

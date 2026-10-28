@@ -58,11 +58,8 @@ async function startSession(req, res, admin, { remember = false, method }) {
 
 let googleClient = null;
 
-// POST /api/auth/google  { credential }
-// Single Sign-On with the admin's Google account (Google Identity Services
-// on the login screen). Google proves the email; it must belong to an
-// active admin account -- SSO never creates accounts, a Super Admin does
-// (Settings > Admin Accounts).
+// POST /api/auth/google { credential }
+// Google SSO for existing active admins only; it never creates accounts.
 async function googleLogin(req, res, next) {
   try {
     if (!process.env.GOOGLE_CLIENT_ID) {
@@ -87,7 +84,6 @@ async function googleLogin(req, res, next) {
     }
 
     const email = String(payload.email).toLowerCase();
-    // Same rule as the mobile app: only the institutional Google account.
     if (!config.email.isInstitutional(email)) {
       return res.status(403).json({ success: false, message: `Use your institutional Google account (${config.email.domainLabel}). ${email} is not allowed.` });
     }
@@ -128,7 +124,7 @@ async function forgotPassword(req, res, next) {
     const { email } = req.body;
     const [rows] = await pool.query('SELECT id FROM admin_accounts WHERE email = ?', [email]);
 
-    // Always respond the same way to avoid leaking which emails exist
+    // Same response either way, so existing emails aren't revealed.
     if (!rows[0]) {
       return res.json({ success: true, message: 'If that email exists, a reset link has been generated.' });
     }
@@ -141,7 +137,7 @@ async function forgotPassword(req, res, next) {
       [rows[0].id, resetToken, expiresAt]
     );
 
-    // In production this token would be emailed. Returned here for local/dev testing.
+    // TODO: email the token instead of returning it.
     res.json({ success: true, message: 'Reset token generated.', resetToken });
   } catch (err) {
     next(err);

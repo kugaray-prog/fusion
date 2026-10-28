@@ -2,37 +2,14 @@ const fs = require('fs');
 const sharp = require('sharp');
 const config = require('../config/config');
 
-// ============================================================================
-// InsightFace ("buffalo_l") face recognition pipeline
-//
-// Unlike a plain "resize the whole photo and embed it" approach, InsightFace
-// is a two-stage pipeline:
-//   1. DETECT — SCRFD finds the face's bounding box + 5 landmarks (eyes,
-//      nose, mouth corners) in the source photo.
-//   2. ALIGN + RECOGNIZE — those 5 landmarks are used to warp the face into
-//      a canonical, upright 112x112 crop (the same alignment every
-//      ArcFace-family model is trained on), which is then run through the
-//      recognizer to produce the embedding.
-// This is why InsightFace is meaningfully more accurate than embedding a
-// naively-cropped photo: a tilted head, an off-center face, or a phone held
-// at an angle all get corrected before recognition ever sees the image.
-//
-// Model files (see config/config.js for why these defaults / how to switch):
-//   - Detector:   det_500m.onnx   (SCRFD-500M, "buffalo_s", bundled)
-//   - Recognizer: w600k_mbf.onnx  (MobileFaceNet ArcFace, 512-d embeddings, "buffalo_s", bundled)
-// ============================================================================
+// InsightFace pipeline: SCRFD detects the face and 5 landmarks, the face is
+// aligned to the 112x112 ArcFace template, then the recognizer embeds it.
+// Model paths and switching: config/config.js, models/README.md.
 
-// Lazily loaded so the server can boot even before model files are in place
-// (onnxruntime-node is a fairly heavy native dependency) and so we only pay
-// the session-creation cost once per process.
+// Loaded lazily so the server boots even without the model files.
 let ort = null;
 
-// ONNX Runtime's CPU memory arena keeps a large pool of scratch buffers
-// around after each run; with both models loaded it pushed the process to
-// ~430MB, over the 512MB limit of Render's free instance once the rest of
-// the app is counted. Turning it off (and memory-pattern planning, which
-// pre-reserves buffers the same way) brings both models down to ~260MB,
-// with no measurable slowdown for single-image requests.
+// Disabling the CPU memory arena roughly halves memory use with no measurable slowdown.
 const SESSION_OPTIONS = { enableCpuMemArena: false, enableMemPattern: false };
 let detectorSessionPromise = null;
 let recognizerSessionPromise = null;
@@ -71,21 +48,15 @@ function getRecognizerSession() {
   return recognizerSessionPromise;
 }
 
-// -- SCRFD detection --------------------------------------------------------
-
 const FEAT_STRIDE_FPN = [8, 16, 32];
 const NUM_ANCHORS = 2;
 
-// Longest side a photo is decoded at. Faces are aligned down to 112x112
-// anyway, so decoding a 12MP phone photo at full size only costs time.
+// Faces end up 112x112, so large photos are downscaled on decode.
 const MAX_DECODE_SIDE = 1600;
 
 /**
- * Decodes a photo ONCE into an upright, interleaved RGB raw buffer that both
- * detection and alignment then work from. `.rotate()` applies the EXIF
- * orientation: phone cameras (expo-camera with skipProcessing) often save
- * the pixels sideways and only record the rotation in EXIF, and SCRFD
- * misses or mislocates faces that are lying on their side.
+ * Decodes once to an upright RGB buffer. rotate() applies EXIF orientation,
+ * which phone cameras often use instead of rotating the pixels.
  */
 async function loadImage(imagePath) {
   const { data, info } = await sharp(imagePath)
@@ -98,10 +69,8 @@ async function loadImage(imagePath) {
 }
 
 /**
- * Resizes the decoded photo to fit within detectorInputSize x detectorInputSize
- * (aspect-ratio preserved, placed at the top-left, zero-padded elsewhere) and
- * returns a normalized NCHW tensor -- this exact letterbox scheme (top-left,
- * not centered) mirrors InsightFace's own SCRFD preprocessing.
+ * Letterboxes to the detector input size at the top-left (as InsightFace does)
+ * and returns a normalized NCHW tensor.
  */
 async function preprocessDetectorInput(image) {
   const inputSize = config.face.detectorInputSize;
@@ -140,20 +109,14 @@ async function preprocessDetectorInput(image) {
   return { tensorData: chw, inputSize, detScale, origWidth, origHeight };
 }
 
-/**
- * Runs the SCRFD detector and decodes its raw per-stride outputs into
- * image-space boxes + 5-point landmark sets + scores (still in the padded
- * detector-input coordinate space -- callers rescale by detScale).
- */
+/** Runs SCRFD and decodes boxes, landmarks and scores in detector-input space. */
 async function runDetector(tensorData, inputSize) {
   const session = await getDetectorSession();
   const inputName = session.inputNames[0];
   const tensor = new ort.Tensor('float32', tensorData, [1, 3, inputSize, inputSize]);
   const results = await session.run({ [inputName]: tensor });
 
-  // SCRFD's ONNX export groups outputs by TYPE across strides, not
-  // interleaved per stride: [score_8, score_16, score_32, bbox_8, bbox_16,
-  // bbox_32, (kps_8, kps_16, kps_32)] -- see insightface's scrfd.py forward().
+  // Outputs are grouped by type across strides: [scores x3, boxes x3, kps x3].
   const names = session.outputNames;
   const fmc = FEAT_STRIDE_FPN.length; // 3
   const useKps = names.length >= fmc * 3;
@@ -223,7 +186,6 @@ function iou(a, b) {
   return union <= 0 ? 0 : inter / union;
 }
 
-/** Standard greedy IoU-based NMS, highest score first. */
 function nms(boxes, scores, kpss, iouThreshold) {
   const order = scores.map((_, i) => i).sort((i, j) => scores[j] - scores[i]);
   const suppressed = new Array(boxes.length).fill(false);
@@ -239,12 +201,7 @@ function nms(boxes, scores, kpss, iouThreshold) {
   return kept;
 }
 
-/**
- * Detects the most prominent face in a photo (a file path, or an image
- * already decoded by loadImage). Returns { score, box, kps } (kps = 5 [x,y]
- * landmark points, in the upright decoded image's coordinates) or null if no
- * face cleared the confidence threshold.
- */
+/** Returns the largest confident face as { score, box, kps }, or null. */
 async function detectFace(imageOrPath) {
   const image = typeof imageOrPath === 'string' ? await loadImage(imageOrPath) : imageOrPath;
   const { tensorData, inputSize, detScale } = await preprocessDetectorInput(image);
@@ -254,9 +211,7 @@ async function detectFace(imageOrPath) {
   const detections = nms(boxes, scores, kpss, config.face.detectorNmsThreshold);
   if (detections.length === 0) return null;
 
-  // If more than one face is in frame (e.g. someone walking by in the
-  // background), prefer the largest -- almost certainly the one the camera
-  // was actually pointed at.
+  // Prefer the largest face (the one the camera was pointed at).
   detections.sort((a, b) => {
     const areaA = (a.box[2] - a.box[0]) * (a.box[3] - a.box[1]);
     const areaB = (b.box[2] - b.box[0]) * (b.box[3] - b.box[1]);
@@ -271,12 +226,7 @@ async function detectFace(imageOrPath) {
   };
 }
 
-// -- Alignment (5-point similarity transform -> canonical 112x112 crop) -----
-
-// InsightFace's standard 112x112 alignment template: [left eye, right eye,
-// nose tip, left mouth corner, right mouth corner]. Every ArcFace-family
-// recognizer (including w600k_r50) is trained on faces aligned to these
-// exact reference coordinates.
+// InsightFace 112x112 template: eyes, nose tip, mouth corners.
 const ARCFACE_DST_112 = [
   [38.2946, 51.6963],
   [73.5318, 51.5014],
@@ -286,12 +236,8 @@ const ARCFACE_DST_112 = [
 ];
 
 /**
- * Fits dst = s*R(theta)*src + t (uniform scale + rotation + translation, no
- * reflection) to N point correspondences by ordinary least squares. The
- * parametrization dst_x = a*src_x - b*src_y + tx; dst_y = b*src_x + a*src_y + ty
- * is LINEAR in (a, b, tx, ty), so a plain 4x4 normal-equations solve gives
- * the exact least-squares similarity transform without needing a general
- * SVD/Procrustes implementation.
+ * Least-squares similarity transform (scale + rotation + translation). Linear
+ * in (a, b, tx, ty), so a 4x4 normal-equations solve is enough.
  */
 function solveSimilarityTransform(srcPts, dstPts) {
   const ATA = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
@@ -314,7 +260,6 @@ function solveSimilarityTransform(srcPts, dstPts) {
   return { a, b, tx, ty };
 }
 
-/** Solves a small NxN linear system via Gaussian elimination with partial pivoting. */
 function solveLinearSystem(A, b) {
   const n = b.length;
   const M = A.map((row, i) => [...row, b[i]]);
@@ -339,13 +284,7 @@ function solveLinearSystem(A, b) {
   return M.map((row) => row[n]);
 }
 
-/**
- * Warps `src` (an interleaved RGB raw buffer, srcW x srcH x 3) into an
- * outW x outH aligned crop using the INVERSE of the fitted similarity
- * transform -- for every output pixel we look up where it came from in the
- * source and bilinearly sample, which (unlike forward/scatter mapping)
- * guarantees every output pixel gets filled.
- */
+/** Inverse-maps each output pixel into `src` with bilinear sampling. */
 function warpAffine(src, srcW, srcH, transform, outW, outH) {
   const { a, b, tx, ty } = transform;
   const det = a * a + b * b || 1e-9;
@@ -382,22 +321,18 @@ function warpAffine(src, srcW, srcH, transform, outW, outH) {
   return out;
 }
 
-/** Aligns the detected face to a canonical 112x112 RGB raw buffer. */
 function alignFace(image, kps) {
   const transform = solveSimilarityTransform(kps, ARCFACE_DST_112);
   const inputSize = config.face.inputSize;
   return warpAffine(image.data, image.width, image.height, transform, inputSize, inputSize);
 }
 
-// -- Recognition (embedding) -------------------------------------------------
-
-/** Runs the ArcFace recognizer on an already-aligned 112x112 RGB raw buffer. */
 async function embedAlignedFace(rawRgbBuffer) {
   const session = await getRecognizerSession();
   const inputSize = config.face.inputSize;
   const pixelCount = inputSize * inputSize;
   const chw = new Float32Array(pixelCount * 3);
-  // `rawRgbBuffer` is interleaved RGBRGBRGB...; the model wants planar RRR...GGG...BBB...
+  // Interleaved RGB to planar (NCHW).
   for (let i = 0; i < pixelCount; i++) {
     chw[i] = (rawRgbBuffer[i * 3] - 127.5) / 128.0;
     chw[pixelCount + i] = (rawRgbBuffer[i * 3 + 1] - 127.5) / 128.0;
@@ -410,19 +345,12 @@ async function embedAlignedFace(rawRgbBuffer) {
   const outputName = session.outputNames[0];
   const raw = Array.from(results[outputName].data);
 
-  // L2-normalize so cosine similarity reduces to a plain dot product.
+  // L2-normalize so cosine similarity is a dot product.
   const norm = Math.sqrt(raw.reduce((sum, v) => sum + v * v, 0)) || 1;
   return raw.map((v) => v / norm);
 }
 
-/**
- * Full InsightFace pipeline: detect the face, align it to a canonical
- * 112x112 crop from its 5 landmarks, and return its L2-normalized embedding
- * (a plain array of numbers, ready to be JSON-stringified into
- * employee_faces.embedding). Throws a clear, user-facing message if no face
- * could be found, rather than silently embedding an uncropped/misaligned
- * photo the way a detection-less approach would.
- */
+/** Detect, align and embed. Throws a user-facing error when no face is found. */
 async function getEmbedding(imagePath) {
   const image = await loadImage(imagePath);
   const face = await detectFace(image);
@@ -439,15 +367,10 @@ function cosineSimilarity(a, b) {
   let dot = 0;
   const len = Math.min(a.length, b.length);
   for (let i = 0; i < len; i++) dot += a[i] * b[i];
-  // Both vectors are already L2-normalized by getEmbedding(), so the dot
-  // product IS the cosine similarity (range -1..1).
   return dot;
 }
 
-/**
- * Compares one embedding against a list of { employeeId, embedding } candidates
- * and returns the best match (or null if nothing clears the configured threshold).
- */
+/** Best candidate at or above the match threshold, or null. */
 function findBestMatch(targetEmbedding, candidates) {
   let best = null;
   for (const candidate of candidates) {
@@ -460,9 +383,7 @@ function findBestMatch(targetEmbedding, candidates) {
   return best;
 }
 
-// Loads both models ahead of the first request (called once the server is
-// listening), so the first face registration or check-in after a deploy or
-// cold start doesn't also pay the model-loading cost on a slow instance.
+// Loads both models early so the first face request after a restart is fast.
 function warmUp() {
   return Promise.all([getDetectorSession(), getRecognizerSession()]);
 }
@@ -476,7 +397,6 @@ module.exports = {
   MODEL_PATH: config.face.modelPath,
   DETECTOR_MODEL_PATH: config.face.detectorModelPath,
   INPUT_SIZE: config.face.inputSize,
-  // Exported purely so test/faceService.geometry.test.js can exercise the
-  // pure-math pieces (no ONNX model required) without duplicating them.
+  // For test/faceService.geometry.test.js.
   _internal: { solveSimilarityTransform, warpAffine, nms, iou },
 };

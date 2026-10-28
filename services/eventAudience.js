@@ -1,17 +1,10 @@
 const pool = require('../config/db');
 
-// Who an event expects to attend. The admin can narrow an event (Geo-Fences
-// form, "Required Attendees") to chosen offices and/or individual employees,
-// stored in event_attendee_departments / event_attendee_employees. An event
-// with no rows in either table keeps the old rule: everyone in the event's
-// department, or every employee when it isn't department-specific.
-//
-// Only expected employees are counted Absent when they don't show up
-// (attendance placeholders, ratings, reports), see the event in the mobile
-// app, can time in to it, and get its new-event push.
+// Who an event expects: chosen offices and/or employees, or (when none are
+// chosen) its department, or everyone. Only expected employees can time in,
+// get the push, and are counted Absent.
 
-// Map of eventId -> { departmentIds: Set, employeeIds: Set } for the events
-// that have a chosen audience. Events missing from the map are open to all.
+// eventId -> { departmentIds, employeeIds } for events with a chosen audience.
 async function loadAudiences(eventIds, conn = pool) {
   const audiences = new Map();
   if (!eventIds.length) return audiences;
@@ -28,21 +21,16 @@ async function loadAudiences(eventIds, conn = pool) {
   return audiences;
 }
 
-// Whether `emp` ({ id, department_id }) is in the event's audience, ignoring
-// leave status. `audience` is the event's entry from loadAudiences, if any.
 function inAudience(emp, event, audience) {
   if (audience) return audience.departmentIds.has(emp.department_id) || audience.employeeIds.has(emp.id);
   return !event.department_id || emp.department_id === event.department_id;
 }
 
-// Whether `emp` ({ id, department_id, remark }) is expected at the event:
-// in its audience and not on leave. Callers pass approved employees only.
+// In the audience and not on leave.
 function isExpected(emp, event, audience) {
   return emp.remark === 'Active' && inAudience(emp, event, audience);
 }
 
-// Approved employee ids in the event's audience. `activeOnly` (default)
-// leaves out employees on leave, i.e. returns who is expected to attend.
 async function audienceEmployeeIds(event, { activeOnly = true } = {}) {
   const [audiences, [employees]] = await Promise.all([
     loadAudiences([event.id]),
@@ -53,11 +41,9 @@ async function audienceEmployeeIds(event, { activeOnly = true } = {}) {
   return employees.filter((emp) => check(emp, event, audience)).map((emp) => emp.id);
 }
 
-// Reads `attendees` from a create/update request body:
-//   { mode: 'all' }                                             -> everyone
-//   { mode: 'selected', department_ids: [..], employee_ids: [..] } -> only those
-// Returns { departmentIds, employeeIds } (both empty = everyone), null when
-// the body has no `attendees` (leave the event as it is), or { error }.
+// Parses body.attendees: { mode: 'all' } or { mode: 'selected', department_ids,
+// employee_ids }. Returns { departmentIds, employeeIds }, null when absent
+// (leave unchanged), or { error }.
 function parseAttendees(body) {
   const attendees = body && body.attendees;
   if (attendees === undefined || attendees === null) return null;
@@ -71,8 +57,6 @@ function parseAttendees(body) {
   return { departmentIds, employeeIds };
 }
 
-// Replaces the chosen audience of every event in `eventIds` (one per
-// occurrence of a recurring event). Ids that no longer exist are skipped.
 async function saveAudience(conn, eventIds, { departmentIds, employeeIds }) {
   if (!eventIds.length) return;
   await conn.query('DELETE FROM event_attendee_departments WHERE event_id IN (?)', [eventIds]);

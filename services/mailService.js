@@ -1,28 +1,12 @@
 const dns = require('dns').promises;
 const nodemailer = require('nodemailer');
 
-// Outgoing email (admin verification codes). Three senders:
-//
-//   Gmail SMTP (nodemailer) -- needs 2-Step Verification + an App Password.
-//   Render's free instances block outbound SMTP, so on Render keep one of
-//   the HTTP senders below configured as the fallback.
-//     SMTP_USER         the Gmail address that sends (e.g. you@gmail.com)
-//     SMTP_PASS         the 16-character App Password (spaces are ignored)
-//     SMTP_HOST         optional, default smtp.gmail.com
-//     SMTP_PORT         optional, default 465 (SSL); 587 uses STARTTLS
-//
-//   Brevo (https://www.brevo.com, free 300/day)
-//     BREVO_API_KEY     API key (Brevo > SMTP & API > API Keys)
-//     MAIL_FROM_EMAIL   sender address, verified in Brevo (Senders)
-//   Google Apps Script relay (scripts/mail-relay.gs, sends from the Google
-//   account that deployed it -- no activation needed)
-//     MAIL_RELAY_URL    the script's Web App URL (.../exec)
-//     MAIL_RELAY_SECRET the same secret set as RELAY_SECRET in the script
-//   MAIL_FROM_NAME      optional display name for all (default "GeoAttend CSPC")
-//
-// Senders are tried in order SMTP -> Brevo -> relay; the first that works
-// wins. With none set, development servers print the email to the terminal
-// instead; production refuses (sendMail throws).
+// Outgoing email (admin verification codes, certificates). Senders are tried in order:
+// 1. Gmail SMTP: SMTP_USER, SMTP_PASS (App Password), SMTP_HOST, SMTP_PORT
+// 2. Brevo: BREVO_API_KEY, MAIL_FROM_EMAIL
+// 3. Apps Script relay (scripts/mail-relay.gs): MAIL_RELAY_URL, MAIL_RELAY_SECRET
+// MAIL_FROM_NAME sets the display name. With none configured, development
+// prints the email to the terminal and production throws.
 
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
 const FROM_NAME = () => process.env.MAIL_FROM_NAME || 'GeoAttend CSPC';
@@ -35,17 +19,20 @@ function isConfigured() {
   return hasSmtp() || hasBrevo() || hasRelay();
 }
 
-async function sendMail({ to, subject, html, text }) {
+// attachments: [{ filename, content: Buffer, contentType }].
+async function sendMail({ to, subject, html, text, attachments = [] }) {
   if (!isConfigured()) {
     if (process.env.NODE_ENV === 'production') {
       throw Object.assign(new Error('Email sending is not configured on this server (set SMTP_USER/SMTP_PASS, BREVO_API_KEY/MAIL_FROM_EMAIL or MAIL_RELAY_URL/MAIL_RELAY_SECRET).'), { status: 503 });
     }
     console.log('\n[mail] No email sender configured -- email NOT sent, printed here instead:');
-    console.log(`[mail] To: ${to}\n[mail] Subject: ${subject}\n[mail] ${text || html}\n`);
+    console.log(`[mail] To: ${to}\n[mail] Subject: ${subject}\n[mail] ${text || html}`);
+    if (attachments.length) console.log(`[mail] Attachments: ${attachments.map((a) => a.filename).join(', ')}`);
+    console.log('');
     return { sent: false, printed: true };
   }
 
-  const message = { to, subject, html, text };
+  const message = { to, subject, html, text, attachments };
   const hasFallback = hasBrevo() || hasRelay();
   const senders = [
     hasSmtp() && !(hasFallback && Date.now() < smtpUnreachableUntil) && ['Gmail SMTP', sendViaSmtp],
@@ -65,12 +52,9 @@ async function sendMail({ to, subject, html, text }) {
   throw lastError;
 }
 
-// Errors meaning the SMTP server couldn't be reached at all (not a rejection).
 const SMTP_CONNECTION_ERRORS = ['ETIMEDOUT', 'ECONNECTION', 'ESOCKET', 'ECONNREFUSED'];
-// On a host that blocks outbound SMTP (Render's free tier), every attempt
-// waits out connectionTimeout before failing. After one such failure, SMTP is
-// skipped for this long when another sender is configured, so each email
-// doesn't pay that ~10 s first.
+// After an SMTP connection failure, skip SMTP for this long when another
+// sender is configured (hosts that block SMTP time out on every attempt).
 const SMTP_RETRY_AFTER_MS = 10 * 60 * 1000;
 let smtpUnreachableUntil = 0;
 
@@ -91,20 +75,21 @@ function getSmtpTransport() {
   return smtpTransport;
 }
 
-// Gmail rewrites the From address to SMTP_USER anyway, so it's always used.
-async function sendViaSmtp({ to, subject, html, text }) {
+// Gmail rewrites From to SMTP_USER anyway.
+async function sendViaSmtp({ to, subject, html, text, attachments }) {
   try {
     await getSmtpTransport().sendMail({
       from: { name: FROM_NAME(), address: process.env.SMTP_USER },
       to,
       subject,
       html,
-      text
+      text,
+      attachments
     });
   } catch (err) {
     console.error(`[mail] SMTP rejected the email to ${to}: ${err.code || ''} ${err.response || err.message}`);
     if (SMTP_CONNECTION_ERRORS.includes(err.code)) smtpUnreachableUntil = Date.now() + SMTP_RETRY_AFTER_MS;
-    throw Object.assign(new Error(`The verification email could not be sent. ${explainSmtpError(err)}`), { status: 502 });
+    throw Object.assign(new Error(`The email could not be sent. ${explainSmtpError(err)}`), { status: 502 });
   }
   return { sent: true, via: 'smtp' };
 }
@@ -119,7 +104,7 @@ function explainSmtpError(err) {
   return `SMTP said: ${err.response || err.message}`;
 }
 
-async function sendViaBrevo({ to, subject, html, text }) {
+async function sendViaBrevo({ to, subject, html, text, attachments }) {
   const res = await fetch(BREVO_URL, {
     method: 'POST',
     headers: {
@@ -132,27 +117,33 @@ async function sendViaBrevo({ to, subject, html, text }) {
       to: [{ email: to }],
       subject,
       htmlContent: html,
-      textContent: text
+      textContent: text,
+      ...(attachments.length && {
+        attachment: attachments.map((a) => ({ name: a.filename, content: a.content.toString('base64') }))
+      })
     })
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     console.error(`[mail] Brevo rejected the email to ${to}: ${res.status} ${body}`);
-    throw Object.assign(new Error(`The verification email could not be sent. ${explainBrevoError(res.status, body)}`), { status: 502 });
+    throw Object.assign(new Error(`The email could not be sent. ${explainBrevoError(res.status, body)}`), { status: 502 });
   }
   return { sent: true, via: 'brevo' };
 }
 
-// POSTs to the Apps Script Web App, which sends with MailApp. Apps Script
-// answers a POST with a redirect to the result; fetch follows it.
-async function sendViaRelay({ to, subject, html, text }) {
-  const fail = (reason) => Object.assign(new Error(`The verification email could not be sent. ${reason}`), { status: 502 });
+async function sendViaRelay({ to, subject, html, text, attachments }) {
+  const fail = (reason) => Object.assign(new Error(`The email could not be sent. ${reason}`), { status: 502 });
   let res;
   try {
     res = await fetch(process.env.MAIL_RELAY_URL, {
       method: 'POST',
       headers: { 'content-type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ secret: process.env.MAIL_RELAY_SECRET, to, subject, html, text, name: FROM_NAME() }),
+      body: JSON.stringify({
+        secret: process.env.MAIL_RELAY_SECRET, to, subject, html, text, name: FROM_NAME(),
+        attachments: attachments.map((a) => ({
+          name: a.filename, mimeType: a.contentType || 'application/octet-stream', base64: a.content.toString('base64')
+        }))
+      }),
       redirect: 'follow'
     });
   } catch (err) {
@@ -171,7 +162,6 @@ async function sendViaRelay({ to, subject, html, text }) {
   return { sent: true, via: 'relay' };
 }
 
-// Turns Brevo's error response into a fix the admin can act on.
 function explainBrevoError(status, body) {
   let message = '';
   try { message = JSON.parse(body).message || ''; } catch (e) { message = body; }
@@ -192,10 +182,8 @@ function explainBrevoError(status, body) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// A syntactically valid address whose domain can actually receive mail (has
-// MX records, or at least an A record as the SMTP fallback). Catches typos
-// like "gmial.com" before an OTP is wasted on them. DNS failures other than
-// "no such domain" don't block -- the OTP itself proves the inbox exists.
+// Checks syntax and that the domain has MX/A records, catching typos like
+// "gmial.com". Other DNS failures don't block.
 async function checkDeliverable(email) {
   if (!EMAIL_RE.test(email || '')) return { ok: false, reason: 'Enter a valid email address.' };
   const domain = email.split('@')[1].toLowerCase();

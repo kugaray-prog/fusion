@@ -2,7 +2,7 @@
 'use strict';
 
 /**
- * Generates the GeoAttend Pro data flow diagram set into docs/dfd/.
+ * Generates the GeoAttend data flow diagram set into docs/dfd/.
  *
  *   GeoAttend-DFD-Level0-Context             whole system as a single process
  *   GeoAttend-DFD-Level1                     processes 1.0 - 8.0 vs data stores D1 - D14
@@ -333,7 +333,7 @@ function level0() {
   g.push(flow([[ips.x2, 1064], [740, 1064], [740, 800], [962, 800], [962, sys.y2]],
     'server public IP', { at: [580, 1040] }));
 
-  g.push(processBox('0', 'GeoAttend Pro\nGeofenced Attendance\nMonitoring System', sys));
+  g.push(processBox('0', 'GeoAttend\nGeofenced Attendance\nMonitoring System', sys));
   g.push(entityBox('Employee\n(Mobile App)', emp));
   g.push(entityBox('Administrator /\nSuper Admin', adm));
   g.push(entityBox('Google Identity\nServices', goog, { size: 15 }));
@@ -341,7 +341,7 @@ function level0() {
   g.push(entityBox('Public IP Resolver\n(ipify / icanhazip)', ips, { size: 15 }));
 
   return document_('Level 0 — Context Diagram',
-    'GeoAttend Pro · the whole system as a single process', W, H, g.join('') + n.svg);
+    'GeoAttend · the whole system as a single process', W, H, g.join('') + n.svg);
 }
 
 // ==================================================================
@@ -788,7 +788,7 @@ function level2Identity() {
 
 // ==================================================================
 (async () => {
-  console.log('Generating GeoAttend Pro DFD set ->', OUT_DIR);
+  console.log('Generating GeoAttend DFD set ->', OUT_DIR);
   await emit('GeoAttend-DFD-Level0-Context', level0(), 2200);
   await emit('GeoAttend-DFD-Level1', level1(), 2700);
   await emit('GeoAttend-DFD-Level2-RecordAttendance', level2Attendance(), 2600);

@@ -5,16 +5,8 @@ const realtime = require('../services/realtime');
 const { isExpoToken } = require('../services/pushService');
 
 // GET /api/devices
-// Each device row is paired with the employee_faces row whose created_at is
-// closest to that device's registered_at, rather than just the employee's
-// most recent face on file -- an employee can register more than once (each
-// registration attempt/device inserts its own employee_faces row; see
-// FACE_VERIFICATION_README.md's "Known gaps" note), so for someone with
-// multiple devices, "closest in time" is what correctly ties each device
-// back to the specific photo captured during THAT device's registration
-// (linkDevice() inserts both rows in the same request, so they're always
-// seconds apart) instead of always showing their newest photo regardless of
-// which device is being reviewed.
+// Each device is paired with the face photo closest to its registered_at
+// (the one captured during that device's registration).
 async function getDevices(req, res, next) {
   try {
     const [rows] = await pool.query(
@@ -54,11 +46,8 @@ async function registerDevice(req, res, next) {
       return res.status(403).json({ success: false, message: 'You can only register your own device.' });
     }
 
-    // The employee_id on a phone is cached locally after login and can go
-    // stale (e.g. the employee record was deleted/recreated by an admin
-    // since). Check it explicitly and fail with a clear, specific error
-    // instead of letting the INSERT below hit a foreign-key constraint and
-    // leak a raw MySQL message to the app.
+    // The phone's cached employee_id may be stale; fail clearly instead of
+    // hitting the foreign key.
     const [employeeRows] = await pool.query('SELECT id FROM employees WHERE id = ?', [employee_id]);
     if (!employeeRows[0]) {
       return res.status(404).json({
@@ -70,9 +59,7 @@ async function registerDevice(req, res, next) {
 
     const [existing] = await pool.query('SELECT * FROM mobile_devices WHERE device_uid = ?', [device_uid]);
     if (existing[0]) {
-      // A device can only ever belong to one employee. If this device_uid is
-      // already on file under a different employee, block it instead of silently
-      // treating it as "already registered" for the requester.
+      // A device belongs to one employee only.
       if (String(existing[0].employee_id) !== String(employee_id)) {
         return res.status(409).json({
           success: false,
@@ -81,9 +68,6 @@ async function registerDevice(req, res, next) {
       }
       return res.json({ success: true, message: 'Device already registered.', data: existing[0] });
     }
-
-    // One employee may register and use multiple devices, so no check against
-    // the employee already having an approved device here.
 
     const info = cleanDeviceInfo({ model, brand, os });
     const [result] = await pool.query(
@@ -98,10 +82,9 @@ async function registerDevice(req, res, next) {
   }
 }
 
-// PUT /api/devices/push-token { token } -- saves this phone's Expo push token
-// (the phone is identified by X-Device-Uid, and must belong to the signed-in
-// employee). A token moves with the phone, so it's cleared from any other row
-// first. { token: null } clears it, e.g. on sign-out.
+// PUT /api/devices/push-token { token }
+// Saves the Expo push token for the X-Device-Uid phone, clearing it from any
+// other row first. { token: null } clears it.
 async function savePushToken(req, res, next) {
   try {
     const deviceUid = req.headers['x-device-uid'];
@@ -123,20 +106,16 @@ async function savePushToken(req, res, next) {
 
 const DEVICE_STATUSES = ['pending', 'approved', 'rejected', 'blacklisted'];
 
-// Sets one device's status and sends the side effects that go with it.
-// Returns false when the device doesn't exist. Shared by the single-device
-// PATCH and the bulk action endpoint.
+// Sets a device's status and sends its notifications. Returns false if not found.
 async function applyDeviceStatus(id, status, req) {
   const [deviceRows] = await pool.query('SELECT employee_id, status, model FROM mobile_devices WHERE id = ?', [id]);
   const device = deviceRows[0];
   if (!device) return false;
 
   await pool.query('UPDATE mobile_devices SET status = ? WHERE id = ?', [status, id]);
-  // Approving a self-registered employee's device is what accepts them:
-  // from now on they appear in the Employees list (see schemaUpgrades.js).
+  // Approving a self-registered employee's device approves the employee.
   if (status === 'approved') {
     await pool.query('UPDATE employees SET is_approved = 1 WHERE id = ?', [device.employee_id]);
-    // Confirmation alert for the employee: their phone is now registered.
     if (device.status !== 'approved') {
       await pool.query(
         `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, 'Device Registered', ?, 'device_approved')`,
@@ -146,28 +125,19 @@ async function applyDeviceStatus(id, status, req) {
   }
   await logAction({ adminId: req.admin.id, action: 'update_status', module: 'devices', details: { id, status }, ip: req.ip });
 
-  // Tell the employee. A blocked phone is also signed out on its next
-  // request (see middleware/authMiddleware.js requireEmployeeAuth), where
-  // the app shows its own notification with the same explanation.
   if (isBlockedStatus(status) && device.status !== status) {
     await pool.query(
       `INSERT INTO notifications (employee_id, title, message, type) VALUES (?, ?, ?, 'device_blocked')`,
       [device.employee_id, status === 'blacklisted' ? 'Device Blacklisted' : 'Device Rejected', blockedMessage(status)]
     );
   }
-  // Open apps re-check their device status right away: approval lets a
-  // waiting employee in, a block signs the phone out.
   realtime.notifyEmployee(device.employee_id, 'device');
   return true;
 }
 
-// Removes a device registration. If it belonged to someone who registered
-// themselves and was never accepted (employees.is_approved = 0), and it was
-// their only device, their pending employee record goes too (faces etc.
-// cascade), so they can register again from scratch. Attendance history keeps
-// its rows (attendance.device_id is set to NULL). A phone still signed in on
-// this device is signed out on its next request (services/deviceAccess.js).
-// Returns null when the device doesn't exist.
+// Deletes a device. If it was the only device of an unapproved self-registered
+// employee, that employee record is deleted too so they can register again.
+// Returns null when not found.
 async function removeDevice(id, req) {
   const [rows] = await pool.query(
     `SELECT md.id, md.employee_id, md.device_uid, e.is_approved, e.employee_code
@@ -227,10 +197,7 @@ async function deleteDevice(req, res, next) {
   }
 }
 
-// POST /api/devices/bulk  { ids: [1, 2, ...], action: 'approve'|'blacklist'|'delete' }
-// Device Management's Approve / Block / Delete selected. Each device goes
-// through the same path as its single-device action, so notifications,
-// employee approval and pending-registration cleanup all still happen.
+// POST /api/devices/bulk { ids, action: 'approve'|'blacklist'|'delete' }
 async function bulkDeviceAction(req, res, next) {
   try {
     const { action } = req.body;

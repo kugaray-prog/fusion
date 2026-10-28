@@ -1,15 +1,9 @@
 const pool = require('../config/db');
 
-// Alerts for the admin dashboard's notification bell (Notification & Alert
-// module): device registrations, sign-in / attendance attempts from
-// unregistered or blocked devices, and geo anomalies. Stored in
-// admin_notifications (created by services/schemaUpgrades.js).
-//
-// notifyAdmins never throws -- an alert failing to save must not fail the
-// employee's request that triggered it.
+// Admin notification bell alerts. notifyAdmins never throws, so a failed alert
+// never fails the employee request that triggered it.
 
-// Same alert (type + employee + title) within this window is skipped, so a
-// phone retrying a refused request every few seconds doesn't flood the bell.
+// Identical alerts within this window are skipped to avoid flooding on retries.
 const DEDUPE_MINUTES = 10;
 
 async function notifyAdmins({ type, severity = 'info', title, message, targetView = null, employeeId = null, dedupe = true }) {
@@ -32,7 +26,6 @@ async function notifyAdmins({ type, severity = 'info', title, message, targetVie
   }
 }
 
-// "Juan Dela Cruz (E004)" for an employee id, for alert messages.
 async function employeeLabel(employeeId) {
   try {
     const [rows] = await pool.query('SELECT full_name, employee_code FROM employees WHERE id = ?', [employeeId]);

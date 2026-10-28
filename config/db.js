@@ -1,8 +1,7 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
-// Defaults match the "db" service in docker-compose.yml (MySQL published on
-// localhost:3307).
+// Defaults match the "db" service in docker-compose.yml.
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   port: process.env.DB_PORT || 3307,
@@ -13,33 +12,19 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   dateStrings: true,
-  // MySQL closes connections that have sat idle past its wait_timeout. TCP keep-alive probes keep the socket live so the server is
-  // less likely to drop an otherwise-healthy pooled connection out from under
-  // us; idleTimeout retires a connection on our side after 60s idle so the
-  // pool tends to hand out fresh ones rather than ones the server may have
-  // already killed. Neither fully eliminates the race -- a connection can
-  // still die between checkout and first query -- which is what the retry
-  // wrapper below is for.
+  // Keep-alive and a short idleTimeout reduce the chance of being handed a
+  // connection MySQL already closed; the one-time retry below covers the rest.
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
   idleTimeout: 60000
 });
 
-// A pooled connection can drop while idle (e.g. the db container restarts),
-// and mysql2 emits that as an 'error' on the underlying pool. With no listener
-// Node treats it as an unhandled 'error' event and crashes the whole process,
-// so swallow it here -- the pool discards the dead connection and makes a new
-// one on the next query. We only log; there's no request to fail.
+// Without a listener, a dropped idle connection crashes the process.
 pool.pool.on('error', (err) => {
   console.error('MySQL pool connection error (recovered):', err.code || err.message);
 });
 
-// A connection the pool hands out can turn out to be already dead (the server
-// closed it while it was idle), so the very first query on it rejects with a
-// fatal ECONNRESET / PROTOCOL_CONNECTION_LOST before the statement ever runs.
-// Retrying once gets a fresh connection and the request succeeds instead of
-// 500ing. We only retry these connection-level failures, and only once, so a
-// genuine query error (or a real outage) still surfaces normally.
+// Retry once when a pooled connection turns out to be dead before the query ran.
 const FATAL_CONNECTION_CODES = new Set([
   'ECONNRESET',
   'PROTOCOL_CONNECTION_LOST',
@@ -66,10 +51,7 @@ for (const method of ['query', 'execute']) {
   };
 }
 
-// Event times and the app's clock are Philippine time, so a MySQL running in
-// UTC would put NOW() 8 hours behind every stored event time (auto time-outs
-// firing late, check-ins saved in UTC). Pin each connection's session to
-// +08:00; an offset works even without MySQL's timezone tables.
+// Run MySQL sessions in Philippine time so NOW() matches stored event times.
 pool.pool.on('connection', (conn) => {
   conn.query(`SET time_zone = '${process.env.DB_TIMEZONE || '+08:00'}'`);
 });

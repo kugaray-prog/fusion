@@ -7,10 +7,7 @@ const employeeOptionController = require('../controllers/employeeOptionControlle
 const { requireEmployeeAuth } = require('../middleware/authMiddleware');
 const { uploadRegistration } = require('../middleware/uploadMiddleware');
 
-// Only FAILED attempts count: everyone on the institutional Wi-Fi shares one
-// public IP, so counting successful logins too meant the 16th person to sign
-// in on campus within 15 minutes was locked out. Failures still count, so
-// repeated bad attempts from one network are still blocked.
+// Only failed attempts count: everyone on campus Wi-Fi shares one public IP.
 const loginLimiter = rateLimit({
   ...clientRateLimitOptions,
   windowMs: 15 * 60 * 1000,
@@ -22,15 +19,9 @@ const loginLimiter = rateLimit({
 router.post('/login', loginLimiter, employeeAuthController.login);
 router.post('/google', loginLimiter, employeeAuthController.googleLogin);
 router.get('/departments', employeeAuthController.listDepartments);
-// Position / Classification lists the admin manages from the dashboard's
-// employee form, for the registration form's dropdowns (public, like /departments).
 router.get('/employee-options', employeeOptionController.getOptions);
-// Registration sequence: Continue with Google -> employee details -> face
-// registration, all submitted together here (multipart: employee details +
-// a still frame under "image"; "video" is accepted for backward
-// compatibility but is optional and no longer sent by the current mobile app.
-// Links/creates the employee, registers the device, and enrolls the face
-// (and stores the liveness clip alongside it) in one request.
+// Creates/links the employee, registers the device and enrolls the face in one
+// request ("image" required, "video" optional).
 router.post(
   '/link-device',
   loginLimiter,

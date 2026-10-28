@@ -4,17 +4,9 @@ const { logAction } = require('../services/auditService');
 const { removeUpload } = require('../services/uploadStore');
 const { recordVerificationAttendance } = require('./attendanceController');
 
-// POST /api/ocr/verify  (multipart: image)
-// Body also accepts an optional `event_id` — when provided and identity is
-// matched, this verification doubles as a one-time attendance roll-call for
-// that event (see recordVerificationAttendance), the alternative to the
-// mobile app's GPS check-in for an employee who came without their phone.
-// Scans an ID card, extracts ONLY the employee ID number (no name/position
-// guessing from the card), and looks that number up directly against the
-// `employees` table. Name/position shown to the admin always come from that
-// database record — never from what OCR "read" off the card — so the result
-// is a simple two-outcome check: the ID number is registered ("Match") or
-// it isn't ("No Match").
+// POST /api/ocr/verify (multipart: image, optional event_id)
+// Reads only the ID number from the card and looks it up; name/position come
+// from the database. With event_id, a match also records attendance.
 async function verifyId(req, res, next) {
   try {
     if (!req.file) {
@@ -28,7 +20,6 @@ async function verifyId(req, res, next) {
     const { text } = await ocrService.extractText(absolutePath);
     const { employeeCode } = ocrService.parseIdCard(text);
 
-    // Minimal server-console debug — just what was actually extracted.
     console.log('[OCR] Extracted employee number:', employeeCode || '(none found)');
 
     let result = 'no_match';
@@ -60,8 +51,6 @@ async function verifyId(req, res, next) {
       ip: req.ip
     });
 
-    // Attendance is only attempted on an actual identity match — no match
-    // means there's no employee to record attendance FOR.
     let attendance = null;
     if (result === 'matched' && eventId) {
       try {
@@ -121,9 +110,7 @@ async function getOcrRecords(req, res, next) {
 }
 
 // DELETE /api/ocr/records/:id
-// Removes one scan from the Recent ID Scans log together with its photo.
-// An attendance row recorded from this scan keeps its attendance; only its
-// ocr_record_id link is cleared (ON DELETE SET NULL).
+// Deletes the scan and its photo; linked attendance keeps its row.
 async function deleteOcrRecord(req, res, next) {
   try {
     const [rows] = await pool.query('SELECT id, image_path, result FROM ocr_records WHERE id = ?', [req.params.id]);

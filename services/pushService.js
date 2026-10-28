@@ -1,8 +1,5 @@
-// Expo push notifications: announces a new event to every approved phone,
-// even while the app is closed (the live WebSocket only reaches open apps).
-// Tokens are saved by PUT /api/devices/push-token (deviceController) into
-// mobile_devices.push_token. Push is a bonus, so nothing here ever throws:
-// a failure is logged and the admin's save still succeeds.
+// Expo push notifications for new events. Tokens are saved by
+// PUT /api/devices/push-token. Never throws: failures are only logged.
 const pool = require('../config/db');
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
@@ -20,14 +17,14 @@ async function sendBatch(messages) {
   });
   if (!res.ok) throw new Error(`Expo push responded ${res.status}`);
   const { data } = await res.json();
-  // Uninstalled app / revoked permission: forget the token so it isn't retried.
+  // Uninstalled app or revoked permission: drop the token.
   const dead = (data || [])
     .map((ticket, i) => (ticket.status === 'error' && ticket.details?.error === 'DeviceNotRegistered' ? messages[i].to : null))
     .filter(Boolean);
   if (dead.length) await pool.query('UPDATE mobile_devices SET push_token = NULL WHERE push_token IN (?)', [dead]);
 }
 
-// `employeeIds` limits the push to those employees' phones; null = everyone.
+// `employeeIds` limits the push to those employees; null = everyone.
 async function sendToApprovedDevices(build, employeeIds = null) {
   if (employeeIds && !employeeIds.length) return;
   const [rows] = await pool.query(
@@ -44,7 +41,6 @@ async function sendToApprovedDevices(build, employeeIds = null) {
   }
 }
 
-// `employeeIds`: only these employees are required to attend (null = everyone).
 function notifyNewEvent({ eventId, title, venue, start, occurrenceCount = 1, employeeIds = null }) {
   const when = start ? new Date(String(start).replace(' ', 'T')) : null;
   const whenText = when && !isNaN(when)

@@ -46,13 +46,8 @@ const uploadFace = multer({
   limits: { fileSize: 6 * 1024 * 1024 }
 });
 
-// Mobile device/face registration now captures a short guided liveness VIDEO
-// (blink / nod / turn head left+right) in addition to the still frame used
-// for the face-recognition embedding, so this needs two differently-typed
-// fields ('image' + optional 'video') routed to two different folders in a
-// single multipart request — hence a dedicated storage function keyed by
-// fieldname rather than reusing makeStorage() above.
-// Also used by the attendance face re-verification upload ('selfie' + 'video').
+// Registration and face re-verification upload a photo and a video in one
+// request, each to its own folder.
 const REGISTRATION_FOLDERS = { image: 'faces', selfie: 'selfies', video: 'face_videos' };
 Object.values(REGISTRATION_FOLDERS).forEach((sub) => {
   const dest = path.join(__dirname, '..', 'uploads', sub);
@@ -73,20 +68,16 @@ const registrationFileFilter = (req, file, cb) => {
     const ok = allowed.test(path.extname(file.originalname).toLowerCase()) || allowed.test(file.mimetype);
     return ok ? cb(null, true) : cb(new Error('The liveness video must be an mp4 or mov file.'));
   }
-  // 'image' (and anything else) falls back to the standard photo rule.
   return imageFilter(req, file, cb);
 };
 
-// The liveness clip is only a few seconds of low-res front-camera video, but
-// gets a generous ceiling since recording length/bitrate varies by device.
 const uploadRegistration = multer({
   storage: registrationStorage,
   fileFilter: registrationFileFilter,
   limits: { fileSize: 30 * 1024 * 1024 } // 30MB
 });
 
-// Batch employee import (CSV/Excel) — kept in memory (not written to disk)
-// since the file is parsed once and discarded, never served back to a browser.
+// Import files stay in memory; they are parsed once and discarded.
 const importFileFilter = (req, file, cb) => {
   const allowed = /csv|xlsx|xls/;
   const ok = allowed.test(path.extname(file.originalname).toLowerCase());
@@ -100,9 +91,8 @@ const uploadImportFile = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB
 });
 
-// Disk uploads also get a durable copy in the database (services/uploadStore.js)
-// because the host's disk doesn't survive restarts. `.single()` / `.fields()`
-// / `.array()` return [multer, store] -- Express runs the array in order.
+// Also store each upload in the database (services/uploadStore.js), since the
+// host disk may not survive restarts.
 function withDurableCopy(uploader) {
   const { persistRequestUploads } = require('../services/uploadStore');
   const wrapped = Object.create(uploader);

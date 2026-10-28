@@ -3705,11 +3705,40 @@ const G_App = {
                 toast('Certificate text reset to default.', 'success');
             } catch (err) { toast(err.message, 'error'); }
         },
+        // Opens one sample page with the current form values; nothing is
+        // saved or emailed. Bulk scopes preview with a sample name.
+        previewCertificate: async () => {
+            const scopeBody = G_App.settings.certScopeBody();
+            const body = {
+                employee_id: scopeBody.scope === 'employee' ? document.getElementById('cert-employee-select').value : null,
+                event_title: document.getElementById('cert-event').value,
+                award_date: document.getElementById('cert-date').value,
+                venue: document.getElementById('cert-venue').value.trim()
+            };
+            // Open the tab now (inside the click) so popup blockers allow it.
+            const win = window.open('', '_blank');
+            try {
+                const res = await fetch(`${API}/certificates/preview`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify(body) });
+                if (!res.ok) {
+                    let message = `Preview failed (${res.status})`;
+                    try { message = (await res.json()).message || message; } catch (e) { /* not JSON */ }
+                    throw new Error(message);
+                }
+                const url = URL.createObjectURL(await res.blob());
+                if (win) win.location.href = url;
+                else window.open(url, '_blank');
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            } catch (err) {
+                if (win) win.close();
+                toast(err.message, 'error');
+            }
+        },
         generateCertificate: async () => {
             const employeeId = document.getElementById('cert-employee-select').value;
             const event = document.getElementById('cert-event').value || 'Professional Development Workshop';
             const awardDate = document.getElementById('cert-date').value;
             const venue = document.getElementById('cert-venue').value.trim();
+            const sendEmail = document.getElementById('cert-send-email')?.checked !== false;
             const scopeBody = G_App.settings.certScopeBody();
 
             if (scopeBody.scope !== 'employee') {
@@ -3719,7 +3748,8 @@ const G_App = {
                     : `all active employees of ${document.getElementById('cert-department-select').selectedOptions[0]?.text || 'this department'}`;
                 const ok = await confirmDialog({
                     title: 'Generate certificates?',
-                    message: `A certificate for "${event}" will be made for ${who}, combined into one PDF.`,
+                    message: `A certificate for "${event}" will be made for ${who}, combined into one PDF.`
+                        + (sendEmail ? ' Each employee will also be emailed their own copy.' : ''),
                     confirmText: 'Generate',
                     danger: false
                 });
@@ -3727,9 +3757,10 @@ const G_App = {
                 try {
                     const result = await apiFetch('/certificates/generate-bulk', {
                         method: 'POST',
-                        body: JSON.stringify({ ...scopeBody, event_title: event, award_date: awardDate, venue })
+                        body: JSON.stringify({ ...scopeBody, event_title: event, award_date: awardDate, venue, send_email: sendEmail })
                     });
-                    toast(`${result.data.count} certificate(s) generated.`, 'success');
+                    toast(`${result.data.count} certificate(s) generated.`
+                        + (result.data.emailing ? ' Emailing them now; you will be notified when done.' : ''), 'success');
                     window.open(result.data.downloadUrl, '_blank');
                 } catch (err) {
                     toast(err.message, 'error');
@@ -3742,9 +3773,12 @@ const G_App = {
             try {
                 const result = await apiFetch('/certificates/generate', {
                     method: 'POST',
-                    body: JSON.stringify({ employee_id: employeeId, event_title: event, award_date: awardDate, venue })
+                    body: JSON.stringify({ employee_id: employeeId, event_title: event, award_date: awardDate, venue, send_email: sendEmail })
                 });
-                toast('Certificate generated.', 'success');
+                const email = result.data.email;
+                if (!email) toast('Certificate generated.', 'success');
+                else if (email.status === 'sent') toast('Certificate generated and emailed to the employee.', 'success');
+                else toast(`Certificate generated, but not emailed: ${email.message}`, 'error');
                 window.open(result.data.downloadUrl, '_blank');
             } catch (err) {
                 toast(err.message, 'error');

@@ -1,4 +1,4 @@
-# GeoAttend Pro -- local/self-hosted stack: the Node app + MySQL 8.
+# GeoAttend -- local/self-hosted stack: the Node app + MySQL 8.
 #
 #   docker compose up -d --build        # build and start
 #   docker compose exec app npm run seed  # first run only: admin + sample data

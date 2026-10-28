@@ -3,7 +3,7 @@ Paalala: Hangga't ganito ang setup, kailangang i-restart ang Expo tuwing may bab
 
 docker compose restart expo
 
-**GeoAttend Pro** is a geofenced attendance monitoring system built for
+**GeoAttend** is a geofenced attendance monitoring system built for
 institutional use (CSPC — Camarines Sur Polytechnic Colleges). It combines
 GPS geofencing, OCR ID verification, and live face verification to record
 attendance for scheduled events (e.g. flag ceremonies, meetings), with a
@@ -35,8 +35,7 @@ on-device face registration and push-style attendance flows.
 - **Live Face Verification** — selfie-based identity verification with an
   in-browser **liveness challenge** (blink / turn head / nod) that must be
   completed before the captured frame is matched against enrolled faces
-  via an ONNX face-recognition model. See
-  [`FACE_VERIFICATION_README.md`](FACE_VERIFICATION_README.md) for details.
+  via an ONNX face-recognition model.
 - **Mobile self-registration** — Google Sign-In → device details (Employee
   ID, Department, Position, Classification) → **Face Registration**, which
   runs the exact same liveness challenge as Face Verification above before
@@ -47,9 +46,7 @@ on-device face registration and push-style attendance flows.
   (restricted to the Verification section only).
 - **Device management** — bind an employee's phone to their account and
   approve/blacklist devices from the dashboard.
-- **Ratings & certificates, batch employee import, audit logging**, and
-  more — see [`CHANGELOG_ENHANCEMENTS.md`](CHANGELOG_ENHANCEMENTS.md) for
-  the full history of additions.
+- **Ratings & certificates, batch employee import, audit logging**.
 
 ---
 
@@ -202,11 +199,6 @@ mobile/          Separate Expo/React Native app (on-device registration + attend
   Most routes also gate by role (`super_admin` vs. `admin`).
 - Employee-facing (mobile) routes use a separate employee JWT — see
   `requireEmployeeAuth` in the same middleware file.
-- `CHANGELOG_ENHANCEMENTS.md` and `FACE_VERIFICATION_README.md` document
-  specific feature additions in more depth, including known limitations
-  and things to double-check before a production deploy (they were
-  written without a live MySQL instance to test against — verify
-  end-to-end before relying on any of it in production).
 
 ---
 

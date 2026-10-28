@@ -1,4 +1,4 @@
-# Load testing GeoAttend Pro with Apache JMeter
+# Load testing GeoAttend with Apache JMeter
 
 `geoattend-load-test.jmx` simulates two groups of users at the same time:
 

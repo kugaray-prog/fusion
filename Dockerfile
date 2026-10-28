@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# GeoAttend Pro backend image.
+# GeoAttend backend image.
 #
 # Uses the Debian-based "bookworm" tag rather than "alpine": bcrypt, sharp,
 # and onnxruntime-node all ship prebuilt binaries for glibc (Debian/Ubuntu)
