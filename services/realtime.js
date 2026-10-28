@@ -118,6 +118,17 @@ function broadcastMutations(req, res, next) {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
   // Read now: routers rewrite req.path before the response finishes.
   const segment = req.path.split('/')[1];
+  // Registering from the phone creates/links the employee, device and face.
+  // A failed face check (401) or Identity Verification Lock (423) still
+  // changes the employee's attempt count / lock, so those are announced too.
+  if (segment === 'employee-auth' && req.path === '/employee-auth/link-device') {
+    res.on('finish', () => {
+      if (res.statusCode === 401 || res.statusCode === 423) return broadcastNow('employees');
+      if (res.statusCode >= 400) return;
+      ['employees', 'devices', 'face'].forEach(broadcastNow);
+    });
+    return next();
+  }
   if (!segment || IGNORED_SEGMENTS.has(segment)) return next();
   // Handlers can opt out via res.locals.noBroadcast. Employee attendance writes
   // (heartbeats) are coalesced; everything else goes out immediately.
@@ -129,4 +140,31 @@ function broadcastMutations(req, res, next) {
   next();
 }
 
-module.exports = { attach, broadcast, broadcastNow, notifyEmployee, broadcastMutations };
+// Events start and end (and face locks expire) by the clock, not by a
+// request, so nothing else announces it: Ongoing/Upcoming labels,
+// Present/Absent statuses and lock badges would otherwise wait for the admin
+// page's 2-minute fallback refresh.
+let lastEventCheck = null;
+async function announceEventBoundaries() {
+  const [[{ now }]] = await pool.query('SELECT NOW() AS now');
+  if (lastEventCheck) {
+    const [[{ crossed }]] = await pool.query(
+      `SELECT COUNT(*) AS crossed FROM events
+       WHERE (start_datetime > ? AND start_datetime <= ?) OR (end_datetime > ? AND end_datetime <= ?)`,
+      [lastEventCheck, now, lastEventCheck, now]
+    );
+    if (crossed) {
+      broadcastNow('events');
+      broadcastNow('attendance-status');
+    }
+    // Identity Verification Locks also run out by the clock.
+    const [[{ unlocked }]] = await pool.query(
+      'SELECT COUNT(*) AS unlocked FROM employees WHERE face_locked_until > ? AND face_locked_until <= ?',
+      [lastEventCheck, now]
+    );
+    if (unlocked) broadcastNow('employees');
+  }
+  lastEventCheck = now;
+}
+
+module.exports = { attach, broadcast, broadcastNow, notifyEmployee, broadcastMutations, announceEventBoundaries };

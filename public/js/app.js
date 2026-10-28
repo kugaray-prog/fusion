@@ -3961,13 +3961,26 @@ const G_App = {
         // ATTENDANCE_MIN_INTERVAL_MS: every employee's heartbeat announces
         // it, so while an event runs it arrives continuously, and the
         // Dashboard view makes ~5 API calls per refresh -- every 5s that
-        // alone is ~900 of the per-account limit of 1000 per 15 minutes.
+        // alone is ~900 of the per-account limit of 1000 per 15 minutes
+        // (production only; see apiLimiter in server.js).
         // A hidden tab refreshes when it's shown again.
+        // So the heavy views (Dashboard, Verification: 4-5 calls each) wait
+        // ATTENDANCE_MIN_INTERVAL_MS between heartbeat refreshes, and the
+        // light ones (Attendance, Events, Geofences: 1-2 calls) only
+        // ATTENDANCE_FAST_INTERVAL_MS, so presence there looks live.
         // "attendance-status" is sent only when an employee is actually timed
         // in or out (never by plain heartbeats), so it's shown almost at once:
         // a short debounce, then at most one refresh per STATUS_MIN_INTERVAL_MS.
         MIN_INTERVAL_MS: 1000,
-        ATTENDANCE_MIN_INTERVAL_MS: 15000,
+        ATTENDANCE_MIN_INTERVAL_MS: 10000,
+        ATTENDANCE_FAST_INTERVAL_MS: 3000,
+        HEAVY_VIEWS: ['dashboard', 'verification-section'],
+        attendanceInterval: () => {
+            const live = G_App.live;
+            const activeView = document.querySelector('.view.active');
+            return activeView && live.HEAVY_VIEWS.includes(activeView.id)
+                ? live.ATTENDANCE_MIN_INTERVAL_MS : live.ATTENDANCE_FAST_INTERVAL_MS;
+        },
         STATUS_MIN_INTERVAL_MS: 1000,
         STATUS_DEBOUNCE_MS: 150,
         refreshDueAt: 0,
@@ -3978,7 +3991,7 @@ const G_App = {
             if (document.hidden) { live.missedWhileHidden = true; return; }
             const isStatus = topic === 'attendance-status';
             const minInterval = isStatus ? live.STATUS_MIN_INTERVAL_MS
-                : topic === 'attendance' ? live.ATTENDANCE_MIN_INTERVAL_MS : live.MIN_INTERVAL_MS;
+                : topic === 'attendance' ? live.attendanceInterval() : live.MIN_INTERVAL_MS;
             const sinceLast = Date.now() - G_App.ui.lastRefreshAt;
             const wait = Math.max(topic === 'attendance' ? live.DEBOUNCE_MS : live.STATUS_DEBOUNCE_MS, minInterval - sinceLast);
             if (live.refreshTimer) {

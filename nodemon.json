@@ -5,6 +5,9 @@
     "loadtest/",
     "public/",
     "views/",
+    "docs/",
+    "models/",
+    "*.md",
     "*.log"
   ]
 }

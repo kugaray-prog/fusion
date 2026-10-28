@@ -44,7 +44,16 @@ services:
       TZ: Asia/Manila
     ports:
       - "3000:3000"
+    # Live-edit the code from Windows: nodemon polls (-L, since Docker doesn't
+    # pass Windows file events through) and restarts on server code changes;
+    # views/ and public/ edits just refresh the browser (services/devLiveReload.js).
+    command: ["nodemon", "-L", "server.js"]
     volumes:
+      - .:/app
+      # Keep the image's Linux node_modules and models/ (w600k_r50.onnx is
+      # downloaded at build time) instead of the Windows copies.
+      - /app/node_modules
+      - /app/models
       - uploads:/app/uploads
     depends_on:
       db:

@@ -23,6 +23,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip \
     && rm -rf /var/lib/apt/lists/*
 
+# nodemon: docker-compose.yml runs the app with it so server code edits
+# restart the server without a rebuild.
+RUN npm install -g nodemon@3
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 

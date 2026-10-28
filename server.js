@@ -67,6 +67,11 @@ app.use(
   })
 );
 
+// Browser auto-refresh on file changes, development only.
+if (NODE_ENV !== 'production') {
+  require('./services/devLiveReload').mount(app);
+}
+
 // Global /api limiter, production only. Login has its own stricter limiter
 // in authRoutes.js / employeeAuthRoutes.js.
 
@@ -344,6 +349,9 @@ require('./services/schemaUpgrades').run()
   setInterval(closeSilentSessions, 5000);
   const { expireEndedEventAnomalies } = require('./controllers/attendanceController');
   setInterval(() => expireEndedEventAnomalies().catch(err => console.error('[anomalies] Expire failed:', err.message)), 30000);
+  // Tell admin pages the moment an event starts or ends.
+  const { announceEventBoundaries } = require('./services/realtime');
+  setInterval(() => announceEventBoundaries().catch(err => console.error('[realtime] Event check failed:', err.message)), 5000);
   });
 
   require('./services/realtime').attach(server);
