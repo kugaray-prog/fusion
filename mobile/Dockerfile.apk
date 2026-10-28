@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+
+# GeoAttend mobile -- one-shot Android APK builder (the Docker version of
+# BUILD-LOCAL.md). Not a long-running service: docker-compose.yml puts it
+# under the "apk" profile and it is started with
+#
+#   docker compose run --rm apk
+#
+# which runs docker/build-apk.sh and drops the APK in public/downloads/.
+#
+# Versions follow react-native 0.88's gradle/libs.versions.toml:
+# compileSdk 37, build-tools 37.0.0, NDK 27.1.12297006. AGP 9 needs JDK 17+;
+# JDK 21 matches what BUILD-LOCAL.md used on Windows.
+
+FROM node:22-bookworm
+
+COPY --from=eclipse-temurin:21-jdk /opt/java/openjdk /opt/java/openjdk
+ENV JAVA_HOME=/opt/java/openjdk \
+    ANDROID_HOME=/opt/android-sdk \
+    ANDROID_SDK_ROOT=/opt/android-sdk
+ENV PATH=$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+
+RUN apt-get update && apt-get install -y --no-install-recommends unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p $ANDROID_HOME/cmdline-tools \
+    && curl -fsSL -o /tmp/cmdline-tools.zip \
+       https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip \
+    && unzip -q /tmp/cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools \
+    && mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest \
+    && rm /tmp/cmdline-tools.zip
+
+# Licenses are accepted so Gradle can also fetch anything a native library
+# asks for beyond this list (the SDK folder stays writable).
+# (Android 37's platform package is named "android-37.0", not "android-37".)
+RUN yes | sdkmanager --licenses > /dev/null \
+    && sdkmanager --install \
+       "platform-tools" \
+       "platforms;android-37.0" \
+       "build-tools;37.0.0" \
+       "ndk;27.1.12297006" \
+       "cmake;3.22.1" > /tmp/sdk.log \
+    && ls $ANDROID_HOME/platforms | grep -q 37 \
+    && test -d $ANDROID_HOME/ndk/27.1.12297006 \
+    || { grep -iE "warning|error" /tmp/sdk.log; exit 1; }
+
+COPY docker/build-apk.sh /usr/local/bin/build-apk
+# Strip CRLF in case Git on Windows checked the script out with them.
+RUN sed -i 's/\r$//' /usr/local/bin/build-apk && chmod +x /usr/local/bin/build-apk
+
+CMD ["build-apk"]

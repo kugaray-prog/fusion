@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { localDate } = require('../services/dateService');
+const eventAudience = require('../services/eventAudience');
 
 // GET /api/dashboard/stats
 async function getStats(req, res, next) {
@@ -158,9 +159,26 @@ async function getDepartmentAttendance(req, res, next) {
     );
     const attendedByDept = Object.fromEntries(attended.map((r) => [r.department_id, r.attended_count]));
 
+    // For one event, "total" is only the employees expected at it, so
+    // offices that weren't required don't show as missing it.
+    let totalByDept = null;
+    if (event_id) {
+      const [[ev]] = await pool.query('SELECT id, department_id FROM events WHERE id = ?', [event_id]);
+      const expectedIds = ev ? await eventAudience.audienceEmployeeIds(ev) : [];
+      totalByDept = {};
+      if (expectedIds.length) {
+        const [rows] = await pool.query(
+          `SELECT e.department_id, COUNT(*) AS total FROM employees e
+           WHERE e.id IN (?) ${empJoinExtra} GROUP BY e.department_id`,
+          [expectedIds, ...empParams]
+        );
+        for (const r of rows) totalByDept[r.department_id] = r.total;
+      }
+    }
+
     const data = totals.map((d) => ({
       department: d.name,
-      total_employees: d.total_employees,
+      total_employees: totalByDept ? totalByDept[d.id] || 0 : d.total_employees,
       attended: attendedByDept[d.id] || 0
     }));
 

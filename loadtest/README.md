@@ -47,24 +47,25 @@ good load-test target yet:
   `trust proxy`, so behind Render's proxy it likely can't tell users' IPs
   apart. A test that hits the limit can lock real employees and admins out
   for up to 15 minutes.
-- **Free tier.** Render's free instance has 0.1 CPU and 512 MB, and the free
-  Aiven MySQL has few connections. Results show the free tier's limits.
-  Heavy load can also crash the instance (it restarts on its own).
+- **Free tier.** Render's free instance has 0.1 CPU and 512 MB. Results show
+  the free tier's limits. Heavy load can also crash the instance (it restarts
+  on its own).
 
 ### Local server (recommended)
 
-Run the server in development mode (no rate limits) against your **local**
-MySQL, not Aiven, so the test never touches production data:
+Run the server in development mode (no rate limits) against a **separate**
+database, so the test never touches real data:
 
 ```powershell
 cd C:\geoattend-pro
 $env:PORT='3100'; $env:NODE_ENV='development'
-$env:DB_HOST='localhost'; $env:DB_PORT='3306'; $env:DB_USER='root'
-$env:DB_PASSWORD='<local mysql password>'; $env:DB_NAME='geoattend_pro'; $env:DB_SSL_CA=''
+$env:DB_HOST='localhost'; $env:DB_PORT='3307'; $env:DB_USER='root'
+$env:DB_PASSWORD='geoattend_root'; $env:DB_NAME='geoattend_loadtest'
 node server.js
 ```
 
-(Environment variables set this way override `.env`, which points at Aiven.)
+(Environment variables set this way override `.env`. Create `geoattend_loadtest`
+in the Docker MySQL first and load `database/schema.sql` into it.)
 
 ### Production (only small, planned runs)
 

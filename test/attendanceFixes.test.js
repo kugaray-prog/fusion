@@ -345,67 +345,100 @@ const metersNorth = (m) => m / 111320;
     faceService.findBestMatch = origMatch;
   }
 
-  // ---- geo-anomaly: phones at the same spot, flagged at once, again every 30 s --
+  // ---- geo-anomaly: flagged only when two phones STAY together ------------
+  // Phones ping every few seconds on a fake clock. Each scenario uses its
+  // own pair of attendance ids, and the clock jumps ahead between scenarios
+  // so earlier readings have expired.
   {
-    const MAX_M = require('../config/config').attendance.anomalyDistanceMeters;
+    const cfg = require('../config/config').attendance;
+    const MAX_M = cfg.anomalyDistanceMeters;
     const HERE = { lat: 13.4059, lng: 123.3758 };
-    // other: { meters north of HERE, verified_ago_s, ping_fresh }
-    const anomalyPing = async ({ selfVerifiedAgo = null, selfFlagged = 0, other, lostRace = false, self = { id: 5, emp: 7 } }) => {
-      log.length = 0;
-      handler = (sql) => {
-        if (/SET requires_face_verification = 1/.test(sql)) return [{ affectedRows: lostRace ? 0 : 1 }];
+    const realNow = Date.now;
+    let clock = realNow();
+    Date.now = () => clock;
+    // Per-record stub state: verifiedAgo[id], flagged[id]; lostRace for all.
+    let state;
+    const ping = async (id, meters, { accuracy = 5 } = {}) => {
+      handler = (sql, params) => {
+        if (/SET requires_face_verification = 1/.test(sql)) {
+          if (state.lostRace) return [{ affectedRows: 0 }];
+          state.flagged[params[1]] = 1;
+          return [{ affectedRows: 1 }];
+        }
         if (/FROM attendance WHERE id = \? AND employee_id/.test(sql)) {
-          return [[{ id: self.id, employee_id: self.emp, event_id: 3, geofence_id: 9, device_id: 1, time_out: null, outside_streak: 0, last_ping_at: null, requires_face_verification: selfFlagged }]];
+          return [[{ id, employee_id: id + 100, event_id: 3, geofence_id: 9, device_id: 1, time_out: null, outside_streak: 0, last_ping_at: null, requires_face_verification: state.flagged[id] || 0 }]];
         }
         if (/SELECT end_datetime FROM events/.test(sql)) return [[{ end_datetime: '2099-01-01 00:00:00' }]];
         if (/FROM geofences WHERE id/.test(sql)) return [[{ id: 9, shape_type: 'polygon' }]];
         if (/FROM geofence_points/.test(sql)) return [SQUARE];
-        if (/SELECT device_uid FROM mobile_devices/.test(sql)) return [[{ device_uid: 'dev-A' }]];
+        if (/SELECT device_uid FROM mobile_devices/.test(sql)) return [[{ device_uid: `dev-${id}` }]];
         if (/verified_ago_s FROM attendance WHERE id/.test(sql)) {
-          return [[{ requires_face_verification: selfFlagged, verified_ago_s: selfVerifiedAgo }]];
+          return [[{ requires_face_verification: state.flagged[id] || 0, verified_ago_s: state.verifiedAgo[id] ?? null }]];
         }
         if (/LEFT JOIN mobile_devices md/.test(sql)) {
-          return [[{
-            id: self.id === 6 ? 5 : 6, employee_id: self.id === 6 ? 7 : 8, requires_face_verification: 0, verified_ago_s: other.verifiedAgo ?? null,
-            last_lat: HERE.lat + metersNorth(other.meters), last_lng: HERE.lng, latitude: HERE.lat, longitude: HERE.lng,
-            ping_fresh: other.fresh === false ? 0 : 1, time_in_fresh: 0, ping_is_newest: 1, device_uid: 'dev-B'
-          }]];
+          return [params[0].map((other) => ({
+            id: other, employee_id: other + 100, requires_face_verification: state.flagged[other] || 0,
+            verified_ago_s: state.verifiedAgo[other] ?? null, device_uid: `dev-${other}`
+          }))];
         }
         if (/SELECT title FROM events/.test(sql)) return [[{ title: 'Flag Ceremony' }]];
         return [[]];
       };
       const r = await call(attendanceController.heartbeat, {
-        params: { id: self.id }, body: { latitude: HERE.lat, longitude: HERE.lng }, employee: { id: self.emp }
+        params: { id }, body: { latitude: HERE.lat + metersNorth(meters), longitude: HERE.lng, accuracy }, employee: { id: id + 100 }
       });
-      const flagged = log.filter((q) => /INSERT INTO geo_anomalies/.test(q.sql)).map((q) => q.params[0]);
-      return { r, flagged };
+      return r.data.data.requiresFaceVerification;
     };
+    // Phones a and b ping 1 s apart every 3 s for `seconds`. `apart(t)` is
+    // b's distance north of a at second t. Returns when the first flag was
+    // logged (seconds in, or null), who was flagged, and a's last answer.
+    const scenario = async (a, b, seconds, apart, opts = {}) => {
+      clock += 10 * 60 * 1000;
+      state = { verifiedAgo: opts.verifiedAgo || {}, flagged: {}, lostRace: !!opts.lostRace };
+      log.length = 0;
+      let firstFlagAt = null;
+      let lastA = null;
+      for (let t = 0; t <= seconds; t += 3) {
+        clock += 2000;
+        lastA = await ping(a, 0, opts);
+        clock += 1000;
+        await ping(b, apart(t), opts);
+        if (firstFlagAt == null && log.some((q) => /INSERT INTO geo_anomalies/.test(q.sql))) firstFlagAt = t;
+      }
+      const flagged = log.filter((q) => /INSERT INTO geo_anomalies/.test(q.sql)).map((q) => q.params[0]);
+      return { firstFlagAt, flagged, lastA };
+    };
+    const SUSTAIN = cfg.anomalySustainSeconds;
 
-    let a = await anomalyPing({ other: { meters: 0.3 } });
-    check(a.r.data.data.requiresFaceVerification === true && a.flagged.includes(5) && a.flagged.includes(6),
-      'phones 0.3 m apart: both flagged on the first ping', a);
-    a = await anomalyPing({ other: { meters: MAX_M + 0.5 } });
-    check(a.r.data.data.requiresFaceVerification === false && a.flagged.length === 0, `phones ${MAX_M + 0.5} m apart: not flagged`, a);
-    a = await anomalyPing({ other: { meters: 0.3, fresh: false } });
-    check(a.r.data.data.requiresFaceVerification === false && a.flagged.length === 0, "other phone's position older than 30 s: not flagged", a);
-    a = await anomalyPing({ selfVerifiedAgo: 10, other: { meters: 0.3 } });
-    check(a.r.data.data.requiresFaceVerification === false && a.flagged.length === 0, 'verified 10 s ago, still together: not asked again yet', a);
-    a = await anomalyPing({ selfVerifiedAgo: 31, other: { meters: 0.3 } });
-    check(a.r.data.data.requiresFaceVerification === true && a.flagged.includes(5), 'verified 31 s ago, still together: asked again', a);
-    a = await anomalyPing({ other: { meters: 0.3, verifiedAgo: 5 } });
-    check(a.flagged.includes(5) && !a.flagged.includes(6), 'the other phone verified 5 s ago keeps its own 30 s', a);
-    a = await anomalyPing({ other: { meters: 0.3 }, lostRace: true });
-    check(a.r.data.data.requiresFaceVerification === true && a.flagged.length === 0,
-      'both phones pinging at once: the second flag is not logged or notified twice', a);
-    a = await anomalyPing({ selfFlagged: 1, other: { meters: 0.3 } });
-    check(a.r.data.data.requiresFaceVerification === true && a.flagged.length === 0, 'already flagged: reported again, not re-logged', a);
-    // Phone B (#6) pings at HERE; seconds later phone A (#5) pings at HERE
-    // while B's newest fix has drifted away -- they were still at the same
-    // spot within 30 s, so A is flagged right away.
-    await anomalyPing({ self: { id: 6, emp: 8 }, other: { meters: 50 } });
-    a = await anomalyPing({ other: { meters: MAX_M * 4 } });
-    check(a.r.data.data.requiresFaceVerification === true && a.flagged.includes(5) && a.flagged.includes(6),
-      'same spot within the last 30 s (newest fixes drifted apart): both flagged', a);
+    let s = await scenario(5, 6, 9, () => 0.3);
+    check(s.flagged.length === 0 && s.lastA === false, 'phones 0.3 m apart for a few seconds: not flagged yet', s);
+    s = await scenario(7, 8, SUSTAIN + 15, () => 0.3);
+    check(s.flagged.includes(7) && s.flagged.includes(8) && s.firstFlagAt >= SUSTAIN && s.lastA === true,
+      `phones 0.3 m apart for ${SUSTAIN}+ s: both flagged, not before`, s);
+    s = await scenario(9, 10, SUSTAIN * 3, () => MAX_M + 0.5);
+    check(s.flagged.length === 0, `phones ${MAX_M + 0.5} m apart the whole time: not flagged`, s);
+    // 3 m apart, but GPS jitter puts every third reading on top of each other.
+    s = await scenario(11, 12, SUSTAIN * 5, (t) => (t % 9 === 0 ? 0.1 : 3));
+    check(s.flagged.length === 0, '3 m apart with occasional jitter coincidences: never flagged', s);
+    // Indoor Wi-Fi fixes give both phones the same coordinates, ±20 m.
+    s = await scenario(13, 14, SUSTAIN * 3, () => 0, { accuracy: 20 });
+    check(s.flagged.length === 0, 'identical but coarse (20 m accuracy) fixes: ignored', s);
+    s = await scenario(15, 16, SUSTAIN + 15, () => 0.3, { verifiedAgo: { 15: 10, 16: 10 } });
+    check(s.flagged.length === 0 && s.lastA === false, 'verified 10 s ago, still together: not asked again yet', s);
+    s = await scenario(17, 18, SUSTAIN + 15, () => 0.3, { verifiedAgo: { 17: 31, 18: 31 } });
+    check(s.flagged.includes(17) && s.lastA === true, 'verified 31 s ago, still together: asked again', s);
+    s = await scenario(19, 20, SUSTAIN + 15, () => 0.3, { verifiedAgo: { 20: 5 } });
+    check(s.flagged.includes(19) && !s.flagged.includes(20), 'the other phone verified 5 s ago keeps its own 30 s', s);
+    s = await scenario(21, 22, SUSTAIN + 15, () => 0.3, { lostRace: true });
+    check(s.lastA === true && s.flagged.length === 0, 'both phones pinging at once: the second flag is not logged or notified twice', s);
+    // Already flagged: reported again on the very first ping, nothing re-logged.
+    clock += 10 * 60 * 1000;
+    state = { verifiedAgo: {}, flagged: { 23: 1 }, lostRace: false };
+    log.length = 0;
+    const again = await ping(23, 0);
+    check(again === true && !log.some((q) => /INSERT INTO geo_anomalies/.test(q.sql)), 'already flagged: reported again, not re-logged', again);
+
+    Date.now = realNow;
   }
 
   console.log(failures ? `\n${failures} failure(s)` : '\nAll checks passed.');

@@ -43,11 +43,10 @@ Requirements: local MySQL 8, Node, Apache JMeter 5.6.3 (see `../README.md`).
    `uploads/`; point `LT_ENROLL_IMAGE`, `LT_KIOSK_IMAGE` and `LT_REG_IMAGE`
    at other photos if those aren't there.
 
-2. **Start the server against it** (Bash; an empty `DB_SSL_CA` turns off the
-   Aiven certificate from `.env`):
+2. **Start the server against it** (Bash; the Docker MySQL is on port 3307):
    ```bash
-   PORT=3200 NODE_ENV=production DB_HOST=localhost DB_USER=root DB_PASSWORD=<pw> \
-   DB_NAME=geoattend_loadtest DB_SSL_CA= JWT_SECRET=loadtest-secret-not-for-production \
+   PORT=3200 NODE_ENV=production DB_HOST=localhost DB_PORT=3307 DB_USER=root DB_PASSWORD=geoattend_root \
+   DB_NAME=geoattend_loadtest JWT_SECRET=loadtest-secret-not-for-production \
    node server.js
    ```
    To approximate a 1-CPU cloud server, pin it to one core (PowerShell):

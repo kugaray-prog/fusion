@@ -1,6 +1,6 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet } from 'react-native';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
+import { IS_EXPO_GO } from '../utils/expoGo';
 import { CameraView } from 'expo-camera';
 import {
   runLivenessAttempt, choosePictureSize, discardPhoto, faceIssue, eyeOpenness, wait,
@@ -28,7 +28,6 @@ import {
 //   cameraRef.current.cancel();
 // Props: style, onReady() once frames are flowing, onStatus({ phase, faceDetected, hint, eyesClosed }).
 
-const IS_EXPO_GO = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
 /* eslint-disable global-require */
 const VisionCamera = IS_EXPO_GO ? null : require('react-native-vision-camera');

@@ -7,6 +7,7 @@ require('dotenv').config();
 const bcrypt = require('bcrypt');
 const pool = require('../config/db');
 const config = require('../config/config');
+const cspcOffices = require('../services/cspcOffices');
 
 async function seed() {
   const conn = await pool.getConnection();
@@ -48,9 +49,8 @@ async function seed() {
       console.log('Admin account already exists, skipping.');
     }
 
-    // 2. Departments
-    const departments = ['Engineering Faculty', 'College of Computer Studies', 'College of Health', 'Administrative Office'];
-    for (const name of departments) {
+    // 2. Departments (CSPC's departments/offices)
+    for (const name of cspcOffices) {
       const [rows] = await conn.query('SELECT id FROM departments WHERE name = ?', [name]);
       if (rows.length === 0) {
         await conn.query('INSERT INTO departments (name, office) VALUES (?, ?)', [name, name]);
@@ -61,10 +61,10 @@ async function seed() {
 
     // 3. Sample employees
     const employees = [
-      { code: 'E001', name: 'Dr. Sarah Jenkins', dept: 'Engineering Faculty', position: 'Senior Professor', status: 'Full-time', email: 'sarah.jenkins@my.cspc.edu.ph' },
+      { code: 'E001', name: 'Dr. Sarah Jenkins', dept: 'College of Engineering and Architecture', position: 'Senior Professor', status: 'Full-time', email: 'sarah.jenkins@my.cspc.edu.ph' },
       { code: 'E002', name: 'Prof. Michael Chen', dept: 'College of Computer Studies', position: 'IT Instructor', status: 'Part-time', email: 'michael.chen@my.cspc.edu.ph' },
-      { code: 'E003', name: 'Dr. Emily Watson', dept: 'College of Health', position: 'Department Dean', status: 'Full-time', email: 'emily.watson@my.cspc.edu.ph' },
-      { code: '2025020147', name: 'Jessemri A. Tabayag', dept: 'Administrative Office', position: 'Administrative Aide II', status: 'Full-time', email: 'jessemri.tabayag@my.cspc.edu.ph' }
+      { code: 'E003', name: 'Dr. Emily Watson', dept: 'College of Health Sciences', position: 'Department Dean', status: 'Full-time', email: 'emily.watson@my.cspc.edu.ph' },
+      { code: '2025020147', name: 'Jessemri A. Tabayag', dept: 'Human Resource Management and Development Unit', position: 'Administrative Aide II', status: 'Full-time', email: 'jessemri.tabayag@my.cspc.edu.ph' }
     ];
     const empPassHash = await bcrypt.hash('employee123', 12);
     for (const e of employees) {

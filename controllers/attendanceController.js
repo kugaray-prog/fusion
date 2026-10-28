@@ -6,6 +6,7 @@ const config = require('../config/config');
 const { logAction } = require('../services/auditService');
 const { notifyAdmins, employeeLabel, deviceLabel } = require('../services/adminNotificationService');
 const realtime = require('../services/realtime');
+const eventAudience = require('../services/eventAudience');
 // NOTE: employee_ratings (the Ratings module) is no longer fed from here.
 // It's now generated on-demand, per actual EVENT, by
 // ratingController.generateRatingsForRange — run automatically every time
@@ -158,50 +159,56 @@ async function flagAttendanceForVerification({ attendanceId, employeeId, eventId
   });
 }
 
-// Looks for OTHER employees' attendance for the same event whose device is
-// currently (or very recently) reporting a position suspiciously close to
-// this one — the signature of one person carrying a colleague's phone in to
-// record attendance for them. Compares against each record's most recent
-// heartbeat position (last_lat/last_lng) as well as its latest time-in
-// position, so it catches two phones that arrived together AND two phones
-// that stay together afterwards. Called on every time-in and every inside
-// heartbeat.
+// Looks for OTHER employees' attendance for the same event whose phone has
+// been staying with this one — the signature of one person carrying a
+// colleague's phone in to record attendance for them. Called on every
+// time-in and every inside ping (full heartbeats and live-position pings).
 //
 // Both sides of a match are flagged: the server can't tell which phone is
 // the "real" one, and only the employee actually present can pass the face
 // verification on their own phone. A record that's already flagged just
 // reports true again (so its app keeps being prompted).
 //
-// Triggers on the FIRST ping that finds another employee's phone within
-// config.attendance.anomalyDistanceMeters (0.5 m by default), as long as
-// that other phone reported its position within the last
-// config.attendance.anomalyWindowSeconds (30 s) -- no waiting period. Every
-// open record at that spot is flagged, however many there are.
+// Phone GPS is only good to a few meters, so two honest employees standing
+// a few meters apart regularly get single readings that land on top of each
+// other. A match therefore needs all of the following (see colocatedRecords):
+//   - readings compared only with the other phone's reading from the same
+//     moment (at most anomalyPairSeconds apart) -- never with where the
+//     other phone was earlier, so walking past a colleague's spot isn't a
+//     match;
+//   - only readings precise enough to tell (accuracy no worse than
+//     anomalyMaxAccuracyMeters); coarse Wi-Fi/network fixes, which give
+//     every phone in a room the same coordinates, are ignored;
+//   - together (within anomalyDistanceMeters) on at least anomalyMinMatches
+//     paired readings in a row, spanning at least anomalySustainSeconds,
+//     with no paired reading in between showing them apart, and still
+//     together within the last anomalyWindowSeconds.
 //
 // Passing face verification does NOT exempt a record: it's only left alone
-// for config.attendance.anomalyRecheckSeconds (30 s) after it was verified,
-// so for as long as the phones stay together, face verification is asked
-// for again every 30 seconds.
+// for config.attendance.anomalyRecheckSeconds after it was verified, so for
+// as long as the phones stay together, face verification is asked for again.
 //
-// Every position each open record reported in the last
-// config.attendance.anomalyWindowSeconds -- full heartbeats, live-position
-// pings and time-ins alike -- so two phones at the same spot at any moment
-// within that window are caught right away, even when their newest fixes
-// have since drifted apart a little (GPS jitter) or one reached the spot a
-// few seconds after the other.
-// attendanceId -> { eventId, employeeId, points: [{ lat, lng, at }] }
+// attendanceId -> { eventId, employeeId, points: [{ lat, lng, accuracy, at }] }
+// (points in the order received, i.e. oldest first)
 const recentPositions = new Map();
 let recentPositionsSweptAt = 0;
 
-function rememberPosition({ attendanceId, eventId, employeeId, latitude, longitude }) {
+// How long readings are kept: enough to cover a full sustained run.
+function trailKeepMs() {
+  const a = config.attendance;
+  return (a.anomalySustainSeconds + a.anomalyWindowSeconds + a.anomalyPairSeconds) * 1000;
+}
+
+function rememberPosition({ attendanceId, eventId, employeeId, latitude, longitude, accuracy }) {
   const lat = Number(latitude);
   const lng = Number(longitude);
   if (!attendanceId || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  const acc = Number(accuracy);
   const now = Date.now();
-  const cutoff = now - config.attendance.anomalyWindowSeconds * 1000;
+  const cutoff = now - trailKeepMs();
   const entry = recentPositions.get(String(attendanceId)) || { eventId, employeeId, points: [] };
   entry.points = entry.points.filter((p) => p.at >= cutoff);
-  entry.points.push({ lat, lng, at: now });
+  entry.points.push({ lat, lng, accuracy: Number.isFinite(acc) && acc > 0 ? acc : null, at: now });
   recentPositions.set(String(attendanceId), entry);
   if (now - recentPositionsSweptAt > 10000) {
     recentPositionsSweptAt = now;
@@ -211,28 +218,70 @@ function rememberPosition({ attendanceId, eventId, employeeId, latitude, longitu
   }
 }
 
-// Other employees' records for this event that were within maxMeters of
-// (latitude, longitude) at some point in the last anomalyWindowSeconds:
-// attendanceId -> { lat, lng } of the closest such position.
-function trailMatches({ attendanceId, employeeId, eventId, latitude, longitude, maxMeters }) {
-  const cutoff = Date.now() - config.attendance.anomalyWindowSeconds * 1000;
-  const matches = new Map();
-  for (const [id, e] of recentPositions) {
-    if (id === String(attendanceId) || String(e.eventId) !== String(eventId) || String(e.employeeId) === String(employeeId)) continue;
-    let best = null;
-    for (const p of e.points) {
-      if (p.at < cutoff) continue;
-      const d = geofenceService.distanceMeters(Number(latitude), Number(longitude), p.lat, p.lng);
-      if (d <= maxMeters && (!best || d < best.d)) best = { d, lat: p.lat, lng: p.lng };
+// A reading too coarse to tell two phones apart says nothing either way.
+// (Unknown accuracy is taken at face value.)
+function preciseEnough(p) {
+  return p.accuracy == null || p.accuracy <= config.attendance.anomalyMaxAccuracyMeters;
+}
+
+// Walks two phones' readings in time order, pairing each of `mine` with the
+// reading of `theirs` closest in time (if within anomalyPairSeconds), and
+// returns the latest unbroken run of "together" pairs -- { count, firstAt,
+// lastAt, other: their reading in the last pair } -- or null. A pair showing
+// the phones apart ends the run; a reading with no comparable partner is
+// skipped.
+function togetherRun(mine, theirs, cutoff) {
+  const pairMs = config.attendance.anomalyPairSeconds * 1000;
+  const maxMeters = config.attendance.anomalyDistanceMeters;
+  const others = theirs.filter((q) => q.at >= cutoff && preciseEnough(q));
+  let run = null;
+  let j = 0;
+  for (const p of mine) {
+    if (p.at < cutoff || !preciseEnough(p)) continue;
+    while (j + 1 < others.length && others[j + 1].at <= p.at) j += 1;
+    let q = null;
+    for (const c of [others[j], others[j + 1]]) {
+      if (c && Math.abs(c.at - p.at) <= pairMs && (!q || Math.abs(c.at - p.at) < Math.abs(q.at - p.at))) q = c;
     }
-    if (best) matches.set(id, best);
+    if (!q) continue;
+    if (geofenceService.distanceMeters(p.lat, p.lng, q.lat, q.lng) > maxMeters) {
+      run = null;
+      continue;
+    }
+    if (!run) run = { count: 0, firstAt: Math.min(p.at, q.at) };
+    run.count += 1;
+    run.lastAt = Math.max(p.at, q.at);
+    run.other = q;
+  }
+  return run;
+}
+
+// Other employees' records for the same event whose phone has stayed with
+// this record's phone (the rules above): attendanceId -> { lat, lng } of the
+// other phone's latest reading in that run.
+function colocatedRecords(attendanceId) {
+  const matches = new Map();
+  const self = recentPositions.get(String(attendanceId));
+  if (!self) return matches;
+  const a = config.attendance;
+  const now = Date.now();
+  const cutoff = now - trailKeepMs();
+  for (const [id, e] of recentPositions) {
+    if (id === String(attendanceId) || String(e.eventId) !== String(self.eventId) || String(e.employeeId) === String(self.employeeId)) continue;
+    const run = togetherRun(self.points, e.points, cutoff);
+    if (run &&
+        run.count >= a.anomalyMinMatches &&
+        run.lastAt - run.firstAt >= a.anomalySustainSeconds * 1000 &&
+        now - run.lastAt <= a.anomalyWindowSeconds * 1000) {
+      matches.set(id, { lat: run.other.lat, lng: run.other.lng });
+    }
   }
   return matches;
 }
 
 // Returns whether THIS record currently requires face verification.
-async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude }) {
-  rememberPosition({ attendanceId, eventId, employeeId, latitude, longitude });
+async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, latitude, longitude, accuracy }) {
+  rememberPosition({ attendanceId, eventId, employeeId, latitude, longitude, accuracy });
 
   // Ages are worked out in SQL (TIMESTAMPDIFF against NOW()) rather than by
   // parsing the DATETIME strings in Node, so they stay right whatever
@@ -249,59 +298,22 @@ async function detectGeoAnomaly({ attendanceId, employeeId, eventId, deviceUid, 
   const recentlyVerified = (row) => row.verified_ago_s != null && Number(row.verified_ago_s) < recheckSeconds;
   if (recentlyVerified(self)) return false;
 
-  // The SQL box is only a coarse prefilter (a degree box sized to the
-  // distance threshold); the real check is the straight-line distance below,
-  // so only phones practically side by side count -- not merely nearby.
-  const maxMeters = config.attendance.anomalyDistanceMeters;
-  const latTol = maxMeters / 111320;
-  const lngTol = maxMeters / (111320 * Math.max(Math.cos(Number(latitude) * Math.PI / 180), 0.01));
-  const windowSeconds = config.attendance.anomalyWindowSeconds;
-  const trail = trailMatches({ attendanceId, employeeId, eventId, latitude, longitude, maxMeters });
-  const trailIds = trail.size ? [...trail.keys()].map(Number) : [0];
+  const matches = colocatedRecords(attendanceId);
+  if (!matches.size) return false;
+  // Still-open records only (a phone that timed out isn't "here" any more).
   const [candidates] = await pool.query(
-    `SELECT x.*, (x.last_ping_at >= NOW() - INTERVAL ? SECOND) AS ping_fresh,
-            (x.latest_time_in >= NOW() - INTERVAL ? SECOND) AS time_in_fresh,
-            (x.last_ping_at IS NOT NULL AND (x.latest_time_in IS NULL OR x.last_ping_at >= x.latest_time_in)) AS ping_is_newest
-     FROM (
-       SELECT a.id, a.employee_id, a.requires_face_verification,
-              TIMESTAMPDIFF(SECOND, a.face_verified_at, NOW()) AS verified_ago_s,
-              a.last_lat, a.last_lng, a.latitude, a.longitude, a.last_ping_at,
-              GREATEST(a.time_in, COALESCE((SELECT MAX(s.time_in) FROM attendance_sessions s WHERE s.attendance_id = a.id), a.time_in)) AS latest_time_in,
-              md.device_uid
-       FROM attendance a
-       LEFT JOIN mobile_devices md ON a.device_id = md.id
-       WHERE a.event_id = ? AND a.employee_id != ? AND a.id != ?
-         AND a.time_out IS NULL
-     ) x
-     WHERE (x.last_ping_at >= NOW() - INTERVAL ? SECOND
-             AND ABS(x.last_lat - ?) < ? AND ABS(x.last_lng - ?) < ?)
-        OR (x.latest_time_in >= NOW() - INTERVAL ? SECOND
-             AND ABS(x.latitude - ?) < ? AND ABS(x.longitude - ?) < ?)
-        OR x.id IN (?)`,
-    [
-      windowSeconds, windowSeconds,
-      eventId, employeeId, attendanceId,
-      windowSeconds, latitude, latTol, longitude, lngTol,
-      windowSeconds, latitude, latTol, longitude, lngTol,
-      trailIds
-    ]
+    `SELECT a.id, a.employee_id, a.requires_face_verification,
+            TIMESTAMPDIFF(SECOND, a.face_verified_at, NOW()) AS verified_ago_s,
+            md.device_uid
+     FROM attendance a
+     LEFT JOIN mobile_devices md ON a.device_id = md.id
+     WHERE a.id IN (?) AND a.event_id = ? AND a.employee_id != ? AND a.time_out IS NULL`,
+    [[...matches.keys()].map(Number), eventId, employeeId]
   );
-  const within = (lat, lng) => lat != null && lng != null &&
-    geofenceService.distanceMeters(Number(latitude), Number(longitude), Number(lat), Number(lng)) <= maxMeters;
-  // Each other phone is judged only by its NEWEST known position: a ping
-  // after its time-in supersedes the time-in spot, so a phone that has
-  // walked away doesn't still count as "here" off its old check-in point.
-  const rows = [];
-  for (const c of candidates) {
-    const seen = trail.get(String(c.id));
-    if (seen) {
-      rows.push({ ...c, cur_lat: seen.lat, cur_lng: seen.lng });
-    } else if (Number(c.ping_is_newest)) {
-      if (Number(c.ping_fresh) && within(c.last_lat, c.last_lng)) rows.push({ ...c, cur_lat: c.last_lat, cur_lng: c.last_lng });
-    } else if (Number(c.time_in_fresh) && within(c.latitude, c.longitude)) {
-      rows.push({ ...c, cur_lat: c.latitude, cur_lng: c.longitude });
-    }
-  }
+  const rows = candidates.map((c) => {
+    const seen = matches.get(String(c.id));
+    return { ...c, cur_lat: seen.lat, cur_lng: seen.lng };
+  });
   if (!rows.length) return false;
 
   const first = rows[0];
@@ -674,10 +686,10 @@ async function getAttendance(req, res, next) {
 
 // Employees expected at an event who have no attendance record for it, as
 // placeholder "Absent" rows (is_placeholder, no id) so the admin sees who
-// didn't show up. Expected = approved Active employees of the event's
-// department, or everyone if the event isn't department-specific — the same
-// rule the reports use. Only once the event has started, and shown as
-// Ongoing (not yet Absent) until it ends.
+// didn't show up. Expected = approved Active employees in the event's
+// attendee list (services/eventAudience.js) — the same rule the reports use.
+// Only once the event has started, and shown as Ongoing (not yet Absent)
+// until it ends.
 async function absentRowsForEvent(eventId, department) {
   const [[ev]] = await pool.query(
     'SELECT id, title, department_id, start_datetime, end_datetime FROM events WHERE id = ?',
@@ -685,25 +697,27 @@ async function absentRowsForEvent(eventId, department) {
   );
   if (!ev || new Date(ev.start_datetime) > new Date()) return [];
 
-  let where = `WHERE e.is_approved = 1 AND e.remark = 'Active'
+  let where = `WHERE e.is_approved = 1
     AND NOT EXISTS (SELECT 1 FROM attendance a WHERE a.event_id = ? AND a.employee_id = e.id)`;
   const params = [ev.id];
-  if (ev.department_id) {
-    where += ' AND e.department_id = ?';
-    params.push(ev.department_id);
-  }
   if (department !== 'all') {
     where += ' AND d.name = ?';
     params.push(department);
   }
-  const [employees] = await pool.query(
-    `SELECT e.id AS employee_id, e.full_name, e.employee_code, d.name AS department_name
-     FROM employees e
-     JOIN departments d ON e.department_id = d.id
-     ${where}
-     ORDER BY e.full_name`,
-    params
-  );
+  const [[candidates], audiences] = await Promise.all([
+    pool.query(
+      `SELECT e.id, e.department_id, e.remark, e.id AS employee_id, e.full_name, e.employee_code, d.name AS department_name
+       FROM employees e
+       JOIN departments d ON e.department_id = d.id
+       ${where}
+       ORDER BY e.full_name`,
+      params
+    ),
+    eventAudience.loadAudiences([ev.id])
+  ]);
+  const employees = candidates
+    .filter((emp) => eventAudience.isExpected(emp, ev, audiences.get(ev.id)))
+    .map(({ id, department_id, remark, ...emp }) => emp);
   const eventDate = new Date(ev.start_datetime);
   const attendanceDate = `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, '0')}-${String(eventDate.getDate()).padStart(2, '0')}`;
   return employees.map((emp) => ({
@@ -781,8 +795,8 @@ async function submitAttendance(req, res, next) {
     // remote, so each sequential round trip delays the time-in.
     const now = new Date();
     const today = localDate(now);
-    const [[employeeExists], [deviceRows], [eventRows], [geofenceRows], [eventPointRows], [existingRows]] = await Promise.all([
-      pool.query('SELECT id FROM employees WHERE id = ?', [employee_id]),
+    const [[employeeExists], [deviceRows], [eventRows], [geofenceRows], [eventPointRows], [existingRows], audiences] = await Promise.all([
+      pool.query('SELECT id, department_id FROM employees WHERE id = ?', [employee_id]),
       pool.query('SELECT * FROM mobile_devices WHERE device_uid = ? AND employee_id = ?', [device_uid, employee_id]),
       pool.query('SELECT * FROM events WHERE id = ?', [event_id]),
       pool.query('SELECT * FROM geofences WHERE event_id = ? AND is_active = 1', [event_id]),
@@ -795,7 +809,8 @@ async function submitAttendance(req, res, next) {
       pool.query(
         'SELECT * FROM attendance WHERE employee_id = ? AND attendance_date = ? AND event_id = ?',
         [employee_id, today, event_id]
-      )
+      ),
+      eventAudience.loadAudiences([event_id])
     ]);
 
     // Same stale-local-session guard as deviceController.registerDevice —
@@ -842,6 +857,15 @@ async function submitAttendance(req, res, next) {
 
     if (now < new Date(event.start_datetime) || now > new Date(event.end_datetime)) {
       return res.status(400).json({ success: false, message: 'Attendance is only allowed during the scheduled event window.' });
+    }
+    // Limited to chosen offices/employees on the Geo-Fences page. A record
+    // already started before the admin changed the list is left to continue.
+    if (!existingRows[0] && !eventAudience.inAudience(employeeExists[0], event, audiences.get(event.id))) {
+      return res.status(403).json({
+        success: false,
+        code: 'NOT_AN_ATTENDEE',
+        message: "You aren't on the attendee list for this event, so there's no need to record attendance."
+      });
     }
 
     // 4. Geofence containment
@@ -962,7 +986,8 @@ async function submitAttendance(req, res, next) {
         eventId: event_id,
         deviceUid: device_uid,
         latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude)
+        longitude: parseFloat(longitude),
+        accuracy
       });
 
       res.status(200).json({
@@ -1019,7 +1044,8 @@ async function submitAttendance(req, res, next) {
       eventId: event_id,
       deviceUid: device_uid,
       latitude: parseFloat(latitude),
-      longitude: parseFloat(longitude)
+      longitude: parseFloat(longitude),
+      accuracy
     });
 
     res.status(201).json({
@@ -1369,52 +1395,36 @@ async function getAnomalies(req, res, next) {
 
 // GET /api/attendance/anomaly-rechecks  (admin — Verification page countdown)
 // Records that passed face verification less than anomalyRecheckSeconds ago
-// whose phone is STILL within anomalyDistanceMeters of another employee's
-// phone for the same event (the same distance test detectGeoAnomaly runs).
-// Those will be flagged again once the recheck window runs out, so the admin
-// page shows a countdown for each. seconds_left is computed in SQL time, the
-// client just ticks it down.
+// whose phone is STILL staying with another employee's phone for the same
+// event (the same test detectGeoAnomaly runs, colocatedRecords). Those will
+// be flagged again once the recheck window runs out, so the admin page shows
+// a countdown for each. seconds_left is computed in SQL time, the client
+// just ticks it down.
 async function getAnomalyRechecks(req, res, next) {
   try {
     const recheckSeconds = config.attendance.anomalyRecheckSeconds;
-    const windowSeconds = config.attendance.anomalyWindowSeconds;
     const maxMeters = config.attendance.anomalyDistanceMeters;
     const [rows] = await pool.query(
-      `SELECT x.*, (x.last_ping_at IS NOT NULL AND (x.latest_time_in IS NULL OR x.last_ping_at >= x.latest_time_in)) AS ping_is_newest,
-              (x.last_ping_at >= NOW() - INTERVAL ? SECOND) AS ping_fresh,
-              (x.latest_time_in >= NOW() - INTERVAL ? SECOND) AS time_in_fresh
-       FROM (
-         SELECT a.id, a.employee_id, a.event_id, a.requires_face_verification,
-                TIMESTAMPDIFF(SECOND, a.face_verified_at, NOW()) AS verified_ago_s,
-                a.last_lat, a.last_lng, a.latitude, a.longitude, a.last_ping_at,
-                GREATEST(a.time_in, COALESCE((SELECT MAX(s.time_in) FROM attendance_sessions s WHERE s.attendance_id = a.id), a.time_in)) AS latest_time_in,
-                e.full_name, e.employee_code, ev.title AS event_title
-         FROM attendance a
-         JOIN employees e ON a.employee_id = e.id
-         LEFT JOIN events ev ON a.event_id = ev.id
-         WHERE a.time_out IS NULL
-           AND a.event_id IN (
-             SELECT event_id FROM attendance
-             WHERE time_out IS NULL AND face_verified_at >= NOW() - INTERVAL ? SECOND
-           )
-       ) x`,
-      [windowSeconds, windowSeconds, recheckSeconds]
+      `SELECT a.id, a.employee_id, a.event_id, a.requires_face_verification,
+              TIMESTAMPDIFF(SECOND, a.face_verified_at, NOW()) AS verified_ago_s,
+              e.full_name, e.employee_code, ev.title AS event_title
+       FROM attendance a
+       JOIN employees e ON a.employee_id = e.id
+       LEFT JOIN events ev ON a.event_id = ev.id
+       WHERE a.time_out IS NULL
+         AND a.event_id IN (
+           SELECT event_id FROM attendance
+           WHERE time_out IS NULL AND face_verified_at >= NOW() - INTERVAL ? SECOND
+         )`,
+      [recheckSeconds]
     );
-    // Each phone's newest known position, only if it's fresh enough to count.
-    const pos = (r) => {
-      if (Number(r.ping_is_newest)) {
-        return Number(r.ping_fresh) && r.last_lat != null ? { lat: Number(r.last_lat), lng: Number(r.last_lng) } : null;
-      }
-      return Number(r.time_in_fresh) && r.latitude != null ? { lat: Number(r.latitude), lng: Number(r.longitude) } : null;
-    };
     const data = [];
     for (const r of rows) {
       if (Number(r.requires_face_verification)) continue;
       if (r.verified_ago_s == null || Number(r.verified_ago_s) >= recheckSeconds) continue;
-      const me = pos(r);
-      if (!me) continue;
-      const near = rows.find((o) => o.id !== r.id && o.event_id === r.event_id && o.employee_id !== r.employee_id &&
-        (() => { const p = pos(o); return p && geofenceService.distanceMeters(me.lat, me.lng, p.lat, p.lng) <= maxMeters; })());
+      const together = colocatedRecords(r.id);
+      if (!together.size) continue;
+      const near = rows.find((o) => o.id !== r.id && o.event_id === r.event_id && o.employee_id !== r.employee_id && together.has(String(o.id)));
       if (!near) continue;
       data.push({
         attendance_id: r.id,
@@ -1881,7 +1891,8 @@ async function heartbeat(req, res, next) {
             eventId: record.event_id,
             deviceUid: deviceRows[0]?.device_uid,
             latitude: parseFloat(latitude),
-            longitude: parseFloat(longitude)
+            longitude: parseFloat(longitude),
+            accuracy
           });
         }
         // `ignored`: last_ping_at wasn't moved, so the app doesn't count this
@@ -1928,7 +1939,8 @@ async function heartbeat(req, res, next) {
         eventId: record.event_id,
         deviceUid: deviceRows[0]?.device_uid,
         latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude)
+        longitude: parseFloat(longitude),
+        accuracy
       });
     }
 

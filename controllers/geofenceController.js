@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const config = require('../config/config');
 const { logAction } = require('../services/auditService');
 const pushService = require('../services/pushService');
+const eventAudience = require('../services/eventAudience');
 
 function centroidOf(points) {
   const sum = points.reduce((acc, p) => ({ lat: acc.lat + Number(p.lat), lng: acc.lng + Number(p.lng) }), { lat: 0, lng: 0 });
@@ -169,6 +170,8 @@ async function getGeofences(req, res, next) {
       pointsByGeofence[p.geofence_id].push({ lat: Number(p.lat), lng: Number(p.lng) });
     }
 
+    const audiences = await eventAudience.loadAudiences(rows.map((g) => g.event_id));
+
     // Auto activation/expiration based on event schedule
     const now = new Date();
     const withStatus = rows.map((g) => {
@@ -177,7 +180,15 @@ async function getGeofences(req, res, next) {
       let computedStatus = 'upcoming';
       if (now >= start && now <= end) computedStatus = 'active';
       else if (now > end) computedStatus = 'expired';
-      return { ...g, points: pointsByGeofence[g.id] || [], computed_status: computedStatus };
+      // Both empty = every employee is expected (see services/eventAudience.js).
+      const audience = audiences.get(g.event_id);
+      return {
+        ...g,
+        points: pointsByGeofence[g.id] || [],
+        computed_status: computedStatus,
+        attendee_department_ids: audience ? [...audience.departmentIds] : [],
+        attendee_employee_ids: audience ? [...audience.employeeIds] : []
+      };
     });
 
     res.json({ success: true, data: withStatus });
@@ -214,6 +225,8 @@ async function createGeofence(req, res, next) {
     if (recurrence_type === 'weekly' && (!recurrence_days || !recurrence_end_date)) {
       return res.status(400).json({ success: false, message: 'Recurring schedules need at least one weekday and an end date.' });
     }
+    const attendees = eventAudience.parseAttendees(req.body) || { departmentIds: [], employeeIds: [] };
+    if (attendees.error) return res.status(400).json({ success: false, message: attendees.error });
 
     // Latitude/Longitude typed manually in the form take priority over the auto-computed centroid.
     const hasManualCoords = center_lat !== undefined && center_lat !== null && center_lat !== '' &&
@@ -279,10 +292,16 @@ async function createGeofence(req, res, next) {
       }
     }
 
+    // Every occurrence of a recurring event gets the same attendees.
+    await eventAudience.saveAudience(conn, createdEventIds, attendees);
+
     await conn.commit();
     await logAction({
       adminId: req.admin.id, action: 'create', module: 'geofence',
-      details: { geofenceId: firstGeofenceId, pointCount: points.length, occurrences: occurrences.length },
+      details: {
+        geofenceId: firstGeofenceId, pointCount: points.length, occurrences: occurrences.length,
+        attendeeDepartments: attendees.departmentIds.length, attendeeEmployees: attendees.employeeIds.length
+      },
       ip: req.ip
     });
 
@@ -295,8 +314,13 @@ async function createGeofence(req, res, next) {
     });
     // Tells every approved phone, including ones with the app closed. Not
     // awaited: the admin's save shouldn't wait on Expo's push service.
+    // Limited events only notify the employees they're limited to.
+    const restricted = attendees.departmentIds.length > 0 || attendees.employeeIds.length > 0;
+    const employeeIds = restricted
+      ? await eventAudience.audienceEmployeeIds({ id: parentEventId }, { activeOnly: false }).catch(() => [])
+      : null;
     pushService.notifyNewEvent({
-      eventId: parentEventId, title, venue, start: occurrences[0].start, occurrenceCount: occurrences.length
+      eventId: parentEventId, title, venue, start: occurrences[0].start, occurrenceCount: occurrences.length, employeeIds
     });
   } catch (err) {
     await conn.rollback();
@@ -320,6 +344,8 @@ async function updateGeofence(req, res, next) {
     if (!Array.isArray(points) || points.length < 3) {
       return res.status(400).json({ success: false, message: 'At least 3 boundary points are required.' });
     }
+    const attendees = eventAudience.parseAttendees(req.body); // null = keep the current attendees
+    if (attendees && attendees.error) return res.status(400).json({ success: false, message: attendees.error });
 
     // Latitude/Longitude typed manually in the form take priority over the auto-computed centroid.
     const hasManualCoords = center_lat !== undefined && center_lat !== null && center_lat !== '' &&
@@ -354,6 +380,8 @@ async function updateGeofence(req, res, next) {
       );
     }
 
+    if (attendees) await eventAudience.saveAudience(conn, [existing[0].event_id], attendees);
+
     await conn.commit();
     await logAction({ adminId: req.admin.id, action: 'update', module: 'geofence', details: { id, pointCount: points.length }, ip: req.ip });
 
@@ -382,6 +410,23 @@ async function deleteGeofence(req, res, next) {
   }
 }
 
+// GET /api/geofences/attendee-options — offices and approved employees for
+// the Geo-Fences form's "Required Attendees" picker.
+async function getAttendeeOptions(req, res, next) {
+  try {
+    const [[departments], [employees]] = await Promise.all([
+      pool.query('SELECT id, name FROM departments ORDER BY name'),
+      pool.query(
+        `SELECT id, employee_code, full_name, department_id, remark
+         FROM employees WHERE is_approved = 1 ORDER BY full_name`
+      )
+    ]);
+    res.json({ success: true, data: { departments, employees } });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // PATCH /api/geofences/:id/toggle  { enable: true|false }
 async function toggleGeofence(req, res, next) {
   try {
@@ -397,7 +442,7 @@ async function toggleGeofence(req, res, next) {
 async function getActiveForMobile(req, res, next) {
   try {
     const [rows] = await pool.query(
-      `SELECT g.id, g.event_id, g.title, g.venue, e.start_datetime, e.end_datetime
+      `SELECT g.id, g.event_id, g.title, g.venue, e.start_datetime, e.end_datetime, e.department_id AS event_department_id
        FROM geofences g JOIN events e ON g.event_id = e.id
        WHERE g.is_active = 1 AND e.end_datetime >= NOW()
        ORDER BY e.start_datetime ASC`
@@ -414,8 +459,17 @@ async function getActiveForMobile(req, res, next) {
       pointsByGeofence[p.geofence_id].push({ lat: Number(p.lat), lng: Number(p.lng) });
     }
 
+    // Only the events this employee is required to attend.
+    const [[[employee]], audiences] = await Promise.all([
+      pool.query('SELECT id, department_id FROM employees WHERE id = ?', [req.employee.id]),
+      eventAudience.loadAudiences(rows.map((g) => g.event_id))
+    ]);
+    const mine = employee
+      ? rows.filter((g) => eventAudience.inAudience(employee, { department_id: g.event_department_id }, audiences.get(g.event_id)))
+      : [];
+
     const now = new Date();
-    const withStatus = rows.map((g) => {
+    const withStatus = mine.map(({ event_department_id, ...g }) => {
       const start = new Date(g.start_datetime);
       const end = new Date(g.end_datetime);
       const computed_status = now >= start && now <= end ? 'active' : 'upcoming';
@@ -428,4 +482,4 @@ async function getActiveForMobile(req, res, next) {
   }
 }
 
-module.exports = { getGeofences, createGeofence, updateGeofence, deleteGeofence, toggleGeofence, getActiveForMobile, getDefaultLocation, saveDefaultLocation };
+module.exports = { getGeofences, createGeofence, updateGeofence, deleteGeofence, toggleGeofence, getActiveForMobile, getDefaultLocation, saveDefaultLocation, getAttendeeOptions };

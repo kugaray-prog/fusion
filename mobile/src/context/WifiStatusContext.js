@@ -1,12 +1,11 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, Platform } from 'react-native';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
+import { IS_EXPO_GO } from '../utils/expoGo';
 import * as Network from 'expo-network';
 
 // react-native-wifi-reborn is a custom native module that Expo Go doesn't
 // include, and only the Android branch below uses it -- so it's only loaded
 // there. Everywhere else (iOS, Expo Go) checkNow() falls back to expo-network.
-const IS_EXPO_GO = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 // eslint-disable-next-line global-require
 const WifiManager = Platform.OS === 'android' && !IS_EXPO_GO ? require('react-native-wifi-reborn').default : null;
 

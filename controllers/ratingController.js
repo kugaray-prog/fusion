@@ -2,23 +2,14 @@ const pool = require('../config/db');
 const { localDate } = require('../services/dateService');
 const { logAction } = require('../services/auditService');
 const { settleEndedEvents } = require('./attendanceController');
+const { audienceEmployeeIds } = require('../services/eventAudience');
 
-// The employees "expected" at a given event: everyone in the event's
-// department, or the entire roster when the event isn't department-scoped
-// (department_id IS NULL === company-wide, e.g. a flag ceremony everyone
-// must attend).
-async function expectedEmployeeIdsForEvent(event) {
-  const params = [];
-  // Inactive/On-leave employees aren't expected anywhere — never auto-mark
-  // them Absent for an event they were never going to attend.
-  let where = "remark = 'Active' AND is_approved = 1";
-  if (event.department_id) {
-    where += ' AND department_id = ?';
-    params.push(event.department_id);
-  }
-  const [rows] = await pool.query(`SELECT id FROM employees WHERE ${where}`, params);
-  return rows.map((r) => r.id);
-}
+// The employees "expected" at a given event: its chosen attendees (offices
+// and/or individual employees picked on the Geo-Fences page), else everyone
+// in the event's department, or the entire roster when the event isn't
+// department-scoped. On-leave employees aren't expected anywhere — never
+// auto-mark them Absent for an event they were never going to attend.
+const expectedEmployeeIdsForEvent = (event) => audienceEmployeeIds(event);
 
 // Auto-generates/refreshes employee_ratings rows for every COMPLETED event
 // (its schedule has already ended) that starts within [rangeStart, rangeEnd).
@@ -49,7 +40,17 @@ async function generateRatingsForRange(rangeStart, rangeEnd) {
   if (!events.length) return events;
 
   for (const ev of events) {
-    const employeeIds = await expectedEmployeeIdsForEvent(ev);
+    const [employeeIds, audienceIds] = await Promise.all([
+      expectedEmployeeIdsForEvent(ev),
+      audienceEmployeeIds(ev, { activeOnly: false })
+    ]);
+    // Drop auto-generated ratings of anyone taken off the event's attendee
+    // list (e.g. after it ended). Manual ratings, and those of employees who
+    // only went on leave later, are kept.
+    await pool.query(
+      `DELETE FROM employee_ratings WHERE event_id = ? AND is_manual = 0 ${audienceIds.length ? 'AND employee_id NOT IN (?)' : ''}`,
+      audienceIds.length ? [ev.id, audienceIds] : [ev.id]
+    );
     if (!employeeIds.length) continue;
 
     const [attendanceRows] = await pool.query(

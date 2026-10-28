@@ -20,22 +20,17 @@ So "deploying on GitHub" really means two things:
 
 This guide covers both, with two alternative paths for step 2:
 
-| | **Option A — Render + Aiven** (both genuinely free) | **Option B — Your own VPS** |
+| | **Option A — Docker** (default) | **Option B — Your own VPS, no Docker** |
 |---|---|---|
-| Best for | $0, fastest path to a live URL | Full control, no PaaS limits |
-| MySQL | Aiven's free managed MySQL (separate signup) | You install and manage it |
-| HTTPS | Automatic | You set it up (Nginx + Certbot, included below) |
-| Cost | **$0** — no credit card for either service | A $5-6/mo VPS covers this app comfortably |
-| Catch | Free web service sleeps after 15 min idle (~30-60s to wake up); **no persistent disk** — `uploads/` (employee photos, OCR scans, selfies) is wiped on every redeploy | You own patching, backups, uptime |
+| Best for | Running on this PC or any machine with Docker | Full control without containers |
+| MySQL | The `db` container in `docker-compose.yml` (MySQL 8) | You install and manage it |
+| HTTPS | The `tunnel` container (dev tunnel), or Nginx in front | You set it up (Nginx + Certbot, included below) |
+| Cost | $0 on your own machine | A $5-6/mo VPS covers this app comfortably |
+| Catch | The machine has to stay on | You own patching, backups, uptime |
 | Ongoing effort | Low | Higher |
 
 Pick **one**. Both are covered start to finish below; skip the one you're
-not using. (An earlier version of this guide recommended Railway — Railway
-no longer has a free tier for an always-on web service, only a paid Hobby
-plan starting at $5/mo, so it's dropped here in favor of an option that's
-actually free. If you'd rather use Railway, or Fly.io, or another PaaS
-anyway, Part 3 still transfers conceptually: create the service from this
-repo, provision a MySQL 8+ database, set the same environment variables.)
+not using.
 
 Everything in this guide is specific to this repository as it exists today
 — real script names, real environment variable names, and two things
@@ -57,7 +52,7 @@ advice would miss:
 
 - A GitHub account, with [Git](https://git-scm.com/downloads) installed locally.
 - Node.js **18 or newer** (`package.json` requires it — `node -v` to check).
-- Either a [Render](https://render.com) account + an [Aiven](https://aiven.io) account (Option A, both free, no card needed) or a VPS/cloud server you can SSH into (Option B, costs a few dollars a month).
+- Either [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Option A) or a VPS/cloud server you can SSH into (Option B, costs a few dollars a month).
 - A [Google Cloud Console](https://console.cloud.google.com/) project, for:
   - A **Maps JavaScript API** key (the admin dashboard's map views).
   - An **OAuth 2.0 Client ID**, Web application type (mobile "Continue with Google").
@@ -71,16 +66,14 @@ advice would miss:
 
 This repo already includes everything this guide references:
 `.gitignore`, `.env.example`, `Dockerfile`, `.dockerignore`,
-`ecosystem.config.js`, `nginx.conf.example`, `render.yaml`, and two
+`docker-compose.yml`, `ecosystem.config.js`, `nginx.conf.example`, and two
 workflows under `.github/workflows/` (`ci.yml`, `deploy-vps.yml`). Nothing
 to copy in — skip straight to 1.2.
 
-> Option A (Render) doesn't need a GitHub Actions workflow at all — Render
-> auto-deploys on every push once you connect the repo in its dashboard
-> (Part 3). `deploy-vps.yml` is only relevant if you're doing Option B; it's
-> harmless to leave in place either way (it only runs if you've added the
-> `VPS_*` secrets it needs — see its own comments), but delete it if you'd
-> rather not see it sit unused.
+> `deploy-vps.yml` is only relevant if you're doing Option B; it's harmless
+> to leave in place either way (it only runs if you've added the `VPS_*`
+> secrets it needs — see its own comments), but delete it if you'd rather
+> not see it sit unused.
 
 ### 1.2 Initialize Git and make the first commit
 
@@ -122,133 +115,77 @@ Open the repo on github.com and spot-check:
 
 ---
 
-## Part 2 — Database first (both options need this)
+## Part 2 — Database
 
-Whichever hosting option you pick, you'll end up needing a MySQL 8.0+
-database reachable from your app, loaded with this project's schema.
+This app needs MySQL 8.0+ loaded with `database/schema.sql`, which creates
+every table plus the default admin, the CSPC departments/offices and the
+default settings.
 
-**Option A (Render) needs Aiven specifically for this** — Render's own free
-tier only offers managed PostgreSQL, not MySQL, and this app requires
-MySQL 8+ (see the note at the top of this guide). Aiven's free MySQL is a
-separate, no-card-required signup:
+**Option A (Docker):** nothing to do by hand. The `db` service in
+`docker-compose.yml` runs MySQL 8 and loads `database/schema.sql`
+automatically the first time it starts (while its `db_data` volume is still
+empty). Its connection details:
 
-1. [aiven.io](https://aiven.io) → sign up → **Create service** → **MySQL** → pick the **Free** plan → pick any region (closer to your Render region is marginally faster, but the free plan doesn't let you choose Render's exact region, so don't worry about matching them precisely) → **Create service**.
-2. Wait for it to turn green ("Running") — a couple of minutes.
-3. Open the service → **Overview** tab → **Connection information**. You'll need `Host`, `Port`, `User`, `Password`, and `Default database name` from here for Part 3.3.
-4. Same page, **CA certificate** → **Download** → save it as `aiven-ca.pem` — Part 3.3 uploads this to Render so the connection can be verified over SSL (Aiven requires SSL; `config/db.js` already supports this via `DB_SSL_CA`, added specifically for this).
-5. Load the schema, from your own machine (Aiven's free MySQL is reachable from anywhere by default — that's how Render will reach it too):
-   ```bash
-   mysql -h <Host> -P <Port> -u <User> -p --ssl-ca=aiven-ca.pem <Default database name> < database/schema.sql
-   mysql -h <Host> -P <Port> -u <User> -p --ssl-ca=aiven-ca.pem <Default database name> < database/migration_v15_cspc_email_domain.sql
-   mysql -h <Host> -P <Port> -u <User> -p --ssl-ca=aiven-ca.pem <Default database name> < database/migration_v16_position_gender_classification.sql
-   mysql -h <Host> -P <Port> -u <User> -p --ssl-ca=aiven-ca.pem <Default database name> < database/migration_v17_classification_remark_cleanup.sql
-   ```
-   `schema.sql` reflects the final shape of every table, so this is the
-   complete set needed on a brand-new database — each migration only
-   touches rows that already exist on an older value, so running all of
-   them against a fresh database is safe; they simply do nothing.
+| | From this PC (`npm start`, MySQL Workbench) | From the `app` container |
+|---|---|---|
+| Host | `localhost` | `db` |
+| Port | `3307` | `3306` |
+| User | `root` | `root` |
+| Password | `geoattend_root` (or `MYSQL_ROOT_PASSWORD` in `.env`) | same |
+| Database | `geoattend_pro` | same |
 
-**Option B (VPS)** — install MySQL yourself; Part 4.3 covers this and the
-same four commands apply directly (no `--ssl-ca` flag needed for a local
-MySQL you control).
+`docker-compose.yml` already sets the container-side values for the app, so
+`.env` only needs the "from this PC" column.
 
-Either way, once your `.env` is in place (Part 5) and pointed at this
-database:
+To start over with an empty database (this **deletes all data**):
 
 ```bash
-npm run seed
+docker compose down -v      # removes the db_data volume
+docker compose up -d        # schema.sql runs again on the fresh volume
 ```
 
-This creates the default admin account (`DEFAULT_ADMIN_EMAIL` /
-`DEFAULT_ADMIN_PASSWORD` from `.env`) and the starting set of departments.
-**Log in once and change that password immediately** — Settings → Admin
-Accounts.
+**Option B (VPS)** — install MySQL yourself; Part 4.3 covers this.
+
+Optional, either way: `npm run seed` (Docker: `docker compose exec app npm run seed`)
+adds the sample employees and creates the admin from `DEFAULT_ADMIN_EMAIL` /
+`DEFAULT_ADMIN_PASSWORD` in `.env`. The admin created by `schema.sql` is
+`admin@my.cspc.edu.ph` / `password`. **Log in once and change that password
+immediately** — Settings → Admin Accounts.
 
 ---
 
-## Part 3 — Option A: Deploy to Render (+ Aiven MySQL)
+## Part 3 — Option A: Run with Docker
 
-### 3.1 Create the web service
+### 3.1 Configure
 
-1. [render.com](https://render.com) → sign up (no card needed for the free tier) → **New +** → **Web Service** → connect your GitHub account → select the `geoattend-pro` repo.
-2. Render reads `render.yaml` (already in this repo) automatically and pre-fills most settings — confirm **Instance Type: Free**, then continue rather than creating the service yet (the next step sets variables first).
+```bash
+cp .env.example .env    # then fill in real values — see Part 5
+```
 
-   If Render doesn't offer the Blueprint/`render.yaml` path for some reason, set these manually instead: **Runtime: Node**, **Build Command:**
-   ```
-   npm ci && bash -c "if [ ! -f models/w600k_r50.onnx ]; then curl -L -o /tmp/buffalo_l.zip https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip && unzip -o /tmp/buffalo_l.zip w600k_r50.onnx -d models/ && rm /tmp/buffalo_l.zip; fi"
-   ```
-   **Start Command:** `node server.js`.
+Set `HOST_LAN_IP` in `.env` to this machine's Wi-Fi IPv4 (`ipconfig`) so
+phones on the same network can reach it.
 
-### 3.2 Upload the Aiven CA certificate
+### 3.2 Start
 
-**Environment** tab → **Secret Files** → **Add Secret File** → path
-`/etc/secrets/aiven-ca.pem` → paste the contents of the `aiven-ca.pem` you
-downloaded in Part 2. This makes the file available inside the running
-service at that exact path.
+```bash
+docker compose up -d --build
+docker compose ps             # db should show "healthy", app "running"
+docker compose logs -f app    # look for "MySQL connected successfully."
+```
 
-### 3.3 Set environment variables
+The admin dashboard is at `http://localhost:3000`. Uploaded files are kept in
+the `uploads` volume and the database in the `db_data` volume, so both
+survive `docker compose down` / `up` and rebuilds (but not `down -v`).
 
-Same **Environment** tab, **Environment Variables** section — add every key
-from `.env.example`, with these values:
+### 3.3 Updates
 
-| Key | Value |
-|---|---|
-| `DB_HOST` | Aiven's `Host` (Part 2.3) |
-| `DB_PORT` | Aiven's `Port` |
-| `DB_USER` | Aiven's `User` |
-| `DB_PASSWORD` | Aiven's `Password` |
-| `DB_NAME` | Aiven's `Default database name` |
-| `DB_SSL_CA` | `/etc/secrets/aiven-ca.pem` (the path from 3.2, not the file's contents) |
-| `NODE_ENV` | `production` |
-| everything else | your own real values — see Part 5 |
+```bash
+git pull
+docker compose up -d --build app
+```
 
-Don't set `PORT` — Render assigns one itself and injects it; `server.js`
-already reads `process.env.PORT`.
-
-### 3.4 Deploy
-
-**Create Web Service** (or **Save Changes** if you set variables before
-creating it). Render builds and starts the app — watch progress in the
-**Logs** tab; the model-download step in the build command adds a couple of
-minutes the first time. Every future push to `main` redeploys automatically,
-no GitHub Actions needed.
-
-Once it's live, seed the admin account from your own machine against the
-same Aiven database (`npm run seed` reads your local `.env` — point a
-temporary local `.env` at the Aiven connection details from Part 2, or run
-`DB_HOST=... DB_SSL_CA=aiven-ca.pem npm run seed` inline with the real
-values in place of `...`).
-
-### 3.5 Get your URL
-
-Your app is live at the `.onrender.com` URL shown at the top of the
-service page (or attach a custom domain under **Settings → Custom Domains**,
-still free). Continue to Part 6.
-
-**About the free tier's cold starts:** a free Render web service spins down
-after 15 minutes with no requests, and takes roughly 30-60 seconds to wake
-back up on the next one — the person hitting it sees a slow first load, not
-an error. Fine for a college's internal attendance system that isn't
-expected to answer instantly at 3 AM; if that delay is ever a real problem,
-Render's paid tier removes it starting at $7/mo, or an external "ping every
-10 minutes" service (e.g. a free [UptimeRobot](https://uptimerobot.com)
-monitor hitting `/api/health`) keeps it warm without paying anything, at
-the cost of the instance never really sleeping (750 free instance-hours/
-month is enough for one always-on service, so this stays within the free
-tier).
-
-**About the free tier's disk (read this one before you rely on it):**
-Render's free web service has **no persistent disk** — anything written to
-the local filesystem while the app runs (`uploads/`: employee photos, OCR
-scans, selfies; the downloaded `w600k_r50.onnx`) is thrown away and rebuilt
-from scratch on every redeploy or restart. The MySQL data itself is safe
-(it lives on Aiven, a separate service), but **uploaded files are not** —
-don't treat this combination as the final home for real employee photos
-without one of: Render's paid persistent disk add-on ($0.25/GB/mo, the
-cheapest fix), swapping `uploads/` for an external object store (e.g. a
-free-tier Cloudflare R2 or Backblaze B2 bucket — a real code change this
-guide doesn't cover), or Option B (a VPS's disk is normal and persistent,
-no extra cost or code change).
+New columns/tables are added by `services/schemaUpgrades.js` when the app
+starts, so an existing `db_data` volume doesn't need re-importing.
 
 ---
 
@@ -359,10 +296,10 @@ Every key `.env.example` lists, and where its value actually comes from:
 
 | Key | Where it comes from |
 |---|---|
-| `PORT` | Leave unset on Render (it assigns one itself); `3000` for a VPS unless something else on the host needs that port |
+| `PORT` | `3000` unless something else on the host needs that port (Docker sets it for the container) |
 | `NODE_ENV` | `production` |
-| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Your MySQL instance — Aiven's Connection Information page (Part 2) for Option A, your own values for Option B |
-| `DB_SSL_CA` | Option A only: `/etc/secrets/aiven-ca.pem` (Part 3.2/3.3). Leave unset for a local MySQL that doesn't use SSL (Option B). |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | Option A: the Docker MySQL from this PC — `localhost` / `3307` / `root` / `geoattend_root` / `geoattend_pro` (Part 2). Option B: your own values |
+| `MYSQL_ROOT_PASSWORD` | Option A only, optional: the Docker MySQL root password (default `geoattend_root`). Set `DB_PASSWORD` to the same value |
 | `JWT_SECRET` / `SESSION_SECRET` | Generate fresh, random values — command below |
 | `DEFAULT_ADMIN_EMAIL` | Whatever you want the first admin login to be |
 | `DEFAULT_ADMIN_PASSWORD` | A strong temporary password — change it after first login |
@@ -378,9 +315,6 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
 Run it twice — `JWT_SECRET` and `SESSION_SECRET` must be different values.
-(Render can also generate these for you automatically if you deploy via
-`render.yaml` — see `generateValue: true` in that file — this manual command
-is for Option B, or if you'd rather set them yourself either way.)
 
 > **Security note on your current `.env`:** whatever database password, JWT
 > secret, and API keys are sitting in your existing local `.env` file should
@@ -390,8 +324,8 @@ is for Option B, or if you'd rather set them yourself either way.)
 > for this deployment rather than copying the old ones over — it costs
 > nothing and closes that door.
 
-For the Google OAuth Client ID specifically: add your deployed URL (the
-Render `.onrender.com` URL, or `https://your-domain.com`) to
+For the Google OAuth Client ID specifically: add your deployed URL (the dev
+tunnel's `https://...devtunnels.ms` URL, or `https://your-domain.com`) to
 **Authorized JavaScript origins** in Google Cloud Console, or the mobile
 app's "Continue with Google" button will fail.
 
@@ -569,7 +503,7 @@ before that change still points at whatever URL was in there when it ran.
 - [ ] `DB_PASSWORD` is a new value, not reused from any prior `.env`.
 - [ ] `ATTENDANCE_MAX_ACCURACY_METERS` lowered from the testing default of `500` to something like `100`.
 - [ ] `GOOGLE_MAPS_API_KEY` restricted to your domain in Google Cloud Console (an unrestricted key can be used by anyone who finds it).
-- [ ] HTTPS is actually active (Render: automatic; VPS: confirmed via Part 4.6) — an attendance/geofencing app should never run over plain HTTP.
+- [ ] HTTPS is actually active (Docker: through the dev tunnel or Nginx; VPS: confirmed via Part 4.6) — an attendance/geofencing app should never run over plain HTTP.
 - [ ] The GitHub repo is **Private**.
 - [ ] `.env` is confirmed absent from the repo (Part 1.4).
 - [ ] MySQL is not reachable from the public internet on a VPS (bind to `127.0.0.1` in `/etc/mysql/mysql.conf.d/mysqld.cnf` unless something outside the server genuinely needs direct access).
@@ -595,20 +529,19 @@ connection, and the schema are all correctly wired together end to end.
 - **Updates:** push to `main` → your chosen workflow deploys automatically. `ci.yml` runs on every push/PR regardless of which deploy path you picked, catching an obvious syntax mistake before it reaches production.
 - **Database backups:**
   ```bash
-  mysqldump -h <Aiven host> -P <Aiven port> -u <user> -p --ssl-ca=aiven-ca.pem <database> > backup_$(date +%Y%m%d).sql
+  # Docker
+  docker compose exec db mysqldump -u root -pgeoattend_root geoattend_pro > backup_$(date +%Y%m%d).sql
+  # VPS
+  mysqldump -u root -p geoattend_pro > backup_$(date +%Y%m%d).sql
   ```
-  Aiven's free MySQL includes automated backups on its own (Aiven console →
-  your service → **Backups**); the command above is for an extra copy in
-  your own hands. On a VPS, automate the equivalent with a daily cron job.
+  Automate this with a daily scheduled task / cron job. Restore with
+  `docker compose exec -T db mysql -u root -pgeoattend_root geoattend_pro < backup.sql`.
 - **Logs:**
-  - Render: the **Logs** tab on the service page.
+  - Docker: `docker compose logs -f app`
   - VPS: `pm2 logs geoattend-pro`
-- **Uploaded files** (`uploads/` — employee photos, OCR scans, etc.) live on
-  whatever disk the app runs on. On a VPS, back this up the same way as the
-  database. **Render's free tier has no persistent disk at all** — this
-  directory (and the downloaded `w600k_r50.onnx`) resets on every redeploy;
-  a paid Render disk ($0.25/GB/mo) fixes this if uploaded-file persistence
-  matters for your use, or move to Option B.
+- **Uploaded files** (`uploads/` — employee photos, OCR scans, etc.) live in
+  the `uploads` Docker volume (Option A) or on the server's disk (Option B).
+  Back them up the same way as the database.
 
 ---
 
@@ -630,7 +563,11 @@ mysql -u root -p geoattend_pro < database/schema.sql
 mysql -u root -p geoattend_pro < database/migration_v15_cspc_email_domain.sql
 mysql -u root -p geoattend_pro < database/migration_v16_position_gender_classification.sql
 mysql -u root -p geoattend_pro < database/migration_v17_classification_remark_cleanup.sql
-# (Aiven/managed MySQL: add --ssl-ca=aiven-ca.pem to each of the four lines above)
+
+# Docker
+docker compose up -d --build     # app on http://localhost:3000, MySQL on localhost:3307
+docker compose logs -f app
+docker compose down -v           # wipe the database (schema.sql reloads on next up)
 
 # VPS process management
 pm2 restart geoattend-pro

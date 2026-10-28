@@ -87,6 +87,18 @@
         .nav-item { display: flex; align-items: center; gap: 14px; padding: 16px 20px; border-radius: 20px; color: var(--text-muted); font-weight: 700; cursor: pointer; margin-bottom: 8px; }
         .nav-item.active { background: var(--primary); color: white; box-shadow: 0px 12px 24px rgba(13, 0, 165, 0.25); }
         .weekday-chip { display:flex; align-items:center; gap:5px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
+        /* Geo-Fences form: Required Attendees picker */
+        .gf-att-hint { font-size: 0.72rem; color: var(--text-muted); margin: 0 0 12px; }
+        .gf-att-label { display:block; font-size: 0.68rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px; }
+        .gf-att-depts { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; max-height: 140px; overflow-y: auto; }
+        .gf-att-list { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; max-height: 220px; overflow-y: auto; }
+        .gf-att-row { display:flex; align-items:center; gap:10px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 0.8rem; cursor: pointer; }
+        .gf-att-row:last-child { border-bottom: none; }
+        .gf-att-row.is-implied { opacity: 0.6; cursor: default; }
+        .gf-att-row span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .gf-att-row small { color: var(--text-muted); font-size: 0.7rem; }
+        .gf-att-empty { padding: 14px; text-align:center; font-size: 0.78rem; color: var(--text-muted); }
+        .gf-att-summary { margin-top: 10px; font-size: 0.78rem; font-weight: 800; color: var(--primary); }
 
         header { padding: 30px 45px; display: flex; justify-content: space-between; align-items: center; }
         .nav-tool-btn { width: 48px; height: 48px; border-radius: 16px; background: var(--bg-card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-main); }
@@ -993,6 +1005,140 @@
             .splash-bar span { width: 100%; opacity: 0.6; }
         }
     </style>
+    <style>
+        /* ============ Sign-in ============ */
+        #login-screen { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(440px, 0.85fr); background: var(--bg-body); align-items: stretch; justify-content: stretch; overflow-y: auto; }
+
+        /* ---- Left: story panel ---- */
+        .lg-hero { position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: 44px 52px; color: #fff; isolation: isolate; margin: 14px 0 14px 14px; border-radius: 28px; background: #0A0870; }
+        .lg-hero-photo { position: absolute; inset: -3%; z-index: -3; background: url('/img/cspc-campus.png') center 40% / cover no-repeat; filter: grayscale(1) contrast(1.1) brightness(0.95); animation: lgDrift 32s ease-in-out infinite alternate; }
+        /* Duotone: brand blue -> violet over a grayscale photo; also hides the
+           photo's low resolution. */
+        .lg-hero-tint { position: absolute; inset: 0; z-index: -2; background:
+            radial-gradient(120% 80% at 85% 10%, rgba(67, 24, 255, 0.55) 0%, transparent 55%),
+            linear-gradient(160deg, rgba(13, 0, 165, 0.82) 0%, rgba(30, 20, 140, 0.62) 45%, rgba(8, 10, 60, 0.94) 100%); }
+        .lg-hero-grid { position: absolute; inset: 0; z-index: -1; opacity: 0.35;
+            background-image: linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+            background-size: 48px 48px; -webkit-mask-image: radial-gradient(ellipse at 60% 40%, #000 20%, transparent 75%); mask-image: radial-gradient(ellipse at 60% 40%, #000 20%, transparent 75%); }
+        @keyframes lgDrift { from { transform: scale(1.03); } to { transform: scale(1.12) translate(-1.5%, -1%); } }
+
+        .lg-hero-top { display: flex; align-items: center; gap: 14px; }
+        .lg-hero-top img { width: 48px; height: 48px; border-radius: 50%; background: #fff; padding: 3px; object-fit: contain; box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.15); }
+        .lg-hero-top strong { display: block; font-size: 0.82rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+        .lg-hero-top small { font-size: 0.78rem; color: rgba(255, 255, 255, 0.65); }
+
+        /* Geofence radar */
+        .lg-radar { position: absolute; top: 44%; left: 60%; width: 360px; height: 360px; transform: translate(-50%, -50%); z-index: -1; pointer-events: none; }
+        .lg-radar-ring { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid rgba(160, 150, 255, 0.55); animation: lgPulse 4.5s cubic-bezier(0.2, 0.6, 0.4, 1) infinite; }
+        .lg-radar-ring:nth-child(2) { animation-delay: 1.5s; }
+        .lg-radar-ring:nth-child(3) { animation-delay: 3s; }
+        .lg-radar-sweep { position: absolute; inset: 18%; border-radius: 50%; background: conic-gradient(from 0deg, rgba(124, 107, 255, 0.45), transparent 28%); border: 1px dashed rgba(255, 255, 255, 0.35); animation: lgSpin 6s linear infinite; }
+        .lg-radar-pin { position: absolute; top: 50%; left: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #fff, #E4E1FF); color: #0D00A5; box-shadow: 0 0 0 10px rgba(255, 255, 255, 0.12), 0 12px 30px rgba(0, 0, 0, 0.35); animation: lgBob 3s ease-in-out infinite; }
+        .lg-radar-pin svg { width: 26px; height: 26px; }
+        @keyframes lgPulse { 0% { transform: scale(0.25); opacity: 0; } 15% { opacity: 1; } 100% { transform: scale(1); opacity: 0; } }
+        @keyframes lgSpin { to { transform: rotate(360deg); } }
+        @keyframes lgBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+        /* Floating status cards */
+        .lg-float { position: absolute; display: flex; align-items: center; gap: 12px; padding: 12px 18px 12px 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.22); backdrop-filter: blur(16px) saturate(150%); -webkit-backdrop-filter: blur(16px) saturate(150%); box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.4); animation: lgFloat 6s ease-in-out infinite; }
+        .lg-float strong { display: block; font-size: 0.86rem; font-weight: 700; }
+        .lg-float small { font-size: 0.74rem; color: rgba(255, 255, 255, 0.7); }
+        .lg-float-icon { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; }
+        .lg-float-icon svg { width: 19px; height: 19px; }
+        .lg-ok { background: rgba(5, 205, 153, 0.22); color: #4BF0C4; }
+        .lg-face { background: rgba(124, 107, 255, 0.3); color: #D2CCFF; }
+        .lg-live { width: 12px; height: 12px; margin: 0 6px 0 8px; border-radius: 50%; background: #05CD99; animation: lgLive 1.8s ease-out infinite; }
+        .lg-float-a { top: 17%; right: 7%; }
+        .lg-float-b { top: 42%; left: 7%; animation-delay: -2s; }
+        .lg-float-c { top: 58%; right: 9%; animation-delay: -4s; }
+        @keyframes lgFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        @keyframes lgLive { 0% { box-shadow: 0 0 0 0 rgba(5, 205, 153, 0.6); } 100% { box-shadow: 0 0 0 12px rgba(5, 205, 153, 0); } }
+
+        .lg-hero-copy { max-width: 560px; }
+        .lg-eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 6px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.2); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 18px; }
+        .lg-eyebrow span { width: 7px; height: 7px; border-radius: 50%; background: #4BF0C4; box-shadow: 0 0 10px #4BF0C4; }
+        .lg-hero-copy h2 { font-size: clamp(2rem, 3.4vw, 3.1rem); font-weight: 800; line-height: 1.08; letter-spacing: -0.035em; margin-bottom: 16px; }
+        .lg-hero-copy h2 em { font-style: normal; background: linear-gradient(90deg, #C9C3FF, #8FF5D8); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .lg-hero-copy p { font-size: 1rem; line-height: 1.65; color: rgba(255, 255, 255, 0.75); max-width: 46ch; }
+        .lg-chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+        .lg-chips li { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.18); font-size: 0.8rem; font-weight: 600; }
+        .lg-chips svg { width: 15px; height: 15px; color: #B9B3FF; }
+
+        /* ---- Right: sign-in panel ---- */
+        .lg-panel { position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 56px 40px 28px; }
+        .lg-panel::before { content: ''; position: absolute; inset: 0; background-image: radial-gradient(rgba(67, 24, 255, 0.13) 1px, transparent 1px); background-size: 22px 22px; -webkit-mask-image: radial-gradient(ellipse at center, #000 30%, transparent 75%); mask-image: radial-gradient(ellipse at center, #000 30%, transparent 75%); }
+        .lg-blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.5; pointer-events: none; }
+        .lg-blob-1 { width: 340px; height: 340px; top: -90px; right: -80px; background: #8B7BFF; animation: lgFloat 12s ease-in-out infinite; }
+        .lg-blob-2 { width: 300px; height: 300px; bottom: -110px; left: -70px; background: #5EE6C2; opacity: 0.35; animation: lgFloat 14s ease-in-out infinite reverse; }
+        body.dark-mode .lg-blob { opacity: 0.22; }
+        .lg-theme { position: absolute; z-index: 2; top: 24px; right: 24px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-muted); display: grid; place-items: center; cursor: pointer; box-shadow: var(--shadow-sm); }
+        .lg-theme:hover { color: var(--primary); transform: rotate(-20deg); }
+        .lg-theme svg { width: 18px; height: 18px; }
+
+        #login-screen .login-card { position: relative; z-index: 1; width: 100%; max-width: 440px; padding: 44px 40px 36px; border-radius: 28px; text-align: left; color: var(--text-main);
+            background: color-mix(in srgb, var(--bg-card) 88%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 40px 80px -30px rgba(13, 0, 165, 0.35), 0 12px 24px -12px rgba(27, 37, 89, 0.12); }
+        body.dark-mode #login-screen .login-card { box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.6); }
+        #login-screen .login-card > div:first-child { border: none; }
+
+        .lg-brand { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 30px; }
+        .lg-brand-mark { position: relative; width: 84px; height: 84px; border-radius: 50%; padding: 4px; margin-bottom: 14px; background: conic-gradient(from 210deg, #0D00A5, #7C6BFF, #5EE6C2, #0D00A5); box-shadow: 0 16px 32px -12px rgba(13, 0, 165, 0.55); }
+        .lg-brand-mark img { width: 100%; height: 100%; border-radius: 50%; background: #fff; padding: 5px; object-fit: contain; }
+        .lg-brand h1 { font-size: 2rem; font-weight: 800 !important; line-height: 1.1; letter-spacing: -0.04em; background: linear-gradient(135deg, #0D00A5 10%, #4318FF 60%, #7C6BFF); -webkit-background-clip: text; background-clip: text; color: transparent !important; }
+        body.dark-mode .lg-brand h1 { background: linear-gradient(135deg, #FFFFFF, #B9B3FF); -webkit-background-clip: text; background-clip: text; }
+        .lg-by { margin-top: 10px; padding: 4px 12px; border-radius: 999px; background: var(--primary-light); color: var(--primary); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+        body.dark-mode .lg-by { color: #B9B3FF; }
+
+        .lg-heading { text-align: center; margin-bottom: 26px; }
+        .lg-greet { display: block; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
+        body.dark-mode .lg-greet { color: #9CA3FF; }
+        .lg-heading h3 { font-size: 1.4rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.02em; margin-bottom: 6px; }
+        #login-screen .lg-heading p { font-size: 0.9rem; color: var(--text-muted); margin: 0; }
+
+        #login-screen .login-error { min-height: 0; margin: 0; }
+        #login-screen .login-error:not(:empty) { margin-bottom: 14px; padding: 11px 14px; border-radius: 12px; background: rgba(238, 93, 80, 0.1); border: 1px solid rgba(238, 93, 80, 0.25); font-size: 0.85rem; text-align: center; }
+        .lg-google { padding: 6px; border-radius: 14px; background: linear-gradient(135deg, rgba(13, 0, 165, 0.08), rgba(94, 230, 194, 0.14)); }
+        body.dark-mode .lg-google { background: rgba(255, 255, 255, 0.05); }
+        #login-screen .google-signin-slot { justify-content: center; min-height: 44px; }
+        .lg-note { display: flex; gap: 10px; margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: var(--bg-body); border: 1px solid var(--border); color: var(--text-main); font-size: 0.8rem; line-height: 1.5; }
+        .lg-note svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--success); margin-top: 1px; }
+        .lg-note-warn svg { color: var(--warning); }
+        .lg-trust { list-style: none; display: flex; justify-content: center; flex-wrap: wrap; gap: 6px 18px; margin-top: 24px; padding-top: 20px; border-top: 1px dashed var(--border); }
+        .lg-trust li { display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
+        .lg-trust svg { width: 14px; height: 14px; }
+
+        .lg-foot { position: relative; z-index: 1; font-size: 0.78rem; color: var(--text-muted); text-align: center; }
+        .lg-foot span { margin: 0 6px; }
+        .lg-foot strong { color: var(--text-main); }
+
+        /* Entrance */
+        body.splash-done #login-screen .lg-hero-copy { animation: loginRise 0.8s cubic-bezier(0.2, 0.7, 0.3, 1) both 0.1s; }
+        body.splash-done #login-screen .lg-hero-top { animation: loginRise 0.8s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+
+        @media (max-width: 1200px) {
+            .lg-hero { padding: 36px; }
+            .lg-float-b { display: none; }
+            .lg-radar { width: 300px; height: 300px; }
+        }
+        @media (max-width: 960px) {
+            #login-screen { display: block; }
+            .lg-hero { margin: 10px 10px 0; min-height: 280px; padding: 22px 20px 52px; border-radius: 24px; justify-content: flex-start; gap: 34px; }
+            .lg-float, .lg-chips, .lg-hero-copy p { display: none; }
+            .lg-radar { top: 30%; left: 82%; width: 220px; height: 220px; opacity: 0.8; }
+            .lg-hero-copy h2 { font-size: 1.7rem; margin-bottom: 0; }
+            .lg-eyebrow { margin-bottom: 12px; }
+            .lg-hero-top img { width: 40px; height: 40px; }
+            .lg-hero-top strong { font-size: 0.7rem; }
+            .lg-panel { overflow: visible; margin-top: -40px; padding: 0 16px 28px; gap: 22px; }
+            .lg-panel::before, .lg-blob { display: none; }
+            .lg-theme { position: fixed; top: 22px; right: 22px; }
+            #login-screen .login-card { padding: 30px 22px 26px; border-radius: 24px; }
+            .lg-brand-mark { width: 72px; height: 72px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .lg-hero-photo, .lg-radar *, .lg-float, .lg-blob, .lg-live { animation: none !important; }
+        }
+    </style>
 </head>
 <body class="light-mode">
     <!-- SPLASH (first thing painted on load/reload) -->
@@ -1192,20 +1338,110 @@
     </div>
 
     <!-- LOGIN -->
+    <!-- Sign-in: campus "story" panel on the left (duotone photo, animated
+         geofence radar, floating status cards), sign-in card on the right.
+         Stacks into a short banner above the card on phones. -->
     <div id="login-screen">
-        <div class="login-card">
-            <div style="margin: 0 auto 30px; background: white; width: 96px; height: 96px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 6px;"><img src="/img/cspc-logo.png" alt="CSPC Logo" style="width: 100%; height: 100%; object-fit: contain;"></div>
-            <h1 style="font-size: 1.8rem; font-weight: 800;">GeoAttend</h1>
-            <p style="margin-bottom: 30px; opacity: 0.7;">CSPC Admin Portal</p>
-            <div class="login-error" id="login-error"></div>
-            <% if (googleClientId) { %>
-            <div id="google-signin-btn" class="google-signin-slot"></div>
-            <p class="login-sso-note">Use your institutional Google account. It must already be an admin account.</p>
-            <% } else { %>
-            <p class="login-sso-note">Google Sign-In is not configured. Set GOOGLE_CLIENT_ID in the server's .env.</p>
-            <% } %>
-        </div>
+        <section class="lg-hero" aria-hidden="true">
+            <div class="lg-hero-photo"></div>
+            <div class="lg-hero-tint"></div>
+            <div class="lg-hero-grid"></div>
+
+            <div class="lg-radar">
+                <span class="lg-radar-ring"></span>
+                <span class="lg-radar-ring"></span>
+                <span class="lg-radar-ring"></span>
+                <span class="lg-radar-sweep"></span>
+                <span class="lg-radar-pin"><i data-lucide="map-pin"></i></span>
+            </div>
+
+            <div class="lg-float lg-float-a">
+                <span class="lg-float-icon lg-ok"><i data-lucide="map-pinned"></i></span>
+                <div><strong>Inside geofence</strong><small>Main Campus &middot; verified</small></div>
+            </div>
+            <div class="lg-float lg-float-b">
+                <span class="lg-float-icon lg-face"><i data-lucide="scan-face"></i></span>
+                <div><strong>Face matched</strong><small>Identity confirmed</small></div>
+            </div>
+            <div class="lg-float lg-float-c">
+                <span class="lg-live"></span>
+                <div><strong>Live monitoring</strong><small>Events update in real time</small></div>
+            </div>
+
+            <div class="lg-hero-top">
+                <img src="/img/cspc-logo.png" alt="">
+                <div>
+                    <strong>Camarines Sur Polytechnic Colleges</strong>
+                    <small>Nabua, Camarines Sur</small>
+                </div>
+            </div>
+
+            <div class="lg-hero-copy">
+                <span class="lg-eyebrow"><span></span> Admin Portal</span>
+                <h2>Attendance,<br><em>verified where it happens.</em></h2>
+                <p>Geofenced check-ins, face verification and live reports for every CSPC event &mdash; all in one place.</p>
+                <ul class="lg-chips">
+                    <li><i data-lucide="map-pin"></i> Geo-fencing</li>
+                    <li><i data-lucide="scan-face"></i> Face verification</li>
+                    <li><i data-lucide="bar-chart-3"></i> Real-time reports</li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="lg-panel">
+            <div class="lg-blob lg-blob-1"></div>
+            <div class="lg-blob lg-blob-2"></div>
+            <button type="button" class="lg-theme" onclick="G_App.ui.toggleDarkMode()" aria-label="Toggle dark mode"><i data-lucide="moon"></i></button>
+
+            <div class="login-card">
+                <div class="lg-brand">
+                    <div class="lg-brand-mark"><img src="/img/cspc-logo.png" alt="CSPC Logo"></div>
+                    <h1>GeoAttend</h1>
+                    <span class="lg-by">By: Fusion</span>
+                </div>
+
+                <div class="lg-heading">
+                    <span class="lg-greet" id="lg-greet">Welcome back</span>
+                    <h3>Sign in to the Admin Portal</h3>
+                    <p>Manage employees, events and attendance for CSPC.</p>
+                </div>
+
+                <div class="login-error" id="login-error"></div>
+                <% if (googleClientId) { %>
+                <div class="lg-google">
+                    <div id="google-signin-btn" class="google-signin-slot"></div>
+                </div>
+                <div class="lg-note">
+                    <i data-lucide="shield-check"></i>
+                    <span>Use your institutional Google account. It must already be an admin account.</span>
+                </div>
+                <% } else { %>
+                <div class="lg-note lg-note-warn">
+                    <i data-lucide="alert-triangle"></i>
+                    <span>Google Sign-In is not configured. Set GOOGLE_CLIENT_ID in the server's .env.</span>
+                </div>
+                <% } %>
+
+                <ul class="lg-trust">
+                    <li><i data-lucide="lock"></i> Google SSO</li>
+                    <li><i data-lucide="user-check"></i> Admins only</li>
+                    <li><i data-lucide="building-2"></i> CSPC accounts</li>
+                </ul>
+            </div>
+
+            <div class="lg-foot">
+                &copy; 2026 &ndash; <%= new Date().getFullYear() %> CSPC GeoAttend <span>&bull;</span> Developed by <strong>Fusion</strong>
+            </div>
+        </section>
     </div>
+    <script>
+        // Time-of-day greeting above the sign-in heading.
+        (function () {
+            var h = new Date().getHours();
+            var el = document.getElementById('lg-greet');
+            if (el) el.textContent = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+        })();
+    </script>
     <script>window.__GOOGLE_CLIENT_ID__ = "<%= googleClientId %>"; window.__EMAIL_DOMAIN__ = "<%= emailDomain %>";</script>
     <% if (googleClientId) { %><script src="https://accounts.google.com/gsi/client" async defer></script><% } %>
 
@@ -1779,6 +2015,23 @@
                             </div>
 
                             <div style="background: var(--bg-body); border-radius: 16px; padding: 16px; margin-bottom: 15px;">
+                                <label for="gf-attendee-mode" style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display:block;">Required Attendees</label>
+                                <select id="gf-attendee-mode" class="geo-input" style="margin-bottom:10px;" onchange="G_App.geofence.onAttendeeModeChange()">
+                                    <option value="all">All employees</option>
+                                    <option value="selected">Only selected offices / employees</option>
+                                </select>
+                                <div id="gf-attendee-fields" class="hidden">
+                                    <p class="gf-att-hint">Only the employees chosen here see the event in the app and are marked Absent if they don't attend.</p>
+                                    <span class="gf-att-label">Offices / Departments</span>
+                                    <div id="gf-attendee-depts" class="gf-att-depts"></div>
+                                    <span class="gf-att-label">Individual Employees</span>
+                                    <input type="search" id="gf-attendee-search" class="geo-input" style="margin-bottom:8px;" placeholder="Search name or employee ID" aria-label="Search employees" oninput="G_App.geofence.renderAttendeeEmployees()">
+                                    <div id="gf-attendee-employees" class="gf-att-list"></div>
+                                    <div id="gf-attendee-summary" class="gf-att-summary"></div>
+                                </div>
+                            </div>
+
+                            <div style="background: var(--bg-body); border-radius: 16px; padding: 16px; margin-bottom: 15px;">
                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
                                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase;">Boundary Polygon</label>
                                     <span id="gf-point-count" style="font-size: 0.75rem; font-weight: 800; color: var(--primary);">0 points</span>
@@ -2137,7 +2390,7 @@
                     <input type="text" id="aa-name" class="geo-input" placeholder="Full Name">
                     <label style="font-size: 0.7rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; display: block;">Email</label>
                     <div class="aa-email-row">
-                        <input type="email" id="aa-email" class="geo-input" placeholder="name@my.cspc.edu.ph" oninput="G_App.adminAccounts.onEmailChange()">
+                        <input type="email" id="aa-email" class="geo-input" placeholder="name@cspc.edu.ph or name@my.cspc.edu.ph" oninput="G_App.adminAccounts.onEmailChange()">
                         <button type="button" class="btn-primary" id="aa-send-otp" onclick="G_App.adminAccounts.sendOtp()"><i data-lucide="send" size="14"></i> Send Code</button>
                     </div>
                     <div id="aa-otp-block" class="hidden">

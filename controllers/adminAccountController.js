@@ -39,7 +39,7 @@ async function sendAdminOtp(req, res, next) {
     const fullName = String(req.body.full_name || '').trim();
 
     if (!config.email.isInstitutional(email)) {
-      return res.status(400).json({ success: false, message: `Admin accounts must use an institutional email (@${config.email.domain}).` });
+      return res.status(400).json({ success: false, message: `Admin accounts must use an institutional email (${config.email.domainLabel}).` });
     }
     const deliverable = await checkDeliverable(email);
     if (!deliverable.ok) return res.status(400).json({ success: false, message: deliverable.reason });
@@ -126,7 +126,7 @@ async function createAdminAccount(req, res, next) {
       return res.status(400).json({ success: false, message: 'Full name and email are required.' });
     }
     if (!config.email.isInstitutional(email)) {
-      return res.status(400).json({ success: false, message: `Admin accounts must use an institutional email (@${config.email.domain}).` });
+      return res.status(400).json({ success: false, message: `Admin accounts must use an institutional email (${config.email.domainLabel}).` });
     }
     if (!['super_admin', 'admin'].includes(role)) {
       return res.status(400).json({ success: false, message: 'Role must be super_admin or admin.' });

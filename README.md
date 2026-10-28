@@ -1,4 +1,7 @@
-# GeoAttend Pro
+# GeoAttend 
+Paalala: Hangga't ganito ang setup, kailangang i-restart ang Expo tuwing may babaguhin sa code ng app:
+
+docker compose restart expo
 
 **GeoAttend Pro** is a geofenced attendance monitoring system built for
 institutional use (CSPC — Camarines Sur Polytechnic Colleges). It combines

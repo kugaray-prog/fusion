@@ -32,6 +32,7 @@ export default function AppHeader({ title }) {
       </View>
       <View style={styles.textCol}>
         <Text style={styles.appName}>GeoAttend</Text>
+        <Text style={styles.byLine}>By: Fusion</Text>
         {title ? <Text style={styles.screenTitle}>{title}</Text> : null}
       </View>
     </View>
@@ -48,5 +49,6 @@ const styles = StyleSheet.create({
   logoImage: { width: 32, height: 32 },
   textCol: { flex: 1, minWidth: 0 },
   appName: { fontSize: 11, fontWeight: '700', color: colors.textSub, textTransform: 'uppercase', letterSpacing: 0.8 },
+  byLine: { fontSize: 10, color: colors.textSub, marginTop: 1 },
   screenTitle: { fontSize: 20, fontWeight: '700', color: colors.textMain, marginTop: 1, letterSpacing: -0.3 },
 });

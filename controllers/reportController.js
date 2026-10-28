@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { settleEndedEvents, DISPLAY_STATUS_SQL } = require('./attendanceController');
+const eventAudience = require('../services/eventAudience');
 
 async function buildFilteredQuery({ department, year, month, employee_id, event_id, status }) {
   let where = 'WHERE 1=1';
@@ -152,9 +153,9 @@ const emptyBreakdown = () => ({ present: 0, late: 0, excused: 0, absent: 0, no_t
 // them yet.
 //
 // Uses the same rules as the rest of the app:
-//   - Expected: active employees of the event's department, or all active
-//     employees for a campus-wide event (department_id NULL). Same as
-//     ratingController's expectedEmployeeIdsForEvent.
+//   - Expected: active employees on the event's attendee list (chosen
+//     offices/employees, else the event's department, else everyone). Same
+//     as ratingController's expectedEmployeeIdsForEvent.
 //   - Attended: Present or Late (same as the Dashboard department chart).
 //   - Missed: Excused, Absent, or no attendance row at all ("No time-in").
 //   - Anyone with an attendance row for the event is counted too, even if
@@ -263,19 +264,13 @@ async function getInsights(req, res, next) {
       attendeeIdsByEvent.get(row.event_id).add(row.employee_id);
     }
 
-    const activeIds = [];
-    const activeIdsByDept = new Map();
-    for (const emp of employees) {
-      if (emp.remark !== 'Active') continue;
-      activeIds.push(emp.id);
-      if (!activeIdsByDept.has(emp.department_id)) activeIdsByDept.set(emp.department_id, []);
-      activeIdsByDept.get(emp.department_id).push(emp.id);
-    }
+    const audiences = await eventAudience.loadAudiences(events.map((ev) => ev.id));
 
     // Tally every employee involved in each event.
     const statsByEmployee = new Map();
     for (const ev of events) {
-      const involved = new Set(ev.department_id ? activeIdsByDept.get(ev.department_id) || [] : activeIds);
+      const audience = audiences.get(ev.id);
+      const involved = new Set(employees.filter((emp) => eventAudience.isExpected(emp, ev, audience)).map((emp) => emp.id));
       for (const id of attendeeIdsByEvent.get(ev.id) || []) involved.add(id);
 
       for (const employeeId of involved) {

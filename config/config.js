@@ -3,19 +3,31 @@ const path = require('path');
 // Institutional email domain. The seeded admin account and sample employees
 // use it, and the admin login screen pre-fills with it.
 const EMAIL_DOMAIN = 'my.cspc.edu.ph';
+// Every domain accepted as institutional: students/employees on
+// @my.cspc.edu.ph and staff/faculty on @cspc.edu.ph. Admin accounts and the
+// admin Google sign-in accept any of these.
+const INSTITUTIONAL_DOMAINS = [EMAIL_DOMAIN, 'cspc.edu.ph'];
 // Old default domain. database/seed.js moves any account still on it over to
 // EMAIL_DOMAIN, and a DEFAULT_ADMIN_EMAIL left on it in an old .env is
 // rewritten below so it can't come back.
 const LEGACY_EMAIL_DOMAIN = 'geoattend.pro';
 
-// True for an address on the institutional domain (name@my.cspc.edu.ph).
+// True for an address on an institutional domain (name@my.cspc.edu.ph or
+// name@cspc.edu.ph). Compares the whole domain, so lookalikes such as
+// name@evilcspc.edu.ph don't pass.
 function isInstitutionalEmail(email) {
-  return String(email || '').trim().toLowerCase().endsWith(`@${EMAIL_DOMAIN}`);
+  const value = String(email || '').trim().toLowerCase();
+  const at = value.lastIndexOf('@');
+  if (at <= 0) return false;
+  return INSTITUTIONAL_DOMAINS.includes(value.slice(at + 1));
 }
 
 module.exports = {
   email: {
     domain: EMAIL_DOMAIN,
+    domains: INSTITUTIONAL_DOMAINS,
+    // For messages: "@my.cspc.edu.ph or @cspc.edu.ph"
+    domainLabel: INSTITUTIONAL_DOMAINS.map(d => `@${d}`).join(' or '),
     legacyDomain: LEGACY_EMAIL_DOMAIN,
     defaultAdmin: (process.env.DEFAULT_ADMIN_EMAIL || `admin@${EMAIL_DOMAIN}`)
       .trim()
@@ -112,17 +124,24 @@ module.exports = {
       : 30,
     // Geo-anomaly ("one person carrying another's phone") detection, see
     // detectGeoAnomaly. Two different employees' phones for the same event
-    // reporting positions within anomalyDistanceMeters of each other
-    // (straight-line distance, default 0.5 m -- about a handspan or two) are
-    // flagged for face verification right away. anomalyWindowSeconds: two
-    // phones that reported the same spot at any point within this many
-    // seconds of each other count, not only their newest positions.
-    // anomalyRecheckSeconds: after passing face verification, a record is
-    // left alone for this long; if the phones are still together after
-    // that, it's flagged again -- so every 30 seconds by default.
-    anomalyDistanceMeters: Number(process.env.ANOMALY_DISTANCE_METERS) || 5,
+    // count as together when readings taken at the same moment (at most
+    // anomalyPairSeconds apart) are within anomalyDistanceMeters of each
+    // other (straight-line distance, default 0.5 m). They're flagged for
+    // face verification only once they've been together on at least
+    // anomalyMinMatches paired readings in a row spanning at least
+    // anomalySustainSeconds, with none in between showing them apart, and
+    // the last of those within anomalyWindowSeconds. Readings less precise
+    // than anomalyMaxAccuracyMeters are ignored: GPS that coarse can't tell
+    // phones apart. anomalyRecheckSeconds: after passing face verification,
+    // a record is left alone for this long; if the phones are still
+    // together after that, it's flagged again.
+    anomalyDistanceMeters: Number(process.env.ANOMALY_DISTANCE_METERS) || 0.5,
     anomalyWindowSeconds: Number(process.env.ANOMALY_WINDOW_SECONDS) || 30,
-    anomalyRecheckSeconds: Number(process.env.ANOMALY_RECHECK_SECONDS) || 30
+    anomalyRecheckSeconds: Number(process.env.ANOMALY_RECHECK_SECONDS) || 30,
+    anomalyPairSeconds: Number(process.env.ANOMALY_PAIR_SECONDS) || 6,
+    anomalySustainSeconds: Number(process.env.ANOMALY_SUSTAIN_SECONDS) || 60,
+    anomalyMinMatches: Number(process.env.ANOMALY_MIN_MATCHES) || 4,
+    anomalyMaxAccuracyMeters: Number(process.env.ANOMALY_MAX_ACCURACY_METERS) || 10
   },
   // Default/initial Geo-Fence location: CSPC (Camarines Sur Polytechnic
   // Colleges). Used to pre-fill the map/coordinates when an admin opens the

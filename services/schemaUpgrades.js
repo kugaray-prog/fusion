@@ -1,7 +1,8 @@
 const pool = require('../config/db');
+const cspcOffices = require('./cspcOffices');
 
 // Small, idempotent schema changes applied at server start, so an existing
-// database (e.g. the live Aiven one) picks them up without a manual
+// database (e.g. the Docker one) picks them up without a manual
 // migration. Each step checks before changing anything.
 
 async function columnExists(table, column) {
@@ -102,6 +103,41 @@ async function addDevicePushToken() {
   console.log('[schema] Added mobile_devices.push_token.');
 }
 
+// The offices and employees an event is limited to (services/eventAudience.js).
+// An event with no rows here is open to everyone, as before.
+async function addEventAttendees() {
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS event_attendee_departments (
+       event_id INT NOT NULL,
+       department_id INT NOT NULL,
+       PRIMARY KEY (event_id, department_id),
+       FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+       FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
+     ) ENGINE=InnoDB`
+  );
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS event_attendee_employees (
+       event_id INT NOT NULL,
+       employee_id INT NOT NULL,
+       PRIMARY KEY (event_id, employee_id),
+       FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+       FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+     ) ENGINE=InnoDB`
+  );
+}
+
+// CSPC's departments/offices (services/cspcOffices.js). Only missing names are
+// inserted, so departments added by admins or registrations are untouched.
+async function addCspcOffices() {
+  const [result] = await pool.query(
+    'INSERT IGNORE INTO departments (name, office) VALUES ?',
+    [cspcOffices.map(name => [name, name])]
+  );
+  if (result.affectedRows) {
+    console.log(`[schema] Added ${result.affectedRows} CSPC department(s)/office(s).`);
+  }
+}
+
 async function indexExists(table, index) {
   const [rows] = await pool.query(
     `SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
@@ -147,6 +183,8 @@ async function run() {
   await addAdminNotifications();
   await addAttendanceStatusFinalized();
   await addDevicePushToken();
+  await addEventAttendees();
+  await addCspcOffices();
   await dropUnusedSchema();
 }
 

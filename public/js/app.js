@@ -154,10 +154,13 @@ const G_App = {
             google.accounts.id.initialize({
                 client_id: window.__GOOGLE_CLIENT_ID__,
                 callback: G_App.auth.googleLogin,
-                ux_mode: 'popup',
-                hd: window.__EMAIL_DOMAIN__ || undefined
+                // No `hd` hint: it takes a single domain and would hide
+                // @cspc.edu.ph accounts. The server checks the domain.
+                ux_mode: 'popup'
             });
-            google.accounts.id.renderButton(slot, { type: 'standard', theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', width: 300 });
+            // Fill the sign-in panel's width (Google caps it at 400px).
+            const width = Math.max(240, Math.min(400, slot.clientWidth || 300));
+            google.accounts.id.renderButton(slot, { type: 'standard', theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', logo_alignment: 'center', width });
         },
         googleLogin: async (response) => {
             const errorEl = document.getElementById('login-error');
@@ -1513,6 +1516,113 @@ const G_App = {
             const type = document.getElementById('gf-recurrence-type').value;
             document.getElementById('gf-recurrence-fields').classList.toggle('hidden', type !== 'weekly');
         },
+        // ---- Required Attendees ----
+        // Offices and employees picked for the event being created/edited.
+        // Nothing picked = every employee is expected (the default).
+        attendees: { departmentIds: new Set(), employeeIds: new Set() },
+        attendeeOptions: null,    // { departments, employees }, fetched once
+        ATTENDEE_LIST_LIMIT: 200, // employee rows shown before asking to search
+        loadAttendeeOptions: () => {
+            if (!G_App.geofence.attendeeOptionsRequest) {
+                G_App.geofence.attendeeOptionsRequest = apiFetch('/geofences/attendee-options')
+                    .then(({ data }) => { G_App.geofence.attendeeOptions = data; })
+                    .catch((err) => {
+                        G_App.geofence.attendeeOptionsRequest = null; // let the next open retry
+                        toast(err.message, 'error');
+                    });
+            }
+            return G_App.geofence.attendeeOptionsRequest;
+        },
+        onAttendeeModeChange: async () => {
+            const selected = document.getElementById('gf-attendee-mode').value === 'selected';
+            document.getElementById('gf-attendee-fields').classList.toggle('hidden', !selected);
+            if (!selected) return;
+            await G_App.geofence.loadAttendeeOptions();
+            G_App.geofence.renderAttendeeDepts();
+            G_App.geofence.renderAttendeeEmployees();
+        },
+        setAttendees: (departmentIds = [], employeeIds = []) => {
+            G_App.geofence.attendees = {
+                departmentIds: new Set(departmentIds.map(Number)),
+                employeeIds: new Set(employeeIds.map(Number))
+            };
+            document.getElementById('gf-attendee-mode').value = departmentIds.length || employeeIds.length ? 'selected' : 'all';
+            document.getElementById('gf-attendee-search').value = '';
+            G_App.geofence.onAttendeeModeChange();
+        },
+        toggleAttendee: (kind, id, checked) => {
+            const set = G_App.geofence.attendees[kind === 'dept' ? 'departmentIds' : 'employeeIds'];
+            if (checked) set.add(id); else set.delete(id);
+            // An office's employees are shown as included through it.
+            if (kind === 'dept') G_App.geofence.renderAttendeeEmployees();
+            else G_App.geofence.renderAttendeeSummary();
+        },
+        renderAttendeeDepts: () => {
+            const opts = G_App.geofence.attendeeOptions;
+            if (!opts) return;
+            const picked = G_App.geofence.attendees.departmentIds;
+            document.getElementById('gf-attendee-depts').innerHTML = opts.departments.map(d => `
+                <label class="weekday-chip"><input type="checkbox" ${picked.has(d.id) ? 'checked' : ''} onchange="G_App.geofence.toggleAttendee('dept', ${d.id}, this.checked)"> ${escapeHtml(d.name)}</label>
+            `).join('') || '<span class="gf-att-hint">No offices yet.</span>';
+        },
+        renderAttendeeEmployees: () => {
+            const gfApp = G_App.geofence;
+            const opts = gfApp.attendeeOptions;
+            if (!opts) return;
+            const { departmentIds, employeeIds } = gfApp.attendees;
+            const deptName = Object.fromEntries(opts.departments.map(d => [d.id, d.name]));
+            const q = document.getElementById('gf-attendee-search').value.trim().toLowerCase();
+            const isPicked = (e) => departmentIds.has(e.department_id) || employeeIds.has(e.id);
+            // Picked employees first, so the current list is easy to review.
+            const matches = opts.employees
+                .filter(e => !q || e.full_name.toLowerCase().includes(q) || String(e.employee_code).toLowerCase().includes(q))
+                .sort((a, b) => isPicked(b) - isPicked(a));
+            const shown = matches.slice(0, gfApp.ATTENDEE_LIST_LIMIT);
+            const rows = shown.map(e => {
+                const viaOffice = departmentIds.has(e.department_id);
+                const details = [e.employee_code, deptName[e.department_id], e.remark !== 'Active' ? e.remark : null].filter(Boolean).join(' · ');
+                return `<label class="gf-att-row${viaOffice ? ' is-implied' : ''}"${viaOffice ? ' title="Included through their office"' : ''}>
+                    <input type="checkbox" ${isPicked(e) ? 'checked' : ''} ${viaOffice ? 'disabled' : ''} onchange="G_App.geofence.toggleAttendee('emp', ${e.id}, this.checked)">
+                    <span>${escapeHtml(e.full_name)} <small>${escapeHtml(details)}</small></span>
+                </label>`;
+            }).join('');
+            const more = matches.length > shown.length
+                ? `<div class="gf-att-empty">Showing ${shown.length} of ${matches.length}. Search to find others.</div>`
+                : '';
+            document.getElementById('gf-attendee-employees').innerHTML = rows + more
+                || `<div class="gf-att-empty">${q ? 'No employees match your search.' : 'No employees yet.'}</div>`;
+            gfApp.renderAttendeeSummary();
+        },
+        renderAttendeeSummary: () => {
+            const opts = G_App.geofence.attendeeOptions;
+            if (!opts) return;
+            const { departmentIds, employeeIds } = G_App.geofence.attendees;
+            const el = document.getElementById('gf-attendee-summary');
+            if (!departmentIds.size && !employeeIds.size) {
+                el.textContent = 'Pick at least one office or employee.';
+                return;
+            }
+            const included = opts.employees.filter(e => departmentIds.has(e.department_id) || employeeIds.has(e.id));
+            const onLeave = included.filter(e => e.remark !== 'Active').length;
+            const required = included.length - onLeave;
+            el.textContent = `${required} employee${required === 1 ? '' : 's'} required to attend`
+                + (onLeave ? ` (${onLeave} on leave, not counted)` : '');
+        },
+        attendeePayload: () => {
+            if (document.getElementById('gf-attendee-mode').value !== 'selected') return { mode: 'all' };
+            const { departmentIds, employeeIds } = G_App.geofence.attendees;
+            return { mode: 'selected', department_ids: [...departmentIds], employee_ids: [...employeeIds] };
+        },
+        // Event card line, e.g. "All employees" or "2 offices, 3 employees".
+        attendeeLabel: (gf) => {
+            const depts = (gf.attendee_department_ids || []).length;
+            const emps = (gf.attendee_employee_ids || []).length;
+            if (!depts && !emps) return 'All employees';
+            return [
+                depts ? `${depts} office${depts === 1 ? '' : 's'}` : null,
+                emps ? `${emps} employee${emps === 1 ? '' : 's'}` : null
+            ].filter(Boolean).join(', ');
+        },
         // ---- Filters (search, status, schedule type, date, sort) ----
         // They narrow both the event list and the shapes drawn on the map.
         parseDate: (value) => new Date(String(value || '').replace(' ', 'T')),
@@ -1744,7 +1854,8 @@ const G_App = {
                 center_lng: lng !== '' ? Number(lng) : null,
                 recurrence_type: recurrenceType,
                 recurrence_days: recurrenceDays,
-                recurrence_end_date: document.getElementById('gf-recurrence-end').value || null
+                recurrence_end_date: document.getElementById('gf-recurrence-end').value || null,
+                attendees: G_App.geofence.attendeePayload()
             };
             if (!payload.title || !payload.start || !payload.end) {
                 return toast('Complete the event name and schedule.', 'error');
@@ -1766,6 +1877,9 @@ const G_App = {
             }
             if (recurrenceType === 'weekly' && (!recurrenceDays || !payload.recurrence_end_date)) {
                 return toast('Pick at least one weekday and a "Repeat Until" date for a recurring schedule.', 'error');
+            }
+            if (payload.attendees.mode === 'selected' && !payload.attendees.department_ids.length && !payload.attendees.employee_ids.length) {
+                return toast('Pick at least one office or employee who must attend, or choose "All employees".', 'error');
             }
             // One save at a time: without this, every extra click while the
             // first request was still in flight posted the event again.
@@ -1819,6 +1933,7 @@ const G_App = {
             document.getElementById('gf-end').value = (gf.end_datetime || '').replace(' ', 'T').slice(0, 16);
             document.getElementById('gf-lat').value = gf.center_lat != null ? Number(gf.center_lat).toFixed(7) : '';
             document.getElementById('gf-lng').value = gf.center_lng != null ? Number(gf.center_lng).toFixed(7) : '';
+            G_App.geofence.setAttendees(gf.attendee_department_ids || [], gf.attendee_employee_ids || []);
             document.getElementById('btn-gf-cancel').classList.remove('hidden');
             document.getElementById('btn-gf-save').innerHTML = '<i data-lucide="save"></i> Save Changes';
             lucide.createIcons();
@@ -1850,6 +1965,7 @@ const G_App = {
             G_App.geofence.applyMinDate();
             document.querySelectorAll('#gf-weekday-picker input:checked').forEach(el => el.checked = false);
             document.getElementById('gf-recurrence-fields').classList.add('hidden');
+            G_App.geofence.setAttendees();
             document.getElementById('btn-gf-cancel').classList.add('hidden');
             document.getElementById('btn-gf-save').innerHTML = '<i data-lucide="calendar-plus"></i> Create Event';
             G_App.geofence.clearPoints();
@@ -1934,6 +2050,7 @@ const G_App = {
                         <span><i data-lucide="map-pin"></i>${escapeHtml(gf.venue || 'No venue')}</span>
                         <span><i data-lucide="clock"></i>${escapeHtml(gfApp.formatRange(gf.start_datetime, gf.end_datetime))}</span>
                         <span><i data-lucide="hexagon"></i>${(gf.points || []).length} boundary points</span>
+                        <span title="Required attendees"><i data-lucide="users"></i>${escapeHtml(gfApp.attendeeLabel(gf))}</span>
                     </div>
                     <div class="gf-item-actions">
                         <button type="button" class="dash-link" onclick="G_App.geofence.focusOn(${Number(gf.center_lat)},${Number(gf.center_lng)})"><i data-lucide="crosshair"></i> Show on map</button>

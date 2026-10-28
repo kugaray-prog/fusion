@@ -2,9 +2,9 @@
 -- GeoAttend Pro — Database Schema (MySQL 8+)
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS geoattend_pro
+CREATE DATABASE IF NOT EXISTS geoattend
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE geoattend_pro;
+USE geoattend;
 
 -- ------------------------------------------------------------
 -- ADMIN ACCOUNTS
@@ -129,6 +129,27 @@ CREATE TABLE events (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (department_id) REFERENCES departments(id),
   FOREIGN KEY (parent_event_id) REFERENCES events(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ------------------------------------------------------------
+-- EVENT ATTENDEES (offices / employees an event is limited to;
+-- an event with no rows in either table expects everyone —
+-- see services/eventAudience.js)
+-- ------------------------------------------------------------
+CREATE TABLE event_attendee_departments (
+  event_id INT NOT NULL,
+  department_id INT NOT NULL,
+  PRIMARY KEY (event_id, department_id),
+  FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE event_attendee_employees (
+  event_id INT NOT NULL,
+  employee_id INT NOT NULL,
+  PRIMARY KEY (event_id, employee_id),
+  FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
@@ -482,3 +503,68 @@ CREATE INDEX idx_employee_ratings_event ON employee_ratings(event_id);
 CREATE INDEX idx_geo_anomalies_resolved ON geo_anomalies(resolved);
 CREATE INDEX idx_employees_classification ON employees(classification);
 CREATE INDEX idx_events_parent ON events(parent_event_id);
+
+-- ============================================================
+-- DEFAULT DATA
+-- Same as `npm run seed` (database/seed.js), minus the sample employees.
+-- INSERT IGNORE skips rows that already exist.
+-- ============================================================
+
+-- Default admin: admin@my.cspc.edu.ph / password -- change the password
+-- right after the first sign-in.
+INSERT IGNORE INTO admin_accounts (full_name, email, password_hash, role) VALUES
+  ('Super Admin', 'admin@my.cspc.edu.ph', '$2b$12$MruGa3uv4qMcs8qFOsHWmO3ouIibDNe1pXN756mdt7hqlXvxEWjBS', 'super_admin');
+
+-- CSPC departments / offices (keep in sync with services/cspcOffices.js)
+INSERT IGNORE INTO departments (name, office) VALUES
+  ('Office of the President', 'Office of the President'),
+  ('Office of the Vice President for Academic Affairs', 'Office of the Vice President for Academic Affairs'),
+  ('Office of the Vice President for Administration and Finance', 'Office of the Vice President for Administration and Finance'),
+  ('Office of the Vice President for Research, Innovation and Collaboration', 'Office of the Vice President for Research, Innovation and Collaboration'),
+  ('Graduate School', 'Graduate School'),
+  ('College of Arts and Sciences', 'College of Arts and Sciences'),
+  ('College of Computer Studies', 'College of Computer Studies'),
+  ('College of Engineering and Architecture', 'College of Engineering and Architecture'),
+  ('College of Health Sciences', 'College of Health Sciences'),
+  ('College of Technological and Developmental Education', 'College of Technological and Developmental Education'),
+  ('College of Tourism, Hospitality and Business Management', 'College of Tourism, Hospitality and Business Management'),
+  ('Human Resource Management and Development Unit', 'Human Resource Management and Development Unit'),
+  ('Accounting Unit', 'Accounting Unit'),
+  ('Budget Unit', 'Budget Unit'),
+  ('Cash Unit', 'Cash Unit'),
+  ('Procurement Unit', 'Procurement Unit'),
+  ('Records and Freedom of Information Unit', 'Records and Freedom of Information Unit'),
+  ('General Services Unit', 'General Services Unit'),
+  ('Supply and Property Management Unit', 'Supply and Property Management Unit'),
+  ('Information and Communications Technology Unit', 'Information and Communications Technology Unit'),
+  ('Project Management Unit', 'Project Management Unit'),
+  ('Internal Audit Unit', 'Internal Audit Unit'),
+  ('Legal Affairs Office', 'Legal Affairs Office'),
+  ('Institutional Planning and Development Unit', 'Institutional Planning and Development Unit'),
+  ('Center for International Relations and Linkages', 'Center for International Relations and Linkages'),
+  ('Student Registration and Records', 'Student Registration and Records'),
+  ('Student Testing and Admission', 'Student Testing and Admission'),
+  ('Student Affairs Services', 'Student Affairs Services'),
+  ('Guidance and Counseling Office', 'Guidance and Counseling Office'),
+  ('Learning Resources and Development', 'Learning Resources and Development'),
+  ('Center for Quality Assurance', 'Center for Quality Assurance'),
+  ('Center for Gender and Development', 'Center for Gender and Development'),
+  ('Center for Human Rights Education', 'Center for Human Rights Education'),
+  ('Research and Development Services Office', 'Research and Development Services Office'),
+  ('Extension and Community Services Office', 'Extension and Community Services Office'),
+  ('Production and Auxiliary Services', 'Production and Auxiliary Services'),
+  ('Technology Transfer Office', 'Technology Transfer Office'),
+  ('National Service Training Program', 'National Service Training Program'),
+  ('Information and Alumni Affairs Unit', 'Information and Alumni Affairs Unit'),
+  ('Buhi Campus Administration', 'Buhi Campus Administration'),
+  ('Other Offices / Units', 'Other Offices / Units');
+
+-- System settings
+INSERT IGNORE INTO settings (setting_key, setting_value) VALUES
+  ('late_grace_minutes', '15'),
+  ('default_geofence_radius', '150'),
+  ('ocr_min_confidence', '70'),
+  ('school_name', 'GeoAttend Institution'),
+  ('cspc_latitude', '13.4059'),
+  ('cspc_longitude', '123.3758'),
+  ('cspc_label', 'CSPC - Camarines Sur Polytechnic Colleges, Nabua, Camarines Sur');

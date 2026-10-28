@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image, ScrollView, Animated, Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { Ionicons } from '@expo/vector-icons';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
+import { IS_EXPO_GO } from '../utils/expoGo';
 import { makeRedirectUri } from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import { useAuth } from '../context/AuthContext';
@@ -19,7 +19,6 @@ WebBrowser.maybeCompleteAuthSession();
 // blocked: Authorization Error ... invalid_request". Those sign in through the
 // server's /mobile/google-signin page instead, which hands the ID token back
 // through the app's redirect URL.
-const IS_EXPO_GO = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 const NATIVE_CLIENT_ID = Platform.OS === 'ios' ? GOOGLE_IOS_CLIENT_ID : Platform.OS === 'android' ? GOOGLE_ANDROID_CLIENT_ID : GOOGLE_WEB_CLIENT_ID;
 const USE_WEB_BRIDGE = IS_EXPO_GO || !NATIVE_CLIENT_ID;
 
@@ -136,6 +135,7 @@ export default function LoginScreen({ navigation }) {
             <Image source={CSPC_LOGO} style={styles.logoImage} resizeMode="contain" />
           </View>
           <Text style={styles.brandTitle}>CSPC GeoAttend</Text>
+          <Text style={styles.brandBy}>By: Fusion</Text>
           <Text style={styles.brandSubtitle}>Employee Attendance</Text>
         </View>
       </FadeIn>
@@ -220,6 +220,7 @@ const styles = StyleSheet.create({
   },
   logoImage: { width: '100%', height: '100%' },
   brandTitle: { color: '#fff', fontSize: 24, fontWeight: '700', letterSpacing: -0.3 },
+  brandBy: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '600', marginTop: 2 },
   brandSubtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 4 },
   // Phone held in landscape: a shorter hero so the sign-in card stays in view.
   brandSectionCompact: { paddingTop: 24, paddingBottom: 40 },

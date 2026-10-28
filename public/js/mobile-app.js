@@ -197,10 +197,11 @@ async function loadDepartmentOptions() {
   } catch (err) {
     // Fall back to a sane default set rather than leaving the dropdown empty.
     sel.innerHTML = `
+      <option value="College of Arts and Sciences">College of Arts and Sciences</option>
       <option value="College of Computer Studies">College of Computer Studies</option>
-      <option value="College of Engineering">College of Engineering</option>
-      <option value="College of Business and Economics">College of Business and Economics</option>
-      <option value="College of Arts and Sciences">College of Arts and Sciences</option>`;
+      <option value="College of Engineering and Architecture">College of Engineering and Architecture</option>
+      <option value="College of Health Sciences">College of Health Sciences</option>
+      <option value="Other Offices / Units">Other Offices / Units</option>`;
   }
 }
 
