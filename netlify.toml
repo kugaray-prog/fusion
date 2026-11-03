@@ -1,0 +1,4 @@
+[build]
+  base = "mobile"
+  command = "npm ci && npx expo export -p web"
+  publish = "dist"
